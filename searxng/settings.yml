@@ -1,0 +1,36 @@
+use_default_settings: true
+
+general:
+  instance_name: 'searxng'
+
+search:
+  autocomplete: 'google'
+  formats:
+    - html
+    - json
+
+server:
+  # Replace with a random value before use, e.g. `openssl rand -hex 32` (see README).
+  # Do not use 'ultrasecretkey': SearXNG refuses to start with it.
+  secret_key: 'REPLACE_ME_RUN_THE_COMMAND_IN_README'
+
+engines:
+  # Required by Vane
+  - name: wolframalpha
+    disabled: false
+
+  # Enabled: verified working (2026-10-11); most default engines were blocked
+  - name: bing
+    disabled: false
+  - name: yandex
+    disabled: false
+  - name: bing news
+    disabled: false
+
+  # Disabled: hard failures (access denied / HTTP error)
+  - name: aol
+    disabled: true
+  - name: karmasearch
+    disabled: true
+  - name: karmasearch videos
+    disabled: true

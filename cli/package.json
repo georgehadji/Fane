@@ -1,0 +1,14 @@
+{
+  "name": "vane-cli",
+  "version": "1.0.0",
+  "description": "Headless CLI for a local Vane instance: ask a question, get a cited answer.",
+  "type": "module",
+  "bin": {
+    "vane": "./vane.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "private": true
+}
