@@ -4,6 +4,10 @@ general:
   instance_name: 'searxng'
 
 search:
+  # Vane sends no language, so engines like Bing localise to the server's IP country
+  # (7 of 24 results were Greek for an English query; 1 of 25 with "en"). "auto" does
+  # not help. Set this to the language you search in.
+  default_lang: 'en'
   autocomplete: 'google'
   formats:
     - html
@@ -15,10 +19,6 @@ server:
   secret_key: 'REPLACE_ME_RUN_THE_COMMAND_IN_README'
 
 engines:
-  # Required by Vane
-  - name: wolframalpha
-    disabled: false
-
   # Enabled: verified working (2026-10-11); most default engines were blocked
   - name: bing
     disabled: false
@@ -47,4 +47,20 @@ engines:
   - name: karmasearch
     disabled: true
   - name: karmasearch videos
+    disabled: true
+
+  # Disabled: blocked or empty on this network (2026-10-27, scripts/engine-check.mjs).
+  # SearXNG waits for every enabled engine on each query, so dead ones add latency.
+  # Vane never calls wolframalpha itself. Re-check with engine-check on a new network.
+  # (patch-social-sources still names some of these explicitly for site:reddit.com
+  # searches; an explicitly named engine runs even when disabled here.)
+  - name: brave
+    disabled: true
+  - name: duckduckgo
+    disabled: true
+  - name: startpage
+    disabled: true
+  - name: google
+    disabled: true
+  - name: wolframalpha
     disabled: true

@@ -54,6 +54,8 @@ const TARGETS = [
     name: 'rank on original text',
     from: 'let d=c.content||c.title,f=(await a.embedding.embedText([d]))[0];',
     to: 'let d=c.content||c.title,f=(await a.embedding.embedText([c.fane_text||d]))[0];',
+    // patch-web-search rewrites this into one batched call and leaves this comment
+    marker: '/*fane:rank-original*/',
   },
   {
     name: 'writer cites papers by author and year',
@@ -76,7 +78,7 @@ let applied = 0;
 // Check every target first so a mismatch leaves the file untouched.
 // `marker` (when set) detects "already applied" for targets a later patch edits further.
 for (const t of TARGETS) {
-  if (s.includes(t.marker || t.to)) continue;
+  if (s.includes(t.to) || (t.marker && s.includes(t.marker))) continue;
   const count = s.split(t.from).length - 1;
   if (count === 0 && t.optional) {
     console.log(`${t.name}: skipped (${t.optional})`);

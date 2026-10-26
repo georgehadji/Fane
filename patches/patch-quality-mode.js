@@ -40,6 +40,8 @@ const TARGETS = [
     name: 'ordered facts + snippets in result',
     from: 'd+=c.extracted_facts+"\\n"}catch(a){console.log("Error extracting information from chunk",a)}})),p.push({...b,content:d})}catch(a){console.log("Error scraping or extracting information from",b.metadata.url,a)}})),p}',
     to: 'F[x]=c.extracted_facts}catch(a){console.log("Error extracting information from chunk",a)}})),d=F.filter(Boolean).join("\\n"),p[P]={...b,content:d||b.content}}catch(a){console.log("Error scraping or extracting information from",b.metadata.url,a),p[P]=b}})),[...p.filter(Boolean),...i.filter(x=>!p.some(y=>y&&y.metadata.url===x.metadata.url)).sort((x,y)=>x.metadata.rank-y.metadata.rank).slice(0,8)]}',
+    // patch-web-search replaces the snippet ranking at the end of `to`
+    marker: 'd=F.filter(Boolean).join(',
   },
   {
     name: 'writer length',
@@ -64,7 +66,7 @@ let applied = 0;
 // Check every target first so a mismatch leaves the file untouched.
 // `marker` (when set) detects "already applied" for targets a later patch edits further.
 for (const t of TARGETS) {
-  if (s.includes(t.marker || t.to)) continue;
+  if (s.includes(t.to) || (t.marker && s.includes(t.marker))) continue;
   const count = s.split(t.from).length - 1;
   if (count !== 1) {
     console.error(`${t.name}: expected 1 match, found ${count}; not patching anything`);

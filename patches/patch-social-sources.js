@@ -53,6 +53,8 @@ const TARGETS = [
     name: 'rank on original text',
     from: 'let d=c.content||c.title,f=(await a.embedding.embedText([d]))[0];',
     to: 'let d=c.content||c.title,f=(await a.embedding.embedText([c.fane_text||d]))[0];',
+    // patch-web-search rewrites this into one batched call and leaves this comment
+    marker: '/*fane:rank-original*/',
   },
   {
     name: 'writer treats posts as opinions',
@@ -67,7 +69,7 @@ let applied = 0;
 // Check every target first so a mismatch leaves the file untouched.
 for (const t of TARGETS) {
   const alts = t.alts || [{ from: t.from, to: t.to }];
-  if (alts.some(x => s.includes(x.to))) continue;
+  if (alts.some(x => s.includes(x.to)) || (t.marker && s.includes(t.marker))) continue;
   const hit = alts.find(x => s.split(x.from).length - 1 === 1);
   if (!hit) {
     const counts = alts.map(x => s.split(x.from).length - 1).join('/');

@@ -353,6 +353,7 @@ const PATCH_MARKERS = [
   { name: 'patch-quality-mode', file: '/home/vane/.next/server/chunks/641.js', marker: 'p[P]={...b,content:d||b.content}' },
   { name: 'patch-scholarly-sources', file: '/home/vane/.next/server/chunks/641.js', marker: '/*fane:academic-toggle*/' },
   { name: 'patch-social-sources', file: '/home/vane/.next/server/chunks/641.js', marker: '/*fane:social-toggle*/' },
+  { name: 'patch-web-search', file: '/home/vane/.next/server/chunks/641.js', marker: '/*fane:rank-original*/' },
 ];
 
 function dockerOut(args, timeout = 30_000) {
