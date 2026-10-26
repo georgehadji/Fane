@@ -19,6 +19,12 @@ test('parseCli defaults', () => {
   assert.equal(o.timeoutMs, 180_000);
 });
 
+test('parseCli timeout depends on mode unless given', () => {
+  assert.equal(parseCli(['q', '-o', 'quality']).timeoutMs, 600_000);
+  assert.equal(parseCli(['q', '-o', 'quality', '-t', '90']).timeoutMs, 90_000);
+  assert.equal(parseCli(['q', '-o', 'balanced']).timeoutMs, 180_000);
+});
+
 test('parseCli marks -m as explicit', () => {
   const o = parseCli(['q', '-m', 'gpt-5']);
   assert.equal(o.model, 'gpt-5');
@@ -48,5 +54,7 @@ test('findOpenRouterProvider', () => {
   assert.equal(findOpenRouterProvider(providers).id, 'p2');
   assert.equal(findOpenRouterProvider(providers, 'anthropic').id, 'p1');
   assert.throws(() => findOpenRouterProvider(providers, 'nope'), /No Vane provider/);
+  const two = [...providers, { id: 'p4', name: 'Openrouter', chatModels: [] }];
+  assert.equal(findOpenRouterProvider(two, 'Openrouter').id, 'p4'); // exact name beats substring matches
   assert.throws(() => findOpenRouterProvider([...providers, { id: 'p3', name: 'OpenRouter 2', chatModels: [] }]), /More than one/);
 });

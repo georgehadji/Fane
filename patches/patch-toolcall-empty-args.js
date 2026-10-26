@@ -14,5 +14,6 @@ if (count !== 1) {
   console.error(`expected 1 match, found ${count}; not patching`);
   process.exit(1);
 }
+if (!fs.existsSync(`${f}.bak`)) fs.copyFileSync(f, `${f}.bak`);
 fs.writeFileSync(f, s.replace(from, to));
 console.log('patched 1 occurrence');

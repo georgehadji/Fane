@@ -9,6 +9,7 @@ This is **not a fork** of Vane. It is a small toolkit for the official Docker im
 | `cli/` | `vane "<question>"`: ask Vane from any shell or agent and get a cited answer plus sources (text or JSON). No extra server needed. |
 | `patches/patch-toolcall-empty-args.js` | Fixes `Error: is empty`, which crashes or hangs every search with Anthropic/OpenAI models through OpenRouter ([Vane#1150](https://github.com/ItzCrazyKns/Vane/issues/1150)). |
 | `patches/patch-always-search.js` | Fixes "could not find any relevant information" for general-knowledge questions. The classifier skips search, but the writer only answers from search results ([Vane#1211](https://github.com/ItzCrazyKns/Vane/issues/1211)). |
+| `patches/patch-quality-mode.js` | Improves Quality (Beta) mode. It keeps the top search snippets next to the scraped pages (upstream drops them, so quality got fewer sources than speed), falls back to the snippet when a page can't be scraped, caps the LLM calls per page, keeps extracted facts in page order, sets the research loop to 10 iterations (matching its prompt, down from 25), trims what the researcher re-reads each round, and makes answer length match the question instead of a forced 2000+ words. Measured on "Compare Rust and Go for building CLI tools" with Claude Haiku: 30 sources instead of 9, and 2,076 words instead of 3,313. A narrow question ("latest Node.js LTS") now gets 367 words. |
 | `searxng/settings.yml` | SearXNG engine override for when the default engines are blocked (CAPTCHA or rate limits). Enables Bing, Yandex and Bing News. |
 
 Tested against **Vane 1.12.2**, image `itzcrazykns1337/vane:latest` (digest `sha256:0b61bf0d4470…`), with models through OpenRouter.
@@ -92,7 +93,7 @@ On Windows PowerShell, `npm` may be blocked by the execution policy. Use `npm.cm
 | `-j, --json` | Print `{model, message, sources}` as JSON |
 | `--stream` | Print the answer as it is generated (not with `--json`) |
 | `--require-sources` | Exit 1 if the answer has no sources |
-| `-t, --timeout` | `180` seconds |
+| `-t, --timeout` | `180` seconds, `600` with `--mode quality` |
 | `--doctor` | Check Docker, container, models, patches and SearXNG; exit 1 on a failed check |
 
 Environment overrides: `VANE_URL`, `VANE_CHAT_MODEL`, `VANE_EMBEDDING_MODEL`, `VANE_CONTAINER`, `VANE_SOURCES`, `VANE_MODE`.

@@ -39,7 +39,7 @@ Options:
   -s, --sources <list>   Comma list of: ${VALID_SOURCES.join(', ')} (default: ${DEFAULTS.sources}, env VANE_SOURCES)
   -o, --mode <mode>      ${VALID_MODES.join(' | ')} (default: ${DEFAULTS.mode}, env VANE_MODE)
   -i, --instructions <t> Extra system instructions (style, focus)
-  -t, --timeout <sec>    Request timeout in seconds (default: 180)
+  -t, --timeout <sec>    Request timeout in seconds (default: 180, 600 with --mode quality)
   -j, --json             Print raw JSON {message, sources}
       --stream           Print the answer as it is generated (not with --json)
       --require-sources  Exit 1 if the answer has no sources
@@ -68,7 +68,8 @@ export function parseCli(argv) {
       sources: { type: 'string', short: 's', default: DEFAULTS.sources },
       mode: { type: 'string', short: 'o', default: DEFAULTS.mode },
       instructions: { type: 'string', short: 'i' },
-      timeout: { type: 'string', short: 't', default: '180' },
+      // default depends on mode: quality runs a multi-iteration research loop with page scraping
+      timeout: { type: 'string', short: 't' },
       json: { type: 'boolean', short: 'j', default: false },
       stream: { type: 'boolean', default: false },
       'require-sources': { type: 'boolean', default: false },
@@ -86,6 +87,7 @@ export function parseCli(argv) {
   const bad = sources.filter(s => !VALID_SOURCES.includes(s));
   if (bad.length) throw new UsageError(`Invalid source(s): ${bad.join(', ')}. Use: ${VALID_SOURCES.join(', ')}`);
   if (!VALID_MODES.includes(values.mode)) throw new UsageError(`Invalid mode "${values.mode}". Use: ${VALID_MODES.join(', ')}`);
+  values.timeout ??= values.mode === 'quality' ? '600' : '180';
   const timeoutSec = Number(values.timeout);
   if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) throw new UsageError(`Invalid timeout "${values.timeout}"`);
   if (values.stream && values.json) throw new UsageError('--stream cannot be combined with --json');
@@ -152,6 +154,8 @@ async function fetchOpenRouterCatalog() {
 // Vane has no "provider type" in /api/providers, so find the OpenRouter one by name.
 export function findOpenRouterProvider(providers, wanted) {
   const w = (wanted || 'openrouter').toLowerCase();
+  const exact = providers.filter(p => p.name.toLowerCase() === w);
+  if (exact.length === 1) return exact[0];
   const hits = providers.filter(p => p.name.toLowerCase().includes(w));
   if (hits.length === 1) return hits[0];
   const names = providers.map(p => p.name).join(', ');
@@ -346,6 +350,7 @@ const PATCH_MARKERS = [
   { name: 'patch-toolcall-empty-args', file: '/home/vane/.next/server/chunks/136.js', marker: 'arguments:(0,n.parse)(b.arguments.trim()||"{}")' },
   { name: 'patch-always-search (search)', file: '/home/vane/.next/server/app/api/search/route.js', marker: '(c.classification.skipSearch=!1)||(j=new g.A().research(' },
   { name: 'patch-always-search (chat)', file: '/home/vane/.next/server/app/api/chat/route.js', marker: '(d.classification.skipSearch=!1)||(m=new f.A().research(' },
+  { name: 'patch-quality-mode', file: '/home/vane/.next/server/chunks/641.js', marker: 'p[P]={...b,content:d||b.content}' },
 ];
 
 function dockerOut(args, timeout = 30_000) {

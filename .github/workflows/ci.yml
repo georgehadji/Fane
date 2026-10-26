@@ -30,4 +30,7 @@ jobs:
           image=$(grep -o 'itzcrazykns1337/vane@sha256:[0-9a-f]*' docker-compose.yml)
           docker run --rm -u 0 --entrypoint sh -v "$PWD/patches:/p:ro" "$image" -c '
             set -e
-            for f in /p/*.js; do node "$f"; node "$f"; done'
+            for f in /p/*.js; do node "$f"; node "$f"; done
+            # every patched bundle (each patch leaves a .bak) must still parse
+            cd /home/vane/.next/server
+            for b in $(find . -name "*.js.bak"); do node --check "${b%.bak}"; echo "parses: ${b%.bak}"; done'
