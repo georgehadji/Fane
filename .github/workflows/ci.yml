@@ -25,12 +25,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply each patch twice inside the pinned image
+      # Two full passes in file order, as apply.mjs and the Compose entrypoint run them:
+      # a later patch editing an earlier one's output must not break re-runs.
+      - name: Apply all patches twice inside the pinned image
         run: |
           image=$(grep -o 'itzcrazykns1337/vane@sha256:[0-9a-f]*' docker-compose.yml)
           docker run --rm -u 0 --entrypoint sh -v "$PWD/patches:/p:ro" "$image" -c '
             set -e
-            for f in /p/*.js; do node "$f"; node "$f"; done
+            for pass in 1 2; do for f in /p/*.js; do node "$f"; done; done
             # every patched bundle (each patch leaves a .bak) must still parse
             cd /home/vane/.next/server
             for b in $(find . -name "*.js.bak"); do node --check "${b%.bak}"; echo "parses: ${b%.bak}"; done'

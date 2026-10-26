@@ -47,6 +47,8 @@ const TARGETS = [
     name: 'paper metadata in results',
     from: 'let b=await a.json(),c=b.results,d=b.suggestions;return{results:c,suggestions:d}',
     to: `let b=await a.json(),c=(b.results||[]).map(${ENRICH}),d=b.suggestions;return{results:c,suggestions:d}`,
+    // patch-social-sources inserts another .map() here
+    marker: 'fane_text:r.content||r.title,content:"["+M+"] "',
   },
   {
     name: 'rank on original text',
@@ -57,6 +59,8 @@ const TARGETS = [
     name: 'writer cites papers by author and year',
     from: 'where appropriate.\n\n    ### Citation Requirements',
     to: 'where appropriate.\n\n    ### Scholarly sources\n    - Some sources start with a bracket such as [authors | year | venue | doi | preprint (arXiv)]. When you use one, name the first author and year in the sentence (for example "Chen et al. (2025) show ...") as well as giving the [number] citation.\n    - Say when a finding rests only on preprints (arXiv) that have not been peer reviewed.\n    - When papers disagree, say so, and give more weight to peer-reviewed and more recent work.\n\n    ### Citation Requirements',
+    // patch-social-sources inserts its section before "### Citation Requirements"
+    marker: '### Scholarly sources',
   },
   {
     name: 'quality: failed scrape keeps the snippet',
@@ -70,8 +74,9 @@ const original = fs.readFileSync(FILE, 'utf8');
 let s = original;
 let applied = 0;
 // Check every target first so a mismatch leaves the file untouched.
+// `marker` (when set) detects "already applied" for targets a later patch edits further.
 for (const t of TARGETS) {
-  if (s.includes(t.to)) continue;
+  if (s.includes(t.marker || t.to)) continue;
   const count = s.split(t.from).length - 1;
   if (count === 0 && t.optional) {
     console.log(`${t.name}: skipped (${t.optional})`);

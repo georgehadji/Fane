@@ -33,6 +33,8 @@ const TARGETS = [
     name: 'scrape fallback + chunk cap',
     from: 'if(!c)return;let d="",e=(0,h.A)(c.content,4e3,500);await Promise.all(e.map(async b=>{try{let c=await a.llm.generateObject({schema:r,',
     to: 'if(!c){p[P]=b;return}let d="",F=[],e=(0,h.A)(c.content,4e3,500).slice(0,4);await Promise.all(e.map(async(b,x)=>{try{let c=await a.llm.generateObject({schema:r,',
+    // patch-scholarly-sources edits the start of `to`; this part stays as written
+    marker: 'F=[],e=(0,h.A)(c.content,4e3,500).slice(0,4)',
   },
   {
     name: 'ordered facts + snippets in result',
@@ -60,8 +62,9 @@ const original = fs.readFileSync(FILE, 'utf8');
 let s = original;
 let applied = 0;
 // Check every target first so a mismatch leaves the file untouched.
+// `marker` (when set) detects "already applied" for targets a later patch edits further.
 for (const t of TARGETS) {
-  if (s.includes(t.to)) continue;
+  if (s.includes(t.marker || t.to)) continue;
   const count = s.split(t.from).length - 1;
   if (count !== 1) {
     console.error(`${t.name}: expected 1 match, found ${count}; not patching anything`);

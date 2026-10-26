@@ -35,6 +35,12 @@ engines:
   - name: crossref
     disabled: false
 
+  # Social source (Vane's social_search, see patches/patch-social-sources.js).
+  # Reddit's own engine is blocked (JSON API 403), so forums are used instead.
+  # Lemmy and Stack Exchange engines are on by default; Hacker News is not.
+  - name: hackernews
+    disabled: false
+
   # Disabled: hard failures (access denied / HTTP error)
   - name: aol
     disabled: true
