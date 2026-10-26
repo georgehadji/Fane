@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: node --check cli/vane.mjs && node --check scripts/apply.mjs && node --check scripts/engine-check.mjs
+      - run: node --check cli/vane.mjs && node --check scripts/apply.mjs && node --check scripts/engine-check.mjs && node --check scripts/bench.mjs
       - run: npm test --prefix cli
 
   # The patches match exact fragments of the pinned Vane build. This fails when the

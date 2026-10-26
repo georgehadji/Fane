@@ -96,6 +96,8 @@ On Windows PowerShell, `npm` may be blocked by the execution policy. Use `npm.cm
 | `-j, --json` | Print `{model, message, sources}` as JSON |
 | `--stream` | Print the answer as it is generated (not with `--json`) |
 | `--require-sources` | Exit 1 if the answer has no sources |
+| `--verify` | Check every cited sentence against the sources it cites (see below) |
+| `--min-support <0-1>` | With `--verify`: exit 1 if the supported share of cited sentences is lower |
 | `-t, --timeout` | `180` seconds, `600` with `--mode quality` |
 | `--doctor` | Check Docker, container, models, patches and SearXNG; exit 1 on a failed check |
 
@@ -119,6 +121,29 @@ vane --remove-model google/gemini-3.8-flash
 ```
 
 This needs a Vane provider whose name contains "openrouter" (override with `--provider <name>`), configured in Vane (Settings → Models) as an OpenAI-compatible provider with **Base URL `https://openrouter.ai/api/v1`** and your OpenRouter API key. `vane --doctor` and `--add-model` warn when the provider points somewhere else.
+
+### Citation check (`--verify`)
+
+`--verify` checks the answer against the text of the sources Vane returned, with no extra model calls. A cited sentence counts as supported when at least 30% of its content words appear in one of the sources it cites, and every multi-digit number in it appears in a cited source. The report lists weakly supported sentences, numbers not found in their sources, citation numbers that have no source, and how many sentences have no citation. With `-j` it is in the `verification` field.
+
+```bash
+vane "What is the latest Node.js LTS version?" --verify
+vane "question" -j --min-support 0.8     # exit 1 below 80%, for agents
+```
+
+It catches citations to the wrong source, invented or changed numbers, and broken citation numbers. It can't judge meaning: a sentence that reuses the source's words but reverses its claim still passes, and a correct paraphrase can show as weak. On 4 test answers, correct sources scored 81–100% and deliberately mismatched sources 0–21%.
+
+## Benchmark
+
+`scripts/bench.mjs` runs the questions in `bench/questions.json` through the CLI with `--verify` and records time, words, sources, distinct sites, citations used, citation support and the share of non-Latin source titles. It saves the results to `bench/results/` and compares them against a baseline.
+
+```bash
+node scripts/bench.mjs -m claude-haiku-5-5                                   # speed mode, 1 run
+node scripts/bench.mjs --modes speed,balanced --runs 3 -m claude-haiku-5-5
+node scripts/bench.mjs -m claude-haiku-5-5 --modes speed,balanced --baseline bench/baseline.json --fail-on-regression
+```
+
+Each run is a real query. `bench/baseline.json` holds one run per question in speed and balanced mode with Claude Haiku (2026-10-27). Single runs vary: one `coffee/speed` run scored 0.038 support, while 3 reruns gave a median of 0.864. Use `--runs 3` before trusting a regression. A regression means more failed runs, 25% fewer sources, citation support down 0.1, time up 50% and more than 10s, or non-Latin titles up 10 points.
 
 ## Development
 

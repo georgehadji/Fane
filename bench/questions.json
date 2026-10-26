@@ -1,0 +1,8 @@
+[
+  { "id": "node-lts", "q": "What is the latest Node.js LTS version?", "sources": ["web"] },
+  { "id": "laptop", "q": "What is the best budget laptop for students?", "sources": ["web"] },
+  { "id": "rust-go", "q": "Compare Rust and Go for building CLI tools", "sources": ["web"] },
+  { "id": "long-context", "q": "How do transformers handle long context efficiently?", "sources": ["academic"] },
+  { "id": "coffee", "q": "Is coffee bad for your heart?", "sources": ["academic"] },
+  { "id": "keyboard", "q": "Best mechanical keyboard switches for typing", "sources": ["discussions"] }
+]

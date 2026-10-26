@@ -31,6 +31,8 @@ vane --doctor                        # full health check, exit 1 on a failure
 node scripts/apply.mjs               # (re)apply patches + SearXNG settings to a running `vane` container
 docker compose up -d                 # alternative: patched Vane from the pinned digest
 node scripts/engine-check.mjs [--engines a,b]
+node scripts/bench.mjs -m claude-haiku-5-5 --modes speed,balanced --baseline bench/baseline.json   # real queries; measure a change before/after
+vane "q" --verify                    # lexical citation check (verifyCitations in cli/vane.mjs, threshold 0.3)
 ```
 
 ## Environment gotchas (Windows)

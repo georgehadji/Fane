@@ -43,6 +43,9 @@ Options:
   -j, --json             Print raw JSON {message, sources}
       --stream           Print the answer as it is generated (not with --json)
       --require-sources  Exit 1 if the answer has no sources
+      --verify           Check every cited sentence against its cited sources and report
+                         weakly supported sentences, numbers not found, bad citation numbers
+      --min-support <r>  With --verify: exit 1 if the supported share of cited sentences is below r (0-1)
       --list-models      List available chat and embedding models
       --list-openrouter  List/search OpenRouter's public model catalog
       --add-model <slug> Register an OpenRouter model in Vane
@@ -53,7 +56,7 @@ Options:
   -h, --help             Show this help
 
 Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURCES, VANE_MODE
-Exit codes: 0 ok, 1 runtime error (or no sources with --require-sources), 2 usage error`;
+Exit codes: 0 ok, 1 runtime error (or no sources with --require-sources, or support below --min-support), 2 usage error`;
 
 class UsageError extends Error {}
 
@@ -73,6 +76,8 @@ export function parseCli(argv) {
       json: { type: 'boolean', short: 'j', default: false },
       stream: { type: 'boolean', default: false },
       'require-sources': { type: 'boolean', default: false },
+      verify: { type: 'boolean', default: false },
+      'min-support': { type: 'string' },
       'list-models': { type: 'boolean', default: false },
       'list-openrouter': { type: 'boolean', default: false },
       'add-model': { type: 'string' },
@@ -91,6 +96,12 @@ export function parseCli(argv) {
   const timeoutSec = Number(values.timeout);
   if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) throw new UsageError(`Invalid timeout "${values.timeout}"`);
   if (values.stream && values.json) throw new UsageError('--stream cannot be combined with --json');
+  if (values['min-support'] !== undefined) {
+    const r = Number(values['min-support']);
+    if (!(r >= 0 && r <= 1)) throw new UsageError(`Invalid --min-support "${values['min-support']}" (use 0-1)`);
+    values['min-support'] = r;
+    values.verify = true;
+  }
   const modelExplicit = values.model !== undefined || !!process.env.VANE_CHAT_MODEL;
   return { ...values, model: values.model ?? DEFAULTS.model, modelExplicit, sources, timeoutMs: timeoutSec * 1000, query: positionals.join(' ').trim() };
 }
@@ -248,7 +259,8 @@ async function resolveChatModel(providers, opts) {
 // ---- search --------------------------------------------------------------
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const mapSources = (list) => (list || []).map(s => ({ title: s.metadata?.title || '', url: s.metadata?.url || '' }));
+// content is kept for --verify only; it is not printed.
+const mapSources = (list) => (list || []).map(s => ({ title: s.metadata?.title || '', url: s.metadata?.url || '', content: s.content || '' }));
 
 async function postSearch(opts, body, chatKey) {
   for (let attempt = 0; ; attempt++) {
@@ -321,17 +333,104 @@ async function search(opts, providers) {
   return { model: chat.key, message: data.message || '', sources: mapSources(data.sources) };
 }
 
+// ---- citation verification -----------------------------------------------
+// Lexical check, no model calls: a cited sentence counts as supported when enough of its
+// content words appear in at least one cited source and every multi-digit number in it
+// appears in a cited source. It catches citations to the wrong source, invented numbers
+// and citation numbers with no source; it cannot judge paraphrase or meaning.
+
+const CITE_RE = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
+const THRESHOLD = 0.3; // share of a sentence's content words found in a cited source
+const STOP = new Set(('the and for are but not you all any can had her was one our out has have this that with from they will would there their what which when your into than then them these some such only also more most other about after over very just like been were being does did how its may many much made make per via within without upon each both between while where who whom whose why yet own same so too use used using well even still could should might must shall here those because before during through against among across along around however therefore thus often less least few'
+).split(' '));
+const ABBREV_END = /\b(?:et al|e\.g|i\.e|vs|cf|approx|Fig|No|Dr|Mr|Mrs|Ms|St)\.$/i;
+const stem = (w) => (w.length > 5 ? w.replace(/(ing|ed|es|s)$/, '') : w);
+
+export function tokenize(text) {
+  const words = String(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+  return new Set(words.filter(w => w.length >= 3 && !STOP.has(w)).map(stem));
+}
+
+// Markdown answer -> sentence-ish units (list items and table rows count as one each).
+export function splitSentences(md) {
+  const units = [];
+  for (let line of String(md).replace(/```[\s\S]*?```/g, ' ').split('\n')) {
+    line = line.trim();
+    if (!line || /^#{1,6}\s/.test(line) || /^\|?[\s:|-]+\|?$/.test(line)) continue;
+    line = line.replace(/^([-*+]|\d+\.)\s+/, '').replace(/\*\*|__|`/g, '');
+    if (line.startsWith('|')) { units.push(line); continue; }
+    // split after . ! ? (a citation may sit before or after the stop) when a new sentence starts,
+    // then re-join pieces that ended in an abbreviation ("Chen et al. (2025) ...")
+    const pieces = [];
+    for (const piece of line.split(/(?<=[.!?](?:\[\d+(?:\s*,\s*\d+)*\])*)\s+(?=[A-Z0-9"“(\[])/)) {
+      if (pieces.length && ABBREV_END.test(pieces[pieces.length - 1])) pieces[pieces.length - 1] += ` ${piece}`;
+      else pieces.push(piece);
+    }
+    units.push(...pieces);
+  }
+  return units.filter(Boolean);
+}
+
+export function verifyCitations(message, sources, { threshold = THRESHOLD } = {}) {
+  const srcText = sources.map(s => `${s.title || ''} ${s.content || ''}`);
+  const srcTok = srcText.map(tokenize);
+  const srcNum = srcText.map(t => t.replace(/(\d),(\d{3})/g, '$1$2'));
+  const r = { sentences: 0, cited: 0, supported: 0, uncited: 0, supportRate: null, weak: [], numbersMissing: [], invalidCitations: [] };
+  for (const sentence of splitSentences(message)) {
+    const cites = [...sentence.matchAll(CITE_RE)].flatMap(m => m[1].split(',').map(Number));
+    const body = sentence.replace(CITE_RE, ' ');
+    const tok = tokenize(body);
+    if (tok.size < 4) continue; // headings, labels, fragments
+    r.sentences++;
+    if (!cites.length) { r.uncited++; continue; }
+    r.cited++;
+    const valid = [...new Set(cites)].filter(n => n >= 1 && n <= sources.length);
+    const invalid = [...new Set(cites)].filter(n => !(n >= 1 && n <= sources.length));
+    if (invalid.length) r.invalidCitations.push({ sentence, cites: invalid });
+    let overlap = 0;
+    for (const n of valid) {
+      let hit = 0;
+      for (const w of tok) if (srcTok[n - 1].has(w)) hit++;
+      overlap = Math.max(overlap, hit / tok.size);
+    }
+    const numbers = [...new Set((body.match(/\d[\d,]*(?:\.\d+)?/g) || []).map(x => x.replace(/,(?=\d{3})/g, '').replace(/[.,]$/, '')))].filter(x => x.replace(/\D/g, '').length >= 2);
+    const missing = numbers.filter(x => !valid.some(n => srcNum[n - 1].includes(x)));
+    if (missing.length) r.numbersMissing.push({ sentence, numbers: missing, cites: valid });
+    if (valid.length && overlap >= threshold && !missing.length) r.supported++;
+    else if (overlap < threshold) r.weak.push({ sentence, cites, overlap: Math.round(overlap * 100) / 100 });
+  }
+  r.supportRate = r.cited ? Math.round((r.supported / r.cited) * 1000) / 1000 : null;
+  return r;
+}
+
+function printVerification(v) {
+  const pct = v.supportRate == null ? 'n/a' : `${Math.round(v.supportRate * 100)}%`;
+  console.log(`\nVerification: ${v.supported}/${v.cited} cited sentences supported (${pct}); ${v.uncited} uncited, ${v.weak.length} weak, ${v.numbersMissing.length} with numbers not in their sources, ${v.invalidCitations.length} with citation numbers that have no source.`);
+  const short = (s) => (s.length > 140 ? `${s.slice(0, 137)}...` : s);
+  for (const w of v.weak.slice(0, 5)) console.log(`  weak (${Math.round(w.overlap * 100)}% overlap) ${short(w.sentence)}`);
+  for (const m of v.numbersMissing.slice(0, 5)) console.log(`  number ${m.numbers.join(', ')} not in [${m.cites.join('][')}]: ${short(m.sentence)}`);
+  for (const c of v.invalidCitations.slice(0, 5)) console.log(`  no source [${c.cites.join('][')}]: ${short(c.sentence)}`);
+}
+
 function printResult(result, opts) {
   if (!result.sources.length) {
     const tail = opts['require-sources'] ? ' Failing (--require-sources).' : ' Try --mode speed or another --model.';
     process.stderr.write(`vane: warning: no sources returned (model ${result.model}); answer is not grounded in search.${tail}\n`);
     if (opts['require-sources']) process.exitCode = 1;
   }
-  if (opts.json) return console.log(JSON.stringify({ model: result.model, message: result.message, sources: result.sources }, null, 2));
+  const verification = opts.verify ? verifyCitations(result.message, result.sources) : undefined;
+  if (verification && opts['min-support'] !== undefined && !((verification.supportRate ?? 0) >= opts['min-support'])) {
+    process.stderr.write(`vane: support ${verification.supportRate ?? 'n/a'} is below --min-support ${opts['min-support']}.\n`);
+    process.exitCode = 1;
+  }
+  const sources = result.sources.map(({ title, url }) => ({ title, url }));
+  if (opts.json) return console.log(JSON.stringify({ model: result.model, message: result.message, sources, ...(verification ? { verification } : {}) }, null, 2));
   if (!result.streamed) console.log(result.message.trim());
-  if (!result.sources.length) return;
-  console.log('\nSources:');
-  result.sources.forEach((s, i) => console.log(`[${i + 1}] ${s.title}${s.url ? ` - ${s.url}` : ''}`));
+  if (sources.length) {
+    console.log('\nSources:');
+    sources.forEach((s, i) => console.log(`[${i + 1}] ${s.title}${s.url ? ` - ${s.url}` : ''}`));
+  }
+  if (verification) printVerification(verification);
 }
 
 function printModels(providers, asJson) {
