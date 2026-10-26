@@ -6,6 +6,9 @@
   "bin": {
     "vane": "./vane.mjs"
   },
+  "scripts": {
+    "test": "node --test"
+  },
   "engines": {
     "node": ">=20"
   },

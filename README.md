@@ -22,67 +22,114 @@ Tested against **Vane 1.12.2**, image `itzcrazykns1337/vane:latest` (digest `sha
 - At least one chat model and one embedding model configured in Vane (Settings → Models).
 - Node.js 20 or later, for the CLI.
 
-## 1. Apply the patches
+## 1. Patches and SearXNG settings
 
-The scripts match exact fragments of Vane 1.12.2's compiled build. On any other build they make no changes and exit non-zero. They back up every file they change (`*.bak`), and running them twice is safe.
+Pick one.
+
+**A. Docker Compose (recommended).** Runs Vane pinned to the verified image digest, and re-applies the patches and SearXNG settings on every start, so image updates and `docker rm` no longer undo them. It generates a fresh random `secret_key` at each start. It reuses the `vane-data` volume from the `docker run` command above.
+
+```bash
+docker rm -f vane      # only if you started it with `docker run`; your data stays in the vane-data volume
+docker compose up -d
+```
+
+**B. Apply to an existing container.** Idempotent: copies the patches and settings in, generates a random `secret_key` (the repo file keeps its placeholder), restarts only if something changed, then runs `vane --doctor`.
+
+```bash
+node scripts/apply.mjs            # add --no-searxng to skip the SearXNG settings
+```
+
+The patch scripts match exact fragments of Vane 1.12.2's compiled build. On any other build they make no changes and exit non-zero. They back up every file they change (`*.bak`).
+
+<details>
+<summary>Manual steps</summary>
 
 ```bash
 docker cp patches/patch-toolcall-empty-args.js vane:/tmp/p1.js
 docker cp patches/patch-always-search.js vane:/tmp/p2.js
 docker exec -u 0 vane node /tmp/p1.js
 docker exec -u 0 vane node /tmp/p2.js
-docker restart vane
-```
-
-## 2. SearXNG engines (optional)
-
-Use this only if searches return 0 sources. Check first by querying the bundled SearXNG directly:
-
-```bash
-docker exec vane node -e "fetch('http://localhost:8080/search?q=test&format=json').then(r=>r.json()).then(j=>console.log(j.results.length, j.unresponsive_engines))"
-```
-
-Before copying the file in, set a random `secret_key`. The placeholder would technically work, but it is public and therefore insecure.
-
-```bash
-KEY=$(openssl rand -hex 32)   # or: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-sed -i "s/REPLACE_ME_RUN_THE_COMMAND_IN_README/$KEY/" searxng/settings.yml
-docker cp searxng/settings.yml vane:/etc/searxng/settings.yml
+KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+sed "s/REPLACE_ME_RUN_THE_COMMAND_IN_README/$KEY/" searxng/settings.yml > /tmp/settings.yml
+docker cp /tmp/settings.yml vane:/etc/searxng/settings.yml
 docker exec -u 0 vane chown searxng:searxng /etc/searxng/settings.yml
 docker restart vane
 ```
 
-Engines that work depend on your IP address. To test a single engine, add `&engines=<name>` to the query above.
+On Windows Git Bash, prefix with `export MSYS_NO_PATHCONV=1` and write the temp file somewhere `docker.exe` can see. `scripts/apply.mjs` avoids both problems.
+</details>
+
+## 2. SearXNG engines
+
+`searxng/settings.yml` enables Bing, Yandex and Bing News. Which engines work depends on your IP address. Check the whole set (one query per engine, so don't loop it):
+
+```bash
+node scripts/engine-check.mjs
+node scripts/engine-check.mjs --engines mojeek,qwant   # try specific engines, prints the YAML to enable the ones that work
+```
+
+If an engine reports `CAPTCHA` or `too many requests`, the engine has flagged your IP (shared VPN ranges often are). Restart the container to clear SearXNG's suspension timers after changing network.
 
 ## 3. Install the CLI
 
 ```bash
 npm install -g ./cli
+vane --doctor
 vane --list-models
 vane "What is the latest Node.js LTS version?"
 vane "Who maintains SearXNG?" -m "gemini 3.8" -s web,academic -j
+vane "Explain HTTP/3" --stream --require-sources
 ```
+
+On Windows PowerShell, `npm` may be blocked by the execution policy. Use `npm.cmd`, or run the command from Git Bash.
 
 | Option | Default |
 |---|---|
-| `-m, --model` | `google/gemini-3.8-flash` (model key or name; partial matches work if unique) |
+| `-m, --model` | `google/gemini-3.8-flash` (model key, name, or OpenRouter slug; partial matches work if unique) |
 | `-e, --embedding` | `Xenova/all-MiniLM-L6-v2` |
 | `-s, --sources` | `web` (`web`, `academic`, `discussions`) |
 | `-o, --mode` | `speed` (`speed`, `balanced`, `quality`) |
 | `-j, --json` | Print `{model, message, sources}` as JSON |
+| `--stream` | Print the answer as it is generated (not with `--json`) |
+| `--require-sources` | Exit 1 if the answer has no sources |
 | `-t, --timeout` | `180` seconds |
+| `--doctor` | Check Docker, container, models, patches and SearXNG; exit 1 on a failed check |
 
-Environment overrides: `VANE_URL`, `VANE_CHAT_MODEL`, `VANE_EMBEDDING_MODEL`, `VANE_CONTAINER`.
+Environment overrides: `VANE_URL`, `VANE_CHAT_MODEL`, `VANE_EMBEDDING_MODEL`, `VANE_CONTAINER`, `VANE_SOURCES`, `VANE_MODE`.
 
 - If Vane is not reachable, the CLI runs `docker start` on the container and waits for it.
-- If the answer has no sources, it prints a warning to stderr, so agents don't trust an answer that isn't based on search.
-- Exit codes: `0` ok, `1` runtime error, `2` usage error.
+- If the built-in default model is not in your Vane, the CLI uses the only chat model if there is exactly one, or lists what is available.
+- A search that fails with HTTP 5xx or a connection reset is retried once. Timeouts are not retried.
+- If the answer has no sources, it prints a warning to stderr, so agents don't trust an answer that isn't based on search. Add `--require-sources` to make that a non-zero exit.
+- Exit codes: `0` ok, `1` runtime error (or no sources with `--require-sources`), `2` usage error.
+
+### OpenRouter models
+
+Any model on OpenRouter works with `-m vendor/model`. If Vane does not know the slug yet, the CLI checks it against OpenRouter's public catalog and registers it in Vane's OpenRouter provider, so typos are never saved.
+
+```bash
+vane --list-openrouter gemini             # search the catalog (id, context size, input price)
+vane "question" -m anthropic/claude-haiku-4.5
+vane --add-model google/gemini-3.8-flash  # register without running a query
+vane --remove-model google/gemini-3.8-flash
+```
+
+This needs a Vane provider whose name contains "openrouter" (override with `--provider <name>`), configured in Vane (Settings → Models) as an OpenAI-compatible provider with **Base URL `https://openrouter.ai/api/v1`** and your OpenRouter API key. `vane --doctor` and `--add-model` warn when the provider points somewhere else.
+
+## Development
+
+```bash
+npm test --prefix cli    # unit tests (node --test, no dependencies)
+```
+
+CI (`.github/workflows/ci.yml`) runs the tests and applies each patch twice inside the pinned image digest, so a patch/image mismatch fails the build. To move to a newer Vane, change the digest in `docker-compose.yml`, fix the patches until CI passes, and update the "Tested against" line.
 
 ## Known issues
 
 - **Claude Sonnet + `balanced` mode via OpenRouter returns nothing.** The provider ends the first research turn with `finish_reason: content_filter` and no output. `speed` mode works, as does `balanced` with Haiku or Gemini. This is why the CLI defaults to `speed`.
 - **Gemini 3.1 Pro + `balanced`** can take more than 180 seconds.
-- **The patches don't survive image updates.** All changes live in the container's writable layer, so `docker rm` followed by `docker run` (an update) discards them. Re-run the scripts after updating. They will refuse to run once the build changes, which usually means upstream has changed that code, possibly with a fix.
+- **With `docker run` setups the patches don't survive image updates.** All changes live in the container's writable layer, so `docker rm` followed by `docker run` discards them. Use the Compose setup (section 1A), or re-run `node scripts/apply.mjs` after updating. The patches refuse to apply once the build changes, which usually means upstream has changed that code, possibly with a fix. The Compose entrypoint then warns in `docker logs` and starts Vane unpatched.
+- **OpenRouter models fail if the provider's Base URL is not OpenRouter.** An OpenAI-type provider left on `https://api.openai.com/v1` rejects OpenRouter keys and requests hang until the timeout. Run `vane --doctor`.
 
 ## Credits
 

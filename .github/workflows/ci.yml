@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  cli:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --check cli/vane.mjs && node --check scripts/apply.mjs && node --check scripts/engine-check.mjs
+      - run: npm test --prefix cli
+
+  # The patches match exact fragments of the pinned Vane build. This fails when the
+  # pinned digest and the patches drift apart, and checks that re-running is safe.
+  patches:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply each patch twice inside the pinned image
+        run: |
+          image=$(grep -o 'itzcrazykns1337/vane@sha256:[0-9a-f]*' docker-compose.yml)
+          docker run --rm -u 0 --entrypoint sh -v "$PWD/patches:/p:ro" "$image" -c '
+            set -e
+            for f in /p/*.js; do node "$f"; node "$f"; done'
