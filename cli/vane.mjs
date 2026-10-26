@@ -5,6 +5,8 @@ import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { FAMILIES, TIERS } from './image/catalogue.mjs';
+import { ASPECT_RATIOS, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
 
 const DEFAULTS = {
   url: process.env.VANE_URL || 'http://localhost:3000',
@@ -23,6 +25,8 @@ const STARTUP_WAIT_MS = 90_000;
 const SEARCH_RETRIES = 1; // retried only on HTTP 5xx / connection reset, never on timeout (that would double the wait)
 const OPENROUTER_CATALOG = 'https://openrouter.ai/api/v1/models';
 const SLUG_RE = /^[\w.~-]+\/[\w.:~-]+$/; // vendor/model[:variant], the OpenRouter id shape
+// Cheap text model for image-prompt enhancement and intent classification.
+const IMAGE_TEXT_MODEL = process.env.VANE_IMAGE_TEXT_MODEL || 'google/gemini-3.5-flash-lite';
 
 const USAGE = `Usage: vane "<question>" [options]
        vane --list-models [--json]
@@ -30,6 +34,7 @@ const USAGE = `Usage: vane "<question>" [options]
        vane --add-model <openrouter-slug> [--provider <name>]
        vane --remove-model <slug> [--provider <name>]
        vane --doctor
+       vane --image "<prompt>" [-n 2] [--tier budget|premium] [--family <f>] [--aspect 1:1] [--out-dir dir]
 
 Options:
   -m, --model <id>       Chat model key or name (default: ${DEFAULTS.model}).
@@ -55,7 +60,20 @@ Options:
       --url <url>        Vane URL (default: ${DEFAULTS.url}, env VANE_URL)
   -h, --help             Show this help
 
-Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURCES, VANE_MODE
+Image generation (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane):
+      --image            Generate images from the prompt instead of searching
+  -n, --count <n>        Images to make, one model per lab where possible (default 2, max ${MAX_IMAGES})
+      --tier <t>         budget (cheapest models) | premium (most capable); default from the prompt
+      --family <f>       ${FAMILIES.join(' | ')}; default from the prompt
+      --aspect <r>       ${ASPECT_RATIOS.join(' | ')} (default 1:1)
+      --size <s>         ${IMAGE_SIZES.join(' | ')} (models that support it)
+      --ref <file>       Reference image to edit or follow (repeatable)
+      --out-dir <dir>    Where to save images (default: ./vane-images)
+      --no-enhance       Send the prompt as written (skip the prompt-enhancement call)
+      --key-from-vane    Use the API key of Vane's OpenRouter provider (read from ${DEFAULTS.url}/api/config)
+
+Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURCES, VANE_MODE,
+     OPENROUTER_API_KEY, VANE_IMAGE_TEXT_MODEL (prompt enhancement/intent, default ${IMAGE_TEXT_MODEL})
 Exit codes: 0 ok, 1 runtime error (or no sources with --require-sources, or support below --min-support), 2 usage error`;
 
 class UsageError extends Error {}
@@ -84,6 +102,16 @@ export function parseCli(argv) {
       'remove-model': { type: 'string' },
       provider: { type: 'string' },
       doctor: { type: 'boolean', default: false },
+      image: { type: 'boolean', default: false },
+      count: { type: 'string', short: 'n', default: '2' },
+      tier: { type: 'string' },
+      family: { type: 'string' },
+      aspect: { type: 'string', default: '1:1' },
+      size: { type: 'string' },
+      ref: { type: 'string', multiple: true, default: [] },
+      'out-dir': { type: 'string', default: 'vane-images' },
+      'no-enhance': { type: 'boolean', default: false },
+      'key-from-vane': { type: 'boolean', default: false },
       url: { type: 'string', default: DEFAULTS.url },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -96,6 +124,17 @@ export function parseCli(argv) {
   const timeoutSec = Number(values.timeout);
   if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) throw new UsageError(`Invalid timeout "${values.timeout}"`);
   if (values.stream && values.json) throw new UsageError('--stream cannot be combined with --json');
+  if (values.image) {
+    const n = Number(values.count);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_IMAGES) throw new UsageError(`Invalid --count "${values.count}" (1-${MAX_IMAGES})`);
+    values.count = n;
+    if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
+    if (values.family && !FAMILIES.includes(values.family)) throw new UsageError(`Invalid --family "${values.family}". Use: ${FAMILIES.join(', ')}`);
+    if (!ASPECT_RATIOS.includes(values.aspect)) throw new UsageError(`Invalid --aspect "${values.aspect}". Use: ${ASPECT_RATIOS.join(', ')}`);
+    if (values.size && !IMAGE_SIZES.includes(values.size.toUpperCase())) throw new UsageError(`Invalid --size "${values.size}". Use: ${IMAGE_SIZES.join(', ')}`);
+    if (values.size) values.size = values.size.toUpperCase();
+    if (values.stream) throw new UsageError('--stream does not apply to --image');
+  }
   if (values['min-support'] !== undefined) {
     const r = Number(values['min-support']);
     if (!(r >= 0 && r <= 1)) throw new UsageError(`Invalid --min-support "${values['min-support']}" (use 0-1)`);
@@ -518,12 +557,64 @@ async function doctor(opts) {
   return failures;
 }
 
+// ---- image generation ----------------------------------------------------
+
+// OPENROUTER_API_KEY, or with --key-from-vane the key of Vane's OpenRouter provider.
+// The key is passed to the OpenRouter client and nowhere else (never printed or saved).
+async function resolveOpenRouterKey(opts) {
+  if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY;
+  if (!opts['key-from-vane']) throw new UsageError('Image generation needs an OpenRouter key: set OPENROUTER_API_KEY, or pass --key-from-vane to use the one configured in Vane.');
+  const res = await fetch(`${opts.url}/api/config`, { signal: AbortSignal.timeout(10_000) });
+  const providers = (await res.json()).values?.modelProviders || [];
+  const p = providers.find(x => String(x.config?.baseURL || '').includes('openrouter.ai') && x.config?.apiKey);
+  if (!p) throw new UsageError(`No Vane provider with Base URL openrouter.ai and an API key at ${opts.url}.`);
+  return p.config.apiKey;
+}
+
+async function readReference(file) {
+  const { readFile } = await import('node:fs/promises');
+  const { sniffMime } = await import('./image/extract.mjs');
+  const bytes = await readFile(file);
+  const mime = sniffMime(bytes);
+  if (!mime || mime === 'image/svg+xml') throw new UsageError(`--ref ${file} is not a PNG, JPEG, WebP or GIF image`);
+  return `data:${mime};base64,${bytes.toString('base64')}`;
+}
+
+async function runImage(opts) {
+  if (!opts.query) throw new UsageError('Missing image prompt. Example: vane --image "a red fox in fresh snow, morning light"');
+  const references = await Promise.all(opts.ref.map(readReference));
+  const apiKey = await resolveOpenRouterKey(opts);
+  const [{ createOpenRouterClient }, { createImageGenerator }, { safeDownload }, { saveImages }] = await Promise.all([
+    import('./image/openrouter.mjs'), import('./image/generate.mjs'), import('./image/download.mjs'), import('./image/save.mjs'),
+  ]);
+  const generate = createImageGenerator({
+    client: createOpenRouterClient({ apiKey }),
+    download: (url) => safeDownload(url),
+    textModel: IMAGE_TEXT_MODEL,
+    log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); },
+  });
+  const r = await generate({ prompt: opts.query, count: opts.count, tier: opts.tier, family: opts.family, aspect: opts.aspect, size: opts.size, references, enhance: !opts['no-enhance'] });
+  const saved = r.images.length ? await saveImages(r.images, opts['out-dir'], opts.query) : [];
+  const price = (id) => r.images.find(i => i.model === id)?.pricePerImage;
+  if (opts.json) {
+    console.log(JSON.stringify({ prompt: opts.query, intent: r.intent, models: r.models, enhancedPrompt: r.enhancedPrompt, rewrittenPrompt: r.rewrittenPrompt, requested: r.requested, images: saved.map(s => ({ ...s, estUsd: price(s.model) })), errors: r.errors }, null, 2));
+  } else {
+    if (r.intent) console.log(`Intent: ${r.intent.family} / ${r.intent.tier} (${r.intent.source}); models: ${r.models.join(', ') || 'none'}`);
+    if (r.enhancedPrompt) console.log(`Enhanced prompt: ${r.enhancedPrompt}`);
+    if (r.rewrittenPrompt) console.log(`Rewritten prompt: ${r.rewrittenPrompt}`);
+    for (const s of saved) console.log(`Saved ${s.path} (${s.model}, ${Math.round(s.bytes / 1024)} KB, ~$${(price(s.model) ?? 0).toFixed(3)})`);
+    if (!r.complete) console.error(`vane: made ${saved.length} of ${r.requested} images.${r.errors.length ? `\n  ${r.errors.slice(0, 6).join('\n  ')}` : ''}`);
+  }
+  if (!saved.length) process.exitCode = 1;
+}
+
 // ---- main ----------------------------------------------------------------
 
 async function main() {
   const opts = parseCli(process.argv.slice(2));
   if (opts.help) return console.log(USAGE);
   if (opts.doctor) { if (await doctor(opts)) process.exitCode = 1; return; }
+  if (opts.image) return runImage(opts);
   if (opts['list-openrouter']) return listOpenRouter(opts.query, opts.json);
   if (opts['add-model'] !== undefined) {
     const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);

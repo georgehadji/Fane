@@ -122,6 +122,27 @@ vane --remove-model google/gemini-3.8-flash
 
 This needs a Vane provider whose name contains "openrouter" (override with `--provider <name>`), configured in Vane (Settings → Models) as an OpenAI-compatible provider with **Base URL `https://openrouter.ai/api/v1`** and your OpenRouter API key. `vane --doctor` and `--add-model` warn when the provider points somewhere else.
 
+### Image generation (`--image`)
+
+`vane --image "<prompt>"` generates images through OpenRouter directly, without Vane or a search. The method is ported from [reasoner](https://github.com/georgehadji/reasoner):
+
+1. **Intent:** the prompt is classified into a family (`vector`, `photoreal`, `text_in_image`, `design`, `general`, `reference_edit`) and a tier (`budget` or `premium`). A cheap text model does this (`VANE_IMAGE_TEXT_MODEL`), with keyword rules as the fallback. `--family` and `--tier` override it.
+2. **Model choice:** from OpenRouter's live catalogue of image-output models (61 priced, 12 labs on 2026-10-27), with price normalised to USD per image. `budget` takes the cheapest models and `premium` the most capable, ranked by the size word and version in the model id. Primaries come from different labs, with 4 or more fallbacks. SVG models serve only `vector`.
+3. **Prompt enhancement** by the cheap text model (`--no-enhance` skips it).
+4. **Generation:** one call per image, in parallel. Pure generators (Flux, Recraft, Seedream, …) go to OpenRouter's Image API; models that also write text (Gemini, GPT) go to chat completions with `modalities` and `image_config`.
+5. **Fallbacks** until the requested count is reached. A refusal triggers a policy-safe rewrite (by the model, then local rules for protected characters and studios) and a retry. A `401` or `402` stops immediately, since it affects every model alike.
+6. Images are saved to `--out-dir` (default `./vane-images`) and never overwrite existing files.
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...           # or pass --key-from-vane to use Vane's OpenRouter provider key
+vane --image "a red fox in fresh snow, morning light"
+vane --image "minimal SVG logo for a coffee shop" -n 2
+vane --image "cinematic photo of Athens at dusk" --tier premium --aspect 16:9 --size 2K
+vane --image "make it a watercolour" --ref photo.jpg -j
+```
+
+Image links that a provider returns are downloaded only over HTTPS, never from private or loopback addresses, with every redirect re-checked and a 20 MB cap. Unlike reasoner, Fane does not strip AI-provenance metadata (C2PA) from generated images.
+
 ### Citation check (`--verify`)
 
 `--verify` checks the answer against the text of the sources Vane returned, with no extra model calls. A cited sentence counts as supported when at least 30% of its content words appear in one of the sources it cites, and every multi-digit number in it appears in a cited source. The report lists weakly supported sentences, numbers not found in their sources, citation numbers that have no source, and how many sentences have no citation. With `-j` it is in the `verification` field.
