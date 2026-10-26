@@ -27,6 +27,14 @@ engines:
   - name: bing news
     disabled: false
 
+  # Academic source (Vane's academic_search, see patches/patch-scholarly-sources.js).
+  # Verified 2026-10-27: both return results for keyword and sentence-style queries,
+  # with authors, dates and DOIs. Off by default in SearXNG.
+  - name: openalex
+    disabled: false
+  - name: crossref
+    disabled: false
+
   # Disabled: hard failures (access denied / HTTP error)
   - name: aol
     disabled: true

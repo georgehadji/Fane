@@ -351,6 +351,7 @@ const PATCH_MARKERS = [
   { name: 'patch-always-search (search)', file: '/home/vane/.next/server/app/api/search/route.js', marker: '(c.classification.skipSearch=!1)||(j=new g.A().research(' },
   { name: 'patch-always-search (chat)', file: '/home/vane/.next/server/app/api/chat/route.js', marker: '(d.classification.skipSearch=!1)||(m=new f.A().research(' },
   { name: 'patch-quality-mode', file: '/home/vane/.next/server/chunks/641.js', marker: 'p[P]={...b,content:d||b.content}' },
+  { name: 'patch-scholarly-sources', file: '/home/vane/.next/server/chunks/641.js', marker: '/*fane:academic-toggle*/' },
 ];
 
 function dockerOut(args, timeout = 30_000) {

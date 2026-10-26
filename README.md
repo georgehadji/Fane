@@ -10,7 +10,8 @@ This is **not a fork** of Vane. It is a small toolkit for the official Docker im
 | `patches/patch-toolcall-empty-args.js` | Fixes `Error: is empty`, which crashes or hangs every search with Anthropic/OpenAI models through OpenRouter ([Vane#1150](https://github.com/ItzCrazyKns/Vane/issues/1150)). |
 | `patches/patch-always-search.js` | Fixes "could not find any relevant information" for general-knowledge questions. The classifier skips search, but the writer only answers from search results ([Vane#1211](https://github.com/ItzCrazyKns/Vane/issues/1211)). |
 | `patches/patch-quality-mode.js` | Improves Quality (Beta) mode. It keeps the top search snippets next to the scraped pages (upstream drops them, so quality got fewer sources than speed), falls back to the snippet when a page can't be scraped, caps the LLM calls per page, keeps extracted facts in page order, sets the research loop to 10 iterations (matching its prompt, down from 25), trims what the researcher re-reads each round, and makes answer length match the question instead of a forced 2000+ words. Measured on "Compare Rust and Go for building CLI tools" with Claude Haiku: 30 sources instead of 9, and 2,076 words instead of 3,313. A narrow question ("latest Node.js LTS") now gets 367 words. |
-| `searxng/settings.yml` | SearXNG engine override for when the default engines are blocked (CAPTCHA or rate limits). Enables Bing, Yandex and Bing News. |
+| `patches/patch-scholarly-sources.js` | Makes the Academic source dependable. The Academic toggle alone now enables paper search (upstream also needed the classifier to judge the question a "paper request", so "Is coffee bad for your heart?" got 0 sources). The model is told to write keyword queries, because arXiv, PubMed and Semantic Scholar return nothing for sentences. OpenAlex, Crossref and Semantic Scholar are searched too. Results carry `[authors \| year \| venue \| doi \| preprint (arXiv)]`, and the writer cites papers by author and year and flags preprints. Paywalled publisher links are swapped for the arXiv copy when one exists. Measured with Claude Haiku, Academic only: the coffee question went from 0 to 20 sources; "How do transformers handle long context efficiently?" in speed mode went from 20 to 40 sources, with 31 author-year citations. |
+| `searxng/settings.yml` | SearXNG engine override for when the default engines are blocked (CAPTCHA or rate limits). Enables Bing, Yandex and Bing News, plus OpenAlex and Crossref for the Academic source. |
 
 Tested against **Vane 1.12.2**, image `itzcrazykns1337/vane:latest` (digest `sha256:0b61bf0d4470…`), with models through OpenRouter.
 
@@ -62,7 +63,7 @@ On Windows Git Bash, prefix with `export MSYS_NO_PATHCONV=1` and write the temp 
 
 ## 2. SearXNG engines
 
-`searxng/settings.yml` enables Bing, Yandex and Bing News. Which engines work depends on your IP address. Check the whole set (one query per engine, so don't loop it):
+`searxng/settings.yml` enables Bing, Yandex and Bing News, plus OpenAlex and Crossref for academic search. Which engines work depends on your IP address. Check the whole set (one query per engine, so don't loop it):
 
 ```bash
 node scripts/engine-check.mjs
