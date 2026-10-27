@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { DEFAULTS } from '../cli/vane.mjs';
+import { SECRET_KEY_LINE, renderSettings } from './searxng-settings.mjs';
 
 const { FANE_IMAGE_DIR, FANE_WRITE_DIR } = createRequire(import.meta.url)('../patches/lib/vane.js');
 
@@ -19,12 +20,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTAINER = DEFAULTS.container;
 const SETTINGS_PATH = '/etc/searxng/settings.yml';
 const PATCH_DIR = '/tmp/fane-patches'; // the whole folder: patches share patches/lib/
-// The key line itself, not its placeholder value, so the repo file is the only place that
-// says what the placeholder is.
-const SECRET_KEY_LINE = /^(\s*secret_key:).*$/m;
 
 if (process.argv.includes('-h') || process.argv.includes('--help')) {
-  console.log(`Usage: node scripts/apply.mjs [--no-searxng]\nEnv: VANE_CONTAINER (default ${DEFAULTS.container}), VANE_URL (default ${DEFAULTS.url})`);
+  console.log(`Usage: node scripts/apply.mjs [--no-searxng]\nEnv: VANE_CONTAINER (default ${DEFAULTS.container}), VANE_URL (default ${DEFAULTS.url}),\n     CORE_API_KEY (switches on the CORE academic engine; never printed)`);
   process.exit(0);
 }
 const withSearxng = !process.argv.includes('--no-searxng');
@@ -81,22 +79,29 @@ for (const [name, dest] of [['image', FANE_IMAGE_DIR], ['write', FANE_WRITE_DIR]
   }
 }
 
-// 2. SearXNG settings. The secret_key is generated per install and never written to the repo.
+// 2. SearXNG settings. The secret_key is generated per install and the CORE key comes from the
+// environment; neither is written to the repo or printed.
 if (withSearxng) {
   const repoText = readFileSync(join(ROOT, 'searxng', 'settings.yml'), 'utf8');
+  let coreKey = process.env.CORE_API_KEY?.trim() || undefined;
+  try { renderSettings(repoText, { coreKey }); } catch (err) {
+    console.error(`searxng/settings.yml: ${err.message}; the CORE engine stays off`);
+    coreKey = undefined;
+  }
+  const wanted = renderSettings(repoText, { coreKey });
   const norm = (s) => s.replace(/\r\n/g, '\n').replace(SECRET_KEY_LINE, '$1 X').trim();
   let current = '';
   try { current = docker(['exec', CONTAINER, 'cat', SETTINGS_PATH]); } catch { /* treat as different */ }
-  if (norm(current) === norm(repoText)) {
-    console.log('searxng/settings.yml: already applied');
+  if (norm(current) === norm(wanted)) {
+    console.log(`searxng/settings.yml: already applied (CORE ${coreKey ? 'on' : 'off'})`);
   } else {
     const dir = mkdtempSync(join(tmpdir(), 'fane-'));
     try {
       const tmp = join(dir, 'settings.yml');
-      writeFileSync(tmp, repoText.replace(SECRET_KEY_LINE, `$1 '${randomBytes(32).toString('hex')}'`));
+      writeFileSync(tmp, renderSettings(repoText, { coreKey, secretKey: randomBytes(32).toString('hex') }));
       docker(['cp', tmp, `${CONTAINER}:${SETTINGS_PATH}`]);
       docker(['exec', '-u', '0', CONTAINER, 'chown', 'searxng:searxng', SETTINGS_PATH]);
-      console.log('searxng/settings.yml: applied with a new random secret_key');
+      console.log(`searxng/settings.yml: applied with a new random secret_key (CORE ${coreKey ? 'on' : 'off: set CORE_API_KEY to switch it on'})`);
       changed = true;
     } finally {
       rmSync(dir, { recursive: true, force: true });

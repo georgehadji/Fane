@@ -19,6 +19,9 @@ services:
       - ./cli/image:/fane/image:ro
       # FANE_WRITE_DIR in patches/lib/vane.js; used by patch-article-chat (articles in the web UI)
       - ./cli/write:/fane/write:ro
+    environment:
+      # Switches on the CORE academic engine (searxng/settings.yml); empty leaves it off.
+      CORE_API_KEY: ${CORE_API_KEY:-}
     entrypoint: ["sh", "/fane/docker/fane-entrypoint.sh"]
     command: ["/home/vane/entrypoint.sh"]
 

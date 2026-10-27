@@ -78,6 +78,18 @@ node scripts/engine-check.mjs
 node scripts/engine-check.mjs --engines mojeek,qwant   # try specific engines, prints the YAML to enable the ones that work
 ```
 
+**CORE (optional).** [CORE](https://core.ac.uk) indexes open-access papers, 57 million of them with full text. Its SearXNG engine needs a free API key, which you get by registering at https://core.ac.uk/services/api. Set it in the environment the installer runs in, then install again:
+
+```bash
+export CORE_API_KEY=...         # PowerShell: $env:CORE_API_KEY = "..."
+node scripts/apply.mjs          # or: docker compose up -d (passes CORE_API_KEY to the container)
+```
+
+- **Where the key goes:** the installers write it into the installed settings only, never into `searxng/settings.yml`, and print nothing but "CORE on". Without the variable the engine stays off.
+- **How it is used:** CORE is one of the Academic source's engines. CORE returns a paper's whole text as the search snippet, and the scholarly patch cuts any result text to 2,000 characters.
+- **Checking it:** `vane --doctor` runs one CORE query.
+- **Rate limit:** CORE allows 5 requests per 10 seconds. When a research sends more, SearXNG suspends the engine for a while.
+
 If an engine reports `CAPTCHA` or `too many requests`, the engine has flagged your IP (shared VPN ranges often are). Restart the container to clear SearXNG's suspension timers after changing network.
 
 ## 3. Install the CLI

@@ -34,6 +34,13 @@ engines:
     disabled: false
   - name: crossref
     disabled: false
+  # CORE: open-access papers, many with full text. Needs a free API key
+  # (https://core.ac.uk/services/api). The installers (scripts/searxng-settings.mjs,
+  # docker/fane-entrypoint.sh) write CORE_API_KEY into api_key and switch the engine on;
+  # without the variable it stays off. Never put the key in this file.
+  - name: core.ac.uk
+    api_key: ''
+    inactive: true
 
   # Social source (Vane's social_search, see patches/patch-social-sources.js).
   # Reddit's own engine is blocked (JSON API 403), so forums are used instead.

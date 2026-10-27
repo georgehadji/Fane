@@ -654,6 +654,14 @@ async function doctor(opts) {
     if (down.length) report('warn', `SearXNG engines down: ${down.map(([e, why]) => `${e} (${why})`).join(', ')}`);
   } catch (err) { report('FAIL', `SearXNG check failed: ${err.message.split('\n')[0]}`); }
 
+  // CORE is optional: SearXNG loads it only with an API key (searxng/settings.yml), and /config lists loaded engines.
+  try {
+    const script = `fetch('http://localhost:8080/config').then(r=>r.json()).then(c=>c.engines.some(e=>e.name==='core.ac.uk')?fetch('http://localhost:8080/search?q=symplectic+integrator&format=json&engines=core.ac.uk').then(r=>r.json()).then(j=>({on:true,n:j.results.length,down:j.unresponsive_engines})):{on:false}).then(o=>console.log(JSON.stringify(o)))`;
+    const core = JSON.parse(dockerOut(['exec', container, 'node', '-e', script], 60_000));
+    if (!core.on) report('ok', 'CORE academic engine off (optional: set CORE_API_KEY, then run node scripts/apply.mjs)');
+    else report(core.n > 0 ? 'ok' : 'warn', core.n > 0 ? `CORE academic engine returns results (${core.n} for "symplectic integrator")` : `CORE academic engine returned 0 results${core.down.length ? `: ${core.down.map(([, why]) => why).join(', ')}` : ''} (check the key)`);
+  } catch (err) { report('warn', `CORE check failed: ${err.message.split('\n')[0]}`); }
+
   return failures;
 }
 

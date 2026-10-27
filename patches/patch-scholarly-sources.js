@@ -7,7 +7,11 @@
 //     arXiv, PubMed and Semantic Scholar return 0 results for those.
 //     -> ask for 2-6 key terms per query.
 //  3. Engines were arxiv, google scholar, pubmed, and only Scholar handled long
-//     queries. -> add openalex, crossref, semantic scholar (enabled in searxng/settings.yml).
+//     queries. -> add openalex, crossref, semantic scholar (enabled in searxng/settings.yml),
+//     and core.ac.uk (on only when the installers were given CORE_API_KEY; SearXNG ignores
+//     an engine name it has not loaded, so the name is harmless without a key).
+//  3b. CORE returns a paper's whole full text as the result text, which Vane embeds and hands
+//     to the writer. -> result text longer than LONG_RESULT_CHARS is clipped to it.
 //  4. SearXNG returns authors/date/venue/DOI for papers; Vane dropped them.
 //     -> prefix paper results with "[authors | year | venue | doi | preprint (arXiv)]".
 //        Embedding similarity still uses the original text, so the prefix does not
@@ -25,6 +29,14 @@ const { FILES, SCRAPE_FAILED_TITLE, RANK_ON_ORIGINAL_TEXT } = require('./lib/van
 // Paper enrichment, inserted into the SearXNG client. No backticks or ${ } allowed here.
 const ENRICH = String.raw`r=>{let A=Array.isArray(r.authors)?r.authors.map(x=>String(x).trim()).filter(Boolean):[];if(!A.length&&!r.doi&&!r.journal)return r;let U=String(r.url||""),X=(String(r.pdf_url||"")+" "+String(r.html_url||"")).match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})/),M=[A.slice(0,3).join(", ")+(A.length>3?" et al.":""),r.publishedDate?String(r.publishedDate).slice(0,4):"",r.journal||r.publisher||"",r.doi?"doi:"+r.doi:"",/arxiv\.org/.test(U)||X&&!r.journal?"preprint (arXiv)":""].filter(Boolean).join(" | ");/sciencedirect\.com|link\.springer\.com|onlinelibrary\.wiley\.com|ieeexplore\.ieee\.org|tandfonline\.com|pubs\.acs\.org/.test(U)&&X&&(U="https://arxiv.org/abs/"+X[1]);return{...r,url:U,fane_text:r.content||r.title,content:"["+M+"] "+(r.content||r.title)}}`;
 
+// Other engines' snippets are a few hundred characters; the start of a CORE full text is the title,
+// authors and abstract.
+const LONG_RESULT_CHARS = 2000;
+const CLIP = `r=>r&&typeof r.content==="string"&&r.content.length>${LONG_RESULT_CHARS}?{...r,content:r.content.slice(0,${LONG_RESULT_CHARS})}:r`;
+
+const ENGINES = (list) => `searchConfig:{engines:${JSON.stringify(list)}}`;
+const ACADEMIC = ['arxiv', 'google scholar', 'pubmed', 'openalex', 'crossref', 'semantic scholar'];
+
 const TARGETS = [
   {
     name: 'academic toggle enables the tool',
@@ -38,8 +50,11 @@ const TARGETS = [
   },
   {
     name: 'academic engines',
-    from: 'searchConfig:{engines:["arxiv","google scholar","pubmed"]}',
-    to: 'searchConfig:{engines:["arxiv","google scholar","pubmed","openalex","crossref","semantic scholar"]}',
+    // the second form upgrades a container patched before core.ac.uk was added
+    alts: [
+      { from: ENGINES(['arxiv', 'google scholar', 'pubmed']), to: ENGINES([...ACADEMIC, 'core.ac.uk']) },
+      { from: ENGINES(ACADEMIC), to: ENGINES([...ACADEMIC, 'core.ac.uk']) },
+    ],
   },
   {
     name: 'paper metadata in results',
@@ -47,6 +62,13 @@ const TARGETS = [
     to: `let b=await a.json(),c=(b.results||[]).map(${ENRICH}),d=b.suggestions;return{results:c,suggestions:d}`,
     // patch-social-sources inserts another .map() here
     marker: 'fane_text:r.content||r.title,content:"["+M+"] "',
+  },
+  {
+    // Runs after the metadata target above; a statement of its own, so the `c=(b.results||[]).map(`
+    // that patch-social-sources looks for is left as it is.
+    name: 'long result text clipped',
+    from: 'let b=await a.json(),c=',
+    to: `let b=await a.json();b.results=(b.results||[]).map(${CLIP});let c=`,
   },
   RANK_ON_ORIGINAL_TEXT,
   {
@@ -64,5 +86,5 @@ const TARGETS = [
   },
 ].map(t => ({ file: FILES.research, ...t }));
 
-module.exports = { TARGETS, ENRICH };
+module.exports = { TARGETS, ENRICH, CLIP, LONG_RESULT_CHARS };
 if (require.main === module) run('patch-scholarly-sources', TARGETS);
