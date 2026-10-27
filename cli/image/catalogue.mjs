@@ -1,7 +1,8 @@
 // Image model catalogue: OpenRouter's image-output models, priced per image and ranked.
 // Pure functions over catalogue entries (no network), ported from reasoner's
 // infrastructure/llm/image_model_catalogue.py. Intent picks the family, the tier picks
-// cheapest (budget) or most capable (premium), and primaries come from distinct labs.
+// best value (default), cheapest (budget) or most capable (premium), and primaries come
+// from distinct labs, each with its own fallback chain.
 
 // OpenRouter prices image models two ways: a flat `image` price per generated image
 // (pure generators), or `image_output` per output-image token. 1290 tokens is a 1024px
@@ -9,7 +10,9 @@
 export const TOKENS_PER_IMAGE = 1290;
 
 export const FAMILIES = ['vector', 'photoreal', 'text_in_image', 'design', 'general', 'reference_edit'];
-export const TIERS = ['budget', 'premium'];
+export const TIERS = ['value', 'budget', 'premium'];
+export const DEFAULT_TIER = 'value';
+export const FALLBACKS_PER_IMAGE = 4;
 
 // The only hand-maintained ranking: size/quality words in model ids, weakest first.
 // '' is an id with none of them (a plain full-size model). "preview" loses to its stable twin.
@@ -89,15 +92,27 @@ const byCapabilityDesc = (a, b) => {
   return 0;
 };
 
-// Family members, cheapest first (budget) or most capable first (premium). SVG models are
-// the only members of "vector" and never appear in any other family: an SVG answer to a
-// photo prompt is broken, not cheaper.
+const byPrice = (a, b) => a.price - b.price;
+
+// Value for money: the most capable models priced at or below the family's median price,
+// then the pricier ones cheapest first. The median moves with the live catalogue.
+function byValue(pool) {
+  const prices = pool.map(m => m.price).sort((a, b) => a - b);
+  const mid = prices.length >> 1;
+  const median = prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+  return [...pool.filter(m => m.price <= median).sort(byCapabilityDesc), ...pool.filter(m => m.price > median).sort(byPrice)];
+}
+
+// Family members in tier order: best value, cheapest first (budget) or most capable first
+// (premium). SVG models are the only members of "vector" and never appear in any other
+// family: an SVG answer to a photo prompt is broken, not cheaper.
 export function candidates(catalogue, family, tier, needsReference, via) {
   const wantSvg = family === 'vector';
   const pool = catalogue
     .filter(m => m.families.has(family) && emitsSvg(m) === wantSvg && (needsReference ? m.acceptsImageInput : !m.requiresReference) && (!via || viaOf(m) === via))
     .sort((a, b) => a.id.localeCompare(b.id)); // deterministic ties
-  return tier === 'premium' ? pool.sort(byCapabilityDesc) : pool.sort((a, b) => a.price - b.price);
+  if (tier === 'premium') return pool.sort(byCapabilityDesc);
+  return tier === 'budget' ? pool.sort(byPrice) : byValue(pool);
 }
 
 function take(pool, count, picked, labs, allowRepeatLab = false) {
@@ -109,15 +124,27 @@ function take(pool, count, picked, labs, allowRepeatLab = false) {
   }
 }
 
-// `count` primaries from distinct labs where possible, plus >= 4 fallbacks. A lab-thin
-// family widens to "general" instead of doubling up. Exception: "vector" never widens
-// (only SVG models qualify), so it may return fewer than `count`.
+// The unused models, in tier order, dealt round-robin into one chain per primary
+// (up to FALLBACKS_PER_IMAGE each). No model is in two chains, so every image comes
+// from a different model whichever fallbacks run.
+function dealFallbacks(primaries, rest) {
+  const chains = primaries.map(() => []);
+  rest.slice(0, FALLBACKS_PER_IMAGE * primaries.length).forEach((m, i) => chains[i % chains.length].push(m));
+  return chains;
+}
+
+// `count` primaries from distinct labs where possible; fallbacks[i] is the chain for
+// primaries[i]. A lab-thin family widens to "general" instead of doubling up. Exception:
+// "vector" never widens (only SVG models qualify), so it may return fewer than `count`.
 // `via` ('chat' | 'images') limits the choice to one kind of model.
-export function selectModels(catalogue, { family = 'general', tier = 'budget', count = 2, needsReference = false, via } = {}) {
+export function selectModels(catalogue, { family = 'general', tier = DEFAULT_TIER, count = 4, needsReference = false, via } = {}) {
   if (!FAMILIES.includes(family)) family = 'general';
-  if (!TIERS.includes(tier)) tier = 'budget';
+  if (!TIERS.includes(tier)) tier = DEFAULT_TIER;
   const pool = candidates(catalogue, family, tier, needsReference, via);
-  if (family === 'vector') return { primaries: pool.slice(0, count), fallbacks: pool.slice(count) };
+  if (family === 'vector') {
+    const primaries = pool.slice(0, count);
+    return { primaries, fallbacks: dealFallbacks(primaries, pool.slice(count)) };
+  }
   const wider = family === 'general' ? pool : candidates(catalogue, 'general', tier, needsReference, via);
   const primaries = [];
   const labs = new Set();
@@ -126,6 +153,6 @@ export function selectModels(catalogue, { family = 'general', tier = 'budget', c
   take(pool, count, primaries, labs, true);
   take(wider, count, primaries, labs, true);
   const used = new Set(primaries.map(m => m.id));
-  const fallbacks = [...pool, ...wider].filter((m, i, all) => !used.has(m.id) && all.findIndex(x => x.id === m.id) === i);
-  return { primaries, fallbacks: fallbacks.slice(0, Math.max(4, count)) };
+  const rest = [...pool, ...wider].filter((m, i, all) => !used.has(m.id) && all.findIndex(x => x.id === m.id) === i);
+  return { primaries, fallbacks: dealFallbacks(primaries, rest) };
 }

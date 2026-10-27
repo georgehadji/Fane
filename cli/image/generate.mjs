@@ -1,9 +1,10 @@
 // Image generation pipeline, after reasoner's generate_images():
-//   catalogue -> intent -> model selection -> prompt enhancement -> parallel generation
-//   -> fallbacks until `count` -> retry chain (model rewrite, then local rewrite).
+//   catalogue -> intent -> model selection -> prompt enhancement -> one chain per image
+//   (primary, then its own fallbacks), all chains in parallel -> retry chain for the images
+//   still missing (model rewrite, then local rewrite).
 // Dependencies (OpenRouter client, URL downloader) are injected, so the pipeline is
 // tested with fakes. Failures are returned as values; only programming errors throw.
-import { buildCatalogue, emitsSvg, selectModels, viaOf } from './catalogue.mjs';
+import { DEFAULT_TIER, buildCatalogue, emitsSvg, selectModels, viaOf } from './catalogue.mjs';
 import { classifyIntent } from './intent.mjs';
 import { REWRITE_SYSTEM, hasRiskTerms, heuristicRewrite, shouldRetry } from './policy.mjs';
 import { collectImageCandidates, sniffMime } from './extract.mjs';
@@ -21,6 +22,7 @@ const ASPECT_WORDS = { '1:1': 'square', '16:9': 'wide landscape', '9:16': 'tall 
 export const ASPECT_RATIOS = Object.keys(ASPECT_WORDS);
 export const IMAGE_SIZES = ['1K', '2K', '4K'];
 export const MAX_IMAGES = 8; // every image is a paid call, fanned out in parallel
+export const DEFAULT_IMAGES = 4; // one per model, from different labs where possible
 // Cheap text model for prompt enhancement and intent classification (CLI and Vane hook).
 export const DEFAULT_TEXT_MODEL = 'google/gemini-3.5-flash-lite';
 
@@ -110,21 +112,21 @@ export function createImageGenerator({ client, download, textModel = null, log =
     throw new Error(`no image in response${text ? ` (model replied: ${text.slice(0, 120)})` : ''}`);
   }
 
-  // Primaries in parallel, then fallbacks one at a time until `count` images exist.
-  async function attempt(prompt, primaries, fallbacks, count, opts) {
-    const images = [], errors = [];
+  // Runs the chains whose slot in `images` is still empty, all in parallel; each chain tries
+  // its models in order until one draws. A key/credit error stops every chain.
+  async function attempt(prompt, chains, images, opts) {
+    const errors = [];
     let fatal = null;
-    const record = (model, err) => {
-      errors.push(`${model.id}: ${err.message}`);
-      if (FATAL.has(err.status)) fatal ||= err;
-    };
-    const settled = await Promise.allSettled(primaries.map(m => generateOne(m, prompt, opts)));
-    settled.forEach((r, i) => (r.status === 'fulfilled' ? images.push({ ...r.value, model: primaries[i] }) : record(primaries[i], r.reason)));
-    for (const m of fallbacks) {
-      if (images.length >= count || fatal) break;
-      try { images.push({ ...(await generateOne(m, prompt, opts)), model: m }); } catch (err) { record(m, err); }
-    }
-    return { images: images.slice(0, count), errors, fatal };
+    await Promise.all(chains.map(async (chain, slot) => {
+      for (const m of images[slot] ? [] : chain) {
+        if (fatal) return;
+        try { images[slot] = { ...(await generateOne(m, prompt, opts)), model: m }; return; } catch (err) {
+          errors.push(`${m.id}: ${err.message}`);
+          if (FATAL.has(err.status)) fatal ||= err;
+        }
+      }
+    }));
+    return { errors, fatal };
   }
 
   async function policyRewrite(prompt) {
@@ -141,7 +143,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
   // models: exact catalogue ids to use (no substitution); via: 'chat' | 'images' limits the
   // automatic choice to one kind of model. count defaults to one image per listed model.
   return async function generate({ prompt, count, tier, family, aspect = '1:1', size, references = [], enhance = true, models, via, format }) {
-    count = Math.min(Math.max(1, Math.trunc(count ?? (models?.length || 2))), MAX_IMAGES);
+    count = Math.min(Math.max(1, Math.trunc(count ?? (models?.length || DEFAULT_IMAGES))), MAX_IMAGES);
     const result = { ok: false, complete: false, requested: count, intent: null, models: [], enhancedPrompt: null, rewrittenPrompt: null, images: [], errors: [] };
 
     let catalogue;
@@ -152,9 +154,9 @@ export function createImageGenerator({ client, download, textModel = null, log =
       const picked = models.map(id => catalogue.find(m => m.id === id));
       const unknown = models.filter((id, i) => !picked[i]);
       if (unknown.length) { result.errors.push(`not an image model in the OpenRouter catalogue: ${unknown.join(', ')} (see vane --list-image-models)`); return result; }
-      result.intent = { family: family || 'general', tier: tier || 'budget', source: 'explicit' };
+      result.intent = { family: family || 'general', tier: tier || DEFAULT_TIER, source: 'explicit' };
       primaries = Array.from({ length: count }, (_, i) => picked[i % picked.length]); // cycle when -n exceeds the list
-      fallbacks = [];
+      fallbacks = primaries.map(() => []);
     } else {
       result.intent = await classifyIntent(prompt, { complete, hasReference, family, tier });
       ({ primaries, fallbacks } = selectModels(catalogue, { family: result.intent.family, tier: result.intent.tier, count, needsReference: hasReference, via }));
@@ -162,8 +164,9 @@ export function createImageGenerator({ client, download, textModel = null, log =
     result.models = primaries.map(m => m.id);
     if (!primaries.length) { result.errors.push(`no ${via ? `${via} ` : ''}image model for family "${result.intent.family}"`); return result; }
     // Only a few models emit SVG, so a vector request may legitimately return fewer.
-    const want = result.intent.family === 'vector' ? Math.min(count, primaries.length + fallbacks.length) : count;
+    const want = result.intent.family === 'vector' ? primaries.length : count;
     result.requested = want;
+    const chains = primaries.map((m, i) => [m, ...fallbacks[i]]);
 
     let finalPrompt = prompt;
     if (enhance && complete) {
@@ -174,29 +177,30 @@ export function createImageGenerator({ client, download, textModel = null, log =
     }
 
     const opts = { aspect, size, references, format };
-    let run = await attempt(finalPrompt, primaries, fallbacks, want, opts);
-    let { images } = run;
+    const slots = chains.map(() => null);
+    const drawn = () => slots.filter(Boolean).length;
+    let run = await attempt(finalPrompt, chains, slots, opts);
     result.errors.push(...run.errors);
 
-    // Retry chain: a model-written rewrite after a refusal, then the local rewrite when
-    // the prompt names protected works. Skipped entirely after a key/credit error.
+    // Retry chain for the images still missing: a model-written rewrite after a refusal,
+    // then the local rewrite when the prompt names protected works. Skipped entirely after
+    // a key/credit error.
     const retries = [
       async () => (shouldRetry(run.errors) ? (result.rewrittenPrompt = await policyRewrite(finalPrompt)) : null),
       async () => heuristicRewrite(finalPrompt),
     ];
     const tried = new Set([finalPrompt]);
     for (const next of retries) {
-      if (images.length >= want || run.fatal) break;
+      if (drawn() >= want || run.fatal) break;
       const p = await next();
       if (!p || tried.has(p)) continue;
       tried.add(p);
       log('retrying with a rewritten prompt');
-      const r = await attempt(p, primaries, fallbacks, want, opts);
-      if (r.images.length >= images.length) images = r.images;
-      result.errors.push(...r.errors.map(e => `after rewrite: ${e}`));
-      run = r;
+      run = await attempt(p, chains, slots, opts);
+      result.errors.push(...run.errors.map(e => `after rewrite: ${e}`));
     }
 
+    const images = slots.filter(Boolean);
     result.images = images.map(i => ({ dataUrl: i.dataUrl, model: i.model.id, via: viaOf(i.model), endpoint: i.endpoint, aspect: i.aspect, pricePerImage: i.model.price, text: i.text }));
     result.ok = images.length > 0;
     result.complete = images.length >= want;

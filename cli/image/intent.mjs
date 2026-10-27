@@ -1,7 +1,9 @@
 // Prompt intent -> { family, tier }. Strategy chain like reasoner's ImageModelSelector:
 // a cheap text model classifies when available, and the keyword rules answer when it is
-// not (no key, no credits, bad JSON). An explicit --family / --tier always wins.
-import { FAMILIES, TIERS } from './catalogue.mjs';
+// not (no key, no credits, bad JSON). The tier is always best value (DEFAULT_TIER) unless
+// --tier says otherwise: "highly detailed" in a prompt is not a reason to pay 10x per image.
+// An explicit --family / --tier always wins.
+import { DEFAULT_TIER, FAMILIES } from './catalogue.mjs';
 
 const RULES = [
   ['vector', /\b(svg|vector|logo|icon|line[- ]?art|monogram|emblem)\b/i],
@@ -9,7 +11,6 @@ const RULES = [
   ['design', /\b(illustration|flat design|ui|mockup|branding|pattern|sticker|isometric|packaging|wallpaper)\b/i],
   ['photoreal', /\b(photo\w*|realistic|photoreal\w*|portrait|cinematic|dslr|35mm|bokeh|hdr|product shot)\b/i],
 ];
-const PREMIUM = /\b(high[- ]quality|premium|best quality|highly detailed|4k|8k|professional|print[- ]ready|award[- ]winning)\b/i;
 
 // "create an image of ...", "draw me a logo for ...": a request for a picture, not a question.
 // Vane's answer pipeline can only write text, so the CLI sends these to the image pipeline.
@@ -22,14 +23,13 @@ export const imageSubject = (text) => String(text || '').replace(IMAGE_REQUEST, 
 
 export function classifyByRules(prompt, { hasReference = false } = {}) {
   const family = hasReference ? 'reference_edit' : (RULES.find(([, re]) => re.test(prompt))?.[0] || 'general');
-  return { family, tier: PREMIUM.test(prompt) ? 'premium' : 'budget', source: 'rules' };
+  return { family, tier: DEFAULT_TIER, source: 'rules' };
 }
 
 const SYSTEM = `Classify an image-generation prompt. Reply with JSON only:
-{"family": one of ${JSON.stringify(FAMILIES.filter(f => f !== 'reference_edit'))}, "tier_hint": "budget" | "premium"}
+{"family": one of ${JSON.stringify(FAMILIES.filter(f => f !== 'reference_edit'))}}
 vector = SVG/logo/icon/line art; text_in_image = the image must contain legible words (posters, signs, infographics);
-design = illustration, UI, patterns, branding; photoreal = photographs or realistic scenes; general = anything else.
-tier_hint is premium only when the prompt asks for top quality, fine detail or print use.`;
+design = illustration, UI, patterns, branding; photoreal = photographs or realistic scenes; general = anything else.`;
 
 // Parse the model's reply; anything unusable returns null so the rules decide.
 export function parseClassification(text) {
@@ -38,9 +38,8 @@ export function parseClassification(text) {
   try {
     const j = JSON.parse(m[0]);
     const family = String(j.family || '').toLowerCase().trim();
-    const tier = String(j.tier_hint || j.tier || '').toLowerCase().trim();
     if (!FAMILIES.includes(family)) return null;
-    return { family, tier: TIERS.includes(tier) ? tier : 'budget', source: 'model' };
+    return { family, tier: DEFAULT_TIER, source: 'model' };
   } catch {
     return null;
   }
@@ -49,7 +48,7 @@ export function parseClassification(text) {
 // complete(system, user) -> Promise<string>; omit it to use the rules only.
 export async function classifyIntent(prompt, { complete, hasReference = false, family, tier } = {}) {
   let picked = null;
-  if (hasReference) picked = { family: 'reference_edit', tier: 'budget', source: 'reference' };
+  if (hasReference) picked = { family: 'reference_edit', tier: DEFAULT_TIER, source: 'reference' };
   else if (complete && !family) {
     try { picked = parseClassification(await complete(SYSTEM, prompt)); } catch { /* fall through to rules */ }
   }

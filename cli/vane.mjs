@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FAMILIES, TIERS, VIAS } from './image/catalogue.mjs';
 import { imageSubject, isImageRequest } from './image/intent.mjs';
-import { ASPECT_RATIOS, DEFAULT_TEXT_MODEL, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
+import { ASPECT_RATIOS, DEFAULT_IMAGES, DEFAULT_TEXT_MODEL, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
 import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient, findOpenRouterKey } from './image/openrouter.mjs';
 
 // The defaults for every Fane tool (scripts/ import this object).
@@ -38,7 +38,7 @@ const USAGE = `Usage: vane "<question>" [options]
        vane --add-model <openrouter-slug> [--provider <name>]
        vane --remove-model <slug> [--provider <name>]
        vane --doctor
-       vane --image "<prompt>" [-n 2] [--tier budget|premium] [--family <f>] [--aspect 1:1] [--out-dir dir]
+       vane --image "<prompt>" [-n ${DEFAULT_IMAGES}] [--tier ${TIERS.join('|')}] [--family <f>] [--aspect 1:1] [--out-dir dir]
 
 Options:
   -m, --model <id>       Chat model key or name (default: ${DEFAULTS.model}).
@@ -68,12 +68,14 @@ Image generation (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane):
       --image            Generate images from the prompt instead of searching. Questions that
                          start like "create/draw/generate an image of ..." do this automatically
       --no-auto-image    Search even when the question asks for an image
-  -n, --count <n>        Images to make, one model per lab where possible (default 2, max ${MAX_IMAGES})
+  -n, --count <n>        Images to make, each from a different model (labs differ where possible), each
+                         with its own fallback models (default ${DEFAULT_IMAGES}, max ${MAX_IMAGES})
       --via <v>          chat (models that draw inside a chat reply: Gemini, GPT) | images (pure image
                          generators: Flux, Recraft, Seedream, ...); default: whichever fits best
       --image-model <id> Use exactly these models (repeatable or comma list); see --list-image-models
       --list-image-models [filter]  List image models with price, kind (chat/images) and families
-      --tier <t>         budget (cheapest models) | premium (most capable); default from the prompt
+      --tier <t>         value (most capable at or below the median price; default) | budget (cheapest)
+                         | premium (most capable)
       --family <f>       ${FAMILIES.join(' | ')}; default from the prompt
       --aspect <r>       ${ASPECT_RATIOS.join(' | ')} (default 1:1)
       --size <s>         ${IMAGE_SIZES.join(' | ')} (models that support it)
@@ -113,7 +115,7 @@ export function parseCli(argv) {
       provider: { type: 'string' },
       doctor: { type: 'boolean', default: false },
       image: { type: 'boolean', default: false },
-      count: { type: 'string', short: 'n' }, // default: 2, or one per --image-model
+      count: { type: 'string', short: 'n' }, // default: DEFAULT_IMAGES, or one per --image-model
       via: { type: 'string' },
       'image-model': { type: 'string', multiple: true, default: [] },
       'list-image-models': { type: 'boolean', default: false },

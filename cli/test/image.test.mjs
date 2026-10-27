@@ -61,10 +61,25 @@ test('budget picks cheapest from distinct labs; premium picks most capable', () 
   const b = selectModels(CAT, { family: 'general', tier: 'budget', count: 2 });
   assert.equal(b.primaries[0].id, 'black-forest-labs/flux-3-image-klein');
   assert.notEqual(b.primaries[0].lab, b.primaries[1].lab);
-  assert.ok(b.fallbacks.length >= 4);
+  assert.ok(b.fallbacks.flat().length >= 4);
   const p = selectModels(CAT, { family: 'general', tier: 'premium', count: 3 });
   assert.ok(p.primaries.some(m => m.id === 'google/gemini-3-pro-image'));
   assert.equal(new Set(p.primaries.map(m => m.lab)).size, 3);
+});
+
+test('value (default): most capable at or below the median price, then cheapest above it', () => {
+  // general prices: klein 0.0025, grok 0.01, gpt-mini 0.0103 | flux-3 0.0126, gemini flash 0.077, pro 0.155
+  const v = selectModels(CAT, { family: 'general' });
+  assert.deepEqual(v.primaries.map(m => m.id), ['x-ai/grok-imagine-image-2.0', 'openai/gpt-5-image-mini', 'black-forest-labs/flux-3-image-klein', 'google/gemini-3.1-flash-image']);
+  assert.equal(new Set(v.primaries.map(m => m.lab)).size, 4);
+});
+
+test('every image has its own fallback chain; no model is used twice', () => {
+  const s = selectModels(CAT, { family: 'general', count: 2 });
+  assert.equal(s.fallbacks.length, 2);
+  assert.ok(s.fallbacks.every(chain => chain.length >= 1));
+  const ids = [...s.primaries, ...s.fallbacks.flat()].map(m => m.id);
+  assert.equal(new Set(ids).size, ids.length);
 });
 
 test('SVG models only ever serve the vector family, which never widens', () => {
@@ -80,7 +95,7 @@ test('reference images need models that accept image input', () => {
 
 test('style/edit models that require references are used only when references are given', () => {
   const cat = buildCatalogue([...ENTRIES, entry('recraft/recraft-v4-styles-vector-cheap', { pricing: { prompt: '0', image_output: '0.0000001' } }), entry('krea/k3-edit', { pricing: { prompt: '0', image: '0.0001' } })]);
-  const ids = (sel) => [...sel.primaries, ...sel.fallbacks].map(m => m.id);
+  const ids = (sel) => [...sel.primaries, ...sel.fallbacks.flat()].map(m => m.id);
   assert.ok(!ids(selectModels(cat, { family: 'vector', count: 4 })).includes('recraft/recraft-v4-styles-vector-cheap'));
   assert.ok(!ids(selectModels(cat, { family: 'general', count: 8 })).includes('krea/k3-edit'));
   assert.ok(ids(selectModels(cat, { family: 'reference_edit', count: 8, needsReference: true })).includes('krea/k3-edit'));
@@ -88,10 +103,10 @@ test('style/edit models that require references are used only when references ar
 
 // ---- intent -------------------------------------------------------------
 
-test('rules classify family and tier', () => {
-  assert.deepEqual(classifyByRules('minimal SVG logo for a coffee shop'), { family: 'vector', tier: 'budget', source: 'rules' });
+test('rules classify the family; the tier is always value', () => {
+  assert.deepEqual(classifyByRules('minimal SVG logo for a coffee shop'), { family: 'vector', tier: 'value', source: 'rules' });
   assert.equal(classifyByRules('poster that says "Open Late"').family, 'text_in_image');
-  assert.equal(classifyByRules('cinematic photo of a fox, highly detailed').tier, 'premium');
+  assert.equal(classifyByRules('cinematic photo of a fox, highly detailed').tier, 'value');
   assert.equal(classifyByRules('a cat', { hasReference: true }).family, 'reference_edit');
 });
 
@@ -105,7 +120,7 @@ test('image requests are recognised; questions are not', () => {
 });
 
 test('model classification is parsed and validated; failures fall back to rules', async () => {
-  assert.deepEqual(parseClassification('ok {"family":"design","tier_hint":"premium"}'), { family: 'design', tier: 'premium', source: 'model' });
+  assert.deepEqual(parseClassification('ok {"family":"design","tier_hint":"premium"}'), { family: 'design', tier: 'value', source: 'model' });
   assert.equal(parseClassification('{"family":"nonsense"}'), null);
   assert.equal((await classifyIntent('SVG icon', { complete: async () => { throw new Error('402'); } })).source, 'rules');
   assert.deepEqual(await classifyIntent('anything', { family: 'photoreal', tier: 'premium' }), { family: 'photoreal', tier: 'premium', source: 'rules' });
@@ -199,7 +214,7 @@ function fakeClient({ fail = {}, refuseUnless, completeReply = 'an enhanced prom
   return {
     calls,
     imageModels: async () => ENTRIES,
-    complete: async (model, system) => (system.startsWith('Classify') ? '{"family":"general","tier_hint":"budget"}' : completeReply),
+    complete: async (model, system) => (system.startsWith('Classify') ? '{"family":"general"}' : completeReply),
     chat: async (body) => {
       guard('chat', body, body.messages[0].content[0].text);
       return { choices: [{ message: { content: '', images: [{ image_url: { url: PNG_URL } }] } }] };
@@ -213,7 +228,7 @@ function fakeClient({ fail = {}, refuseUnless, completeReply = 'an enhanced prom
 
 test('pipeline: enhance, two labs in parallel, Image API for pure generators', async () => {
   const client = fakeClient();
-  const r = await createImageGenerator({ client, download: async () => null, textModel: 'x/cheap' })({ prompt: 'a fox', count: 2, aspect: '16:9', size: '2K' });
+  const r = await createImageGenerator({ client, download: async () => null, textModel: 'x/cheap' })({ prompt: 'a fox', count: 2, tier: 'budget', aspect: '16:9', size: '2K' });
   assert.ok(r.ok && r.complete);
   assert.equal(r.enhancedPrompt, 'an enhanced prompt');
   assert.equal(r.images.length, 2);
@@ -247,9 +262,9 @@ test('pipeline: chat completions "use the Image API" error switches endpoint', a
 
 test('selection: via limits the choice to chat models or to Image API models', () => {
   const chat = selectModels(CAT, { family: 'general', count: 4, via: 'chat' });
-  assert.ok(chat.primaries.length >= 2 && [...chat.primaries, ...chat.fallbacks].every(m => m.modalities.includes('text')));
+  assert.ok(chat.primaries.length >= 2 && [...chat.primaries, ...chat.fallbacks.flat()].every(m => m.modalities.includes('text')));
   const img = selectModels(CAT, { family: 'photoreal', count: 4, via: 'images' });
-  assert.ok([...img.primaries, ...img.fallbacks].every(m => !m.modalities.includes('text')));
+  assert.ok([...img.primaries, ...img.fallbacks.flat()].every(m => !m.modalities.includes('text')));
 });
 
 test('pipeline: --via chat draws with chat models and keeps their text reply', async () => {
@@ -318,12 +333,33 @@ test('pipeline: vector requests ask the Image API for SVG', async () => {
   assert.equal(client.calls[0].body.output_format, 'svg');
 });
 
-test('pipeline: a failed primary is replaced by a fallback', async () => {
-  const client = fakeClient({ fail: { 'black-forest-labs/flux-3-image-klein': { msg: '500 upstream error', status: 500 } } });
+test('pipeline: a failed primary is replaced by its own fallback, in its slot', async () => {
+  const client = fakeClient({ fail: { 'x-ai/grok-imagine-image-2.0': { msg: '500 upstream error', status: 500 } } });
   const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'a fox', count: 2, enhance: false });
   assert.ok(r.complete);
-  assert.ok(!r.images.some(i => i.model === 'black-forest-labs/flux-3-image-klein'));
+  assert.deepEqual(r.models, ['x-ai/grok-imagine-image-2.0', 'openai/gpt-5-image-mini']);
+  assert.equal(r.images[1].model, 'openai/gpt-5-image-mini');
+  assert.ok(!['x-ai/grok-imagine-image-2.0', 'openai/gpt-5-image-mini'].includes(r.images[0].model));
   assert.match(r.errors[0], /500 upstream error/);
+});
+
+test('pipeline: 4 images from 4 different models by default', async () => {
+  const r = await createImageGenerator({ client: fakeClient(), download: async () => null })({ prompt: 'a fox', enhance: false });
+  assert.equal(r.images.length, 4);
+  assert.equal(new Set(r.images.map(i => i.model)).size, 4);
+});
+
+test('pipeline: a rewrite retries only the missing images', async () => {
+  const client = fakeClient();
+  const images = client.images;
+  client.images = async (body) => {
+    if (body.model !== 'black-forest-labs/flux-3-image-klein' && !body.prompt.includes('original')) throw Object.assign(new Error('400 Request moderated: content policy'), { status: 400 });
+    return images(body);
+  };
+  // images-API models by value: grok, klein, flux-3. Chains: [grok, flux-3] (both refuse) and [klein]
+  const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'Mickey Mouse surfing', count: 2, enhance: false, via: 'images' });
+  assert.ok(r.complete);
+  assert.equal(client.calls.filter(c => c.body.model === 'black-forest-labs/flux-3-image-klein').length, 1); // its image was kept
 });
 
 test('pipeline: stops at once on 402 (no fallbacks, no retries)', async () => {
