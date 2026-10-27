@@ -7,7 +7,7 @@
 import { readFile } from 'node:fs/promises';
 import { TIER_FOR_MODE } from './catalogue.mjs';
 import { isImageEdit, isImageRequest, parseImageOptions, pickReferenceIndex } from './intent.mjs';
-import { renderProgress, renderResult, tagged } from './present.mjs';
+import { quiet, renderProgress, renderResult, tagged } from './present.mjs';
 import { DEFAULT_TEXT_MODEL, createImageGenerator } from './generate.mjs';
 import { createImageStore, storeDirFor, storedUrlsIn } from './store.mjs';
 import { createOpenRouterClient, findOpenRouterKey } from './openrouter.mjs';
@@ -39,7 +39,7 @@ async function earlierImages(query, { history, lastAnswer, store }) {
 export async function handleImageRequest(query, { emit, update, configPath, mode, history, lastAnswer, store = configPath ? createImageStore({ dir: storeDirFor(configPath) }) : null, log = (m) => console.log(`fane: ${m}`), readConfig, generator } = {}) {
   const earlier = await earlierImages(query, { history, lastAnswer, store });
   if (!earlier && !isImageRequest(query)) return false;
-  const id = emit(tagged(earlier ? '_Editing the image…_' : '_Generating images…_'));
+  const id = emit(tagged(quiet([earlier ? 'Editing the image…' : 'Generating images…'])));
   let apiKey = null;
   try {
     const raw = readConfig ? await readConfig() : await readFile(configPath, 'utf8');

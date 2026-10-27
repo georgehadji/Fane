@@ -8,12 +8,21 @@ const img = (n, price, text = null) => ({ dataUrl: URL, model: `lab/m${n}`, name
 
 test('grid, captions, summary line, escaped text', () => {
   const md = renderResult({ images: [img(1, 0.01), img(2, 0.02, '<b>hi</b>')], requested: 2, complete: true, errors: [], elapsedMs: 105000 }, 'draw a "fox" <script>');
-  assert.match(md, /^<div style="display:grid;grid-template-columns:repeat\(2,1fr\)/);
+  assert.match(md, /^<div style="display:grid;grid-template-columns:repeat\(2,1fr\);gap:20px 12px"/);
   assert.equal(md.match(/<figure /g).length, 2);
   assert.match(md, /alt="Image 2 of 2: a &quot;fox&quot; &lt;script&gt; \(Model 2\)"/);
   assert.match(md, /&lt;b&gt;hi&lt;\/b&gt;/);
   assert.doesNotMatch(md, /<script>|<b>hi/);
-  assert.match(md, /\n\n2 images · ~\$0\.030 · 1m 45s$/);
+  assert.match(md, /\n\n<p style="font-size:14px;opacity:0\.7">2 images · ≈ \$0\.030 · 1m 45s<\/p>$/);
+});
+
+test('typography: captions, notes and summary are quiet, never italic, quoted or spaced-dash', () => {
+  const md = renderResult({ images: [img(1, 0.01, 'A lighthouse at dawn.'), img(2, 0.02)], requested: 4, complete: false, errors: ['a: 503 upstream'], rewrittenPrompt: 'a fox', editedImage: 1, elapsedMs: 9000 }, 'draw a fox');
+  assert.doesNotMatch(md, /<em>|<i>|font-style|^> |\n> | — |~\$/); // no italics, no blockquotes, no spaced em dash, no tilde
+  assert.match(md, /<figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0\.4em">Model 1<\/span><span style="opacity:0\.7">· ≈ \$0\.010<\/span><br><span style="opacity:0\.7">A lighthouse at dawn\.<\/span><\/figcaption>/);
+  const quiet = md.slice(md.lastIndexOf('<p style='));
+  assert.match(quiet, /^<p style="font-size:14px;opacity:0\.7">2 images · ≈ \$0\.030 · 9s<br>Edited image 1 of the previous answer\.<br>Rewritten after a refusal: “a fox”<br>Made 2 of 4 images\./);
+  assert.equal(quiet.split('<p ').length - 1, 1); // one quiet block, not one paragraph per line
 });
 
 test('a URL that is not an image data URL never reaches the HTML', () => {
@@ -25,14 +34,16 @@ test('a URL that is not an image data URL never reaches the HTML', () => {
 
 test('an incomplete set says how many and why', () => {
   const md = renderResult({ images: [img(1, 0.01)], requested: 4, complete: false, errors: ['a: 503 upstream'], rewrittenPrompt: 'a <b>fox</b>' }, 'draw a fox');
-  assert.match(md, /> Rewritten after a refusal: a &lt;b&gt;fox&lt;\/b&gt;/);
-  assert.match(md, /> Made 1 of 4 images\. The image models were busy or unreachable\. Try again in a minute\./);
+  assert.match(md, /Rewritten after a refusal: “a &lt;b&gt;fox&lt;\/b&gt;”/);
+  assert.match(md, /Made 1 of 4 images\. The image models were busy or unreachable\. Try again in a minute\./);
 });
 
 test('failures are explained in words, raw errors folded away', () => {
   const credits = renderResult({ images: [], errors: ['a: 402 Insufficient credits'], requested: 2 }, 'draw a fox');
   assert.match(credits, /^\*\*No images this time\.\*\* Your OpenRouter account is out of credits\. Add credits at https:\/\/openrouter\.ai\/credits/);
-  assert.match(credits, /<details><summary>Details<\/summary><ul><li>a: 402 Insufficient credits<\/li>/);
+  assert.match(credits, /<details><summary>Details<\/summary><ul style="font-size:13px"><li><code style="font-size:inherit;font-weight:400">a: 402 Insufficient credits<\/code><\/li>/);
+  assert.match(explainFailure(['x: 401 bad key']).next, /Vane’s Settings/); // curly apostrophe
+  for (const e of [['402 x'], ['401 x'], ['content policy'], ['503 x'], []]) assert.doesNotMatch(Object.values(explainFailure(e)).join(' '), /'/);
 });
 
 test('explainFailure picks the cause, credits before anything else', () => {
@@ -47,7 +58,11 @@ test('helpers', () => {
   assert.equal(altText('a fox', 2, 4, 'Seedream'), 'Image 2 of 4: a fox (Seedream)');
   assert.equal(modelLabel({ name: 'Recraft: Recraft V4.1', model: 'recraft/x' }), 'Recraft V4.1');
   assert.equal(modelLabel({ model: 'recraft/x' }), 'recraft/x');
-  assert.equal(escapeHtml(`<a href="x">&'`), '&lt;a href=&quot;x&quot;&gt;&amp;&#39;');
+  assert.equal(escapeHtml(`<a href="x">&'`), '&lt;a href=&quot;x&quot;&gt;&amp;\'');
+  assert.equal(escapeHtml("don't stop 'now'"), "don’t stop 'now'"); // curly only inside a word
+  assert.match(renderResult({ images: [img(1, 0.01)], requested: 1, complete: true, errors: [] }, "draw a duck's nest").replace(/\n/g, ' '), /Image 1 of 1: a duck’s nest/);
+  assert.match(renderResult({ images: [img(1, 0.01)], requested: 1, complete: false, errors: [], rewrittenPrompt: "don't" }, 'draw').replace(/\n/g, ' '), /“don’t”/);
+  assert.doesNotMatch(renderResult({ images: [img(1, 0.01, "it's")], requested: 1, complete: true, errors: [] }, 'draw'), /&#39;/);
   assert.equal(formatDuration(12400), '12s');
   assert.equal(formatDuration(61000), '1m 1s');
 });

@@ -419,8 +419,8 @@ test('hook ignores questions and answers image requests with markdown images', a
   assert.equal('count' in seen[0] || 'aspect' in seen[0], false);
   const md = blocks.get('b1');
   assert.match(md, /<img src="data:image\/png;base64,[^"]+" alt="Image 1 of 1: donald duck in a playground \(FLUX\.2 Pro\)"/);
-  assert.match(md, /<em>FLUX\.2 Pro · ~\$0\.002<\/em>/);
-  assert.match(md, /> Made 1 of 2 images\./);
+  assert.match(md, /<span style="font-weight:500;margin-right:0\.4em">FLUX\.2 Pro<\/span><span style="opacity:0\.7">· ≈ \$0\.002<\/span>/);
+  assert.match(md, /Made 1 of 2 images\./);
 });
 
 test('hook shows progress while images land, then the grid; words in the prompt set count and shape', async () => {
@@ -438,8 +438,8 @@ test('hook shows progress while images land, then the grid; words in the prompt 
   await handleImageRequest('create 2 images of a fox, widescreen', { ...io, generator });
   assert.equal(seen[0].count, 2);
   assert.equal(seen[0].aspect, '16:9');
-  assert.equal(shown[0], '_Generating images… 1 of 2 ready_\n\n✓ One\n\n<!--fane:image-answer-->');
-  assert.equal(shown[1], '_Generating images… 2 of 2 ready_\n\n✓ One · ✓ Two\n\n<!--fane:image-answer-->');
+  assert.equal(shown[0], '<p style="font-size:14px;opacity:0.7">Generating images… 1 of 2 ready<br>✓ One</p>\n\n<!--fane:image-answer-->');
+  assert.equal(shown[1], '<p style="font-size:14px;opacity:0.7">Generating images… 2 of 2 ready<br>✓ One · ✓ Two</p>\n\n<!--fane:image-answer-->');
   assert.match(shown[2], /^<div style="display:grid/);
   assert.ok(shown.every(md => md.endsWith('<!--fane:image-answer-->')) && firstEmit.endsWith('<!--fane:image-answer-->')); // every answer carries the marker
 });
@@ -468,7 +468,7 @@ test('hook: finished images are stored on arrival, shown at once, and linked onc
   };
   await handleImageRequest('draw a fox', { emit: () => 'b', update: (id, md) => shown.push(md), log: () => {}, generator, store });
   assert.equal(stored.length, 2); // once per image, not again for the final answer
-  assert.match(shown[0], /^<div style="display:grid[^]*1 of 2 ready_\n\n<!--fane:image-answer-->$/);
+  assert.match(shown[0], /^<div style="display:grid[^]*1 of 2 ready<\/p>\n\n<!--fane:image-answer-->$/);
   assert.equal(shown[0].split('<img ').length - 1, 1);
   assert.equal(shown[1].split('<img ').length - 1, 2);
   assert.ok(shown[1].indexOf('/api/uploads?fane-image=2') < shown[1].indexOf('/api/uploads?fane-image=1')); // slot order, not arrival order
@@ -499,7 +499,7 @@ test('hook: a follow-up edit after Fane images uses the earlier image as the ref
   assert.equal(await handleImageRequest('make the second one a watercolour', { ...io, history }), true);
   assert.deepEqual(calls[0].references, [`data:image/png;base64,FROM-${link('b').slice(-9)}`]);
   assert.equal(calls[0].enhance, false);
-  assert.match(shown.at(-1), /> Edited image 2 of the previous answer\./);
+  assert.match(shown.at(-1), /Edited image 2 of the previous answer\./);
 
   // the browser's history can hold a partial copy of the answer: Vane's database copy wins, and
   // the history is used only when lastAnswer is missing, fails or has nothing

@@ -56,7 +56,7 @@ export function heuristicRewrite(prompt) {
 // provider errors stay available next to it.
 const FAILURE_CAUSES = [
   { test: (e) => /\b402\b|insufficient credits|payment required/i.test(e), summary: 'Your OpenRouter account is out of credits.', next: 'Add credits at https://openrouter.ai/credits, then ask again.' },
-  { test: (e) => /\b40[13]\b|invalid api key|unauthorized|no auth/i.test(e), summary: 'OpenRouter did not accept the API key.', next: "Check the OpenRouter key in Vane's Settings → Models." },
+  { test: (e) => /\b40[13]\b|invalid api key|unauthorized|no auth/i.test(e), summary: 'OpenRouter did not accept the API key.', next: 'Check the OpenRouter key in Vane’s Settings → Models.' },
   { test: isPolicyError, summary: 'The image models refused this prompt.', next: 'Describe the subject in your own words, without brand or character names.' },
   { test: (e) => /\b429\b|\b5\d\d\b|rate.?limit|timed? ?out|no endpoints|unavailable|fetch failed|network/i.test(e), summary: 'The image models were busy or unreachable.', next: 'Try again in a minute.' },
 ];

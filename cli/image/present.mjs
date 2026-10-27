@@ -2,6 +2,9 @@
 // Vane renders raw HTML in answers and keeps data:image URLs, but drops `width` from inline
 // styles, so the image width is the HTML attribute. Everything that came from a prompt or a
 // model is escaped before it goes into HTML.
+// Typography: the answer keeps Vane's body text; everything Fane adds around it (captions, status,
+// summary, notes, raw errors) is smaller and dimmed with `opacity` (so it suits both themes), in
+// regular or medium weight, never italic (italic sans barely stands out) and never quoted.
 import { imageSubject } from './intent.mjs';
 import { explainFailure } from './policy.mjs';
 import { isStoredUrl } from './store.mjs';
@@ -12,7 +15,15 @@ import { isStoredUrl } from './store.mjs';
 export const ANSWER_MARKER = '<!--fane:image-answer-->';
 export const tagged = (markdown) => `${markdown}\n\n${ANSWER_MARKER}`;
 
-export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const NBSP = ' ';
+const DIM = 'opacity:0.7';
+
+// Status, summary and notes: one small dimmed block, one line each. Lines are already escaped.
+export const quiet = (lines) => `<p style="font-size:14px;${DIM}">${lines.filter(Boolean).join('<br>')}</p>`;
+
+// & < > " are escaped. An apostrophe needs no escape (Vane shows &#39; literally), and one inside a
+// word is the curly one: don't -> don’t.
+export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]).replace(/(\w)'(\w)/g, '$1’$2');
 
 export const altText = (subject, i, n, name) => `Image ${i} of ${n}: ${subject}${name ? ` (${name})` : ''}`;
 
@@ -28,19 +39,24 @@ export function formatDuration(ms) {
   return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
 }
 
+// Caption: the model in medium weight, its price dimmed; the model's own words, if any, on the next
+// line. The gap to the image (6px) is smaller than the gap between rows (20px), so a caption
+// belongs to the image above it.
 const figure = (img, subject, i, n) => {
-  const price = img.pricePerImage ? ` · ~$${img.pricePerImage.toFixed(3)}` : '';
-  const words = img.text ? ` — ${escapeHtml(img.text)}` : '';
-  return `<figure style="margin:0"><a href="${src(img)}" target="_blank" rel="noopener"><img src="${src(img)}" alt="${escapeHtml(altText(subject, i, n, modelLabel(img)))}" width="100%" loading="lazy" style="height:auto;border-radius:8px"></a><figcaption><em>${escapeHtml(modelLabel(img))}${price}</em>${words}</figcaption></figure>`;
+  // Vane's HTML parser trims the space at the edge of a span, so the gap after the name is a margin.
+  const price = img.pricePerImage ? `· ≈${NBSP}$${img.pricePerImage.toFixed(3)}` : '';
+  const words = img.text ? `<br><span style="${DIM}">${escapeHtml(img.text)}</span>` : '';
+  return `<figure style="margin:0"><a href="${src(img)}" target="_blank" rel="noopener"><img src="${src(img)}" alt="${escapeHtml(altText(subject, i, n, modelLabel(img)))}" width="100%" loading="lazy" style="display:block;margin:0;height:auto;border-radius:8px"></a><figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0.4em">${escapeHtml(modelLabel(img))}</span><span style="${DIM}">${price}</span>${words}</figcaption></figure>`;
 };
 
+// The raw provider errors are code-like: small and in code type.
 function failure(errors) {
   const { summary, next } = explainFailure(errors);
-  const raw = errors.slice(0, 6).map(e => `<li>${escapeHtml(e)}</li>`).join('');
-  return { text: `${summary} ${next}`, details: raw ? `<details><summary>Details</summary><ul>${raw}</ul></details>` : '' };
+  const raw = errors.slice(0, 6).map(e => `<li><code style="font-size:inherit;font-weight:400">${escapeHtml(e)}</code></li>`).join('');
+  return { text: `${summary} ${next}`, details: raw ? `<details><summary>Details</summary><ul style="font-size:13px">${raw}</ul></details>` : '' };
 }
 
-const grid = (images, subject, n = images.length) => `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">${images.map((img, i) => figure(img, subject, i + 1, n)).join('')}</div>`;
+const grid = (images, subject, n = images.length) => `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:20px 12px">${images.map((img, i) => figure(img, subject, i + 1, n)).join('')}</div>`;
 
 // Shown while the models work. A finished image is stored the moment it lands, so it appears in
 // the answer at once (a link is tiny). One that could not be stored is only named: every answer
@@ -51,7 +67,7 @@ export function renderProgress(done, total, prompt = '') {
   const sorted = [...done].sort((x, y) => x.slot - y.slot);
   const shown = sorted.filter(i => isStoredUrl(i.url));
   const named = sorted.filter(i => !isStoredUrl(i.url)).map(i => `✓ ${escapeHtml(modelLabel(i))}`).join(' · ');
-  return [shown.length ? grid(shown, imageSubject(prompt), total) : null, `_Generating images… ${done.length} of ${total} ready_`, named || null].filter(Boolean).join('\n\n');
+  return [shown.length ? grid(shown, imageSubject(prompt), total) : null, quiet([`Generating images… ${done.length} of ${total} ready`, named])].filter(Boolean).join('\n\n');
 }
 
 export function renderResult(result, prompt) {
@@ -62,11 +78,12 @@ export function renderResult(result, prompt) {
     return [`**No images this time.** ${f.text}`, f.details].filter(Boolean).join('\n\n');
   }
   const total = images.reduce((sum, i) => sum + (i.pricePerImage || 0), 0);
-  const summary = [`${images.length} image${images.length > 1 ? 's' : ''}`, total ? `~$${total.toFixed(3)}` : null, result.elapsedMs ? formatDuration(result.elapsedMs) : null].filter(Boolean).join(' · ');
+  const stay = (s) => s.replace(/ /g, NBSP); // a number and its unit stay on one line
+  const summary = [stay(`${images.length} image${images.length > 1 ? 's' : ''}`), total ? `≈${NBSP}$${total.toFixed(3)}` : null, result.elapsedMs ? stay(formatDuration(result.elapsedMs)) : null].filter(Boolean).join(' · ');
   const notes = [
     result.editedImage ? `Edited image ${result.editedImage} of the previous answer.` : null,
-    result.rewrittenPrompt ? `Rewritten after a refusal: ${escapeHtml(result.rewrittenPrompt)}` : null,
+    result.rewrittenPrompt ? `Rewritten after a refusal: “${escapeHtml(result.rewrittenPrompt)}”` : null,
     !result.complete ? `Made ${images.length} of ${result.requested} images. ${failure(result.errors).text}` : null,
-  ].filter(Boolean).map(n => `> ${n}`);
-  return [grid(images, subject), summary, ...notes].join('\n\n');
+  ];
+  return [grid(images, subject), quiet([summary, ...notes])].join('\n\n');
 }
