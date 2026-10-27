@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { pricePerImage, toModelInfo, buildCatalogue, capability, selectModels, emitsSvg } from '../image/catalogue.mjs';
+import { pricePerImage, toModelInfo, buildCatalogue, capability, selectModels, emitsSvg, TIER_FOR_MODE } from '../image/catalogue.mjs';
 import { classifyByRules, classifyIntent, parseClassification, isImageRequest, imageSubject, parseImageOptions } from '../image/intent.mjs';
 import { heuristicRewrite, shouldRetry, isPolicyError } from '../image/policy.mjs';
 import { sniffMime, toDataUrl, collectImageCandidates, decodeDataUrl } from '../image/extract.mjs';
@@ -59,19 +59,31 @@ test('capability: tier words and versions, whole-word match', () => {
 
 test('budget picks cheapest from distinct labs; premium picks most capable', () => {
   const b = selectModels(CAT, { family: 'general', tier: 'budget', count: 2 });
-  assert.equal(b.primaries[0].id, 'black-forest-labs/flux-3-image-klein');
+  assert.deepEqual(b.primaries.map(m => m.id).sort(), ['black-forest-labs/flux-3-image-klein', 'x-ai/grok-imagine-image-2.0']);
   assert.notEqual(b.primaries[0].lab, b.primaries[1].lab);
   assert.ok(b.fallbacks.flat().length >= 4);
   const p = selectModels(CAT, { family: 'general', tier: 'premium', count: 3 });
   assert.ok(p.primaries.some(m => m.id === 'google/gemini-3-pro-image'));
-  assert.equal(new Set(p.primaries.map(m => m.lab)).size, 3);
+  assert.equal(new Set(p.primaries.map(m => m.id)).size, 3);
 });
 
-test('value (default): most capable at or below the median price, then cheapest above it', () => {
-  // general prices: klein 0.0025, grok 0.01, gpt-mini 0.0103 | flux-3 0.0126, gemini flash 0.077, pro 0.155
+test('value (default): the middle price band, borrowing from the nearest bands for the rest', () => {
+  // general prices: klein 0.0025, grok 0.01 | gpt-mini 0.0103, flux-3 0.0126 | gemini flash 0.077, pro 0.155
   const v = selectModels(CAT, { family: 'general' });
-  assert.deepEqual(v.primaries.map(m => m.id), ['x-ai/grok-imagine-image-2.0', 'openai/gpt-5-image-mini', 'black-forest-labs/flux-3-image-klein', 'google/gemini-3.1-flash-image']);
+  assert.deepEqual(v.primaries.map(m => m.id).slice(0, 2).sort(), ['black-forest-labs/flux-3-image', 'openai/gpt-5-image-mini']);
   assert.equal(new Set(v.primaries.map(m => m.lab)).size, 4);
+});
+
+test('the three tiers (Speed, Balanced, Quality) use different models, each with fallbacks', () => {
+  const pick = (tier) => selectModels(CAT, { family: 'general', tier, count: 2 });
+  const [speed, balanced, quality] = ['budget', 'value', 'premium'].map(pick);
+  const ids = (s) => s.primaries.map(m => m.id);
+  assert.deepEqual(ids(speed).sort(), ['black-forest-labs/flux-3-image-klein', 'x-ai/grok-imagine-image-2.0']);
+  assert.deepEqual(ids(balanced).sort(), ['black-forest-labs/flux-3-image', 'openai/gpt-5-image-mini']);
+  assert.deepEqual(ids(quality).sort(), ['google/gemini-3-pro-image', 'google/gemini-3.1-flash-image']);
+  for (const s of [speed, balanced, quality]) assert.ok(s.fallbacks.length === 2 && s.fallbacks.every(chain => chain.length >= 1));
+  assert.equal(new Set([...ids(speed), ...ids(balanced), ...ids(quality)]).size, 6);
+  assert.deepEqual(TIER_FOR_MODE, { speed: 'budget', balanced: 'value', quality: 'premium' });
 });
 
 test('every image has its own fallback chain; no model is used twice', () => {
@@ -334,12 +346,12 @@ test('pipeline: vector requests ask the Image API for SVG', async () => {
 });
 
 test('pipeline: a failed primary is replaced by its own fallback, in its slot', async () => {
-  const client = fakeClient({ fail: { 'x-ai/grok-imagine-image-2.0': { msg: '500 upstream error', status: 500 } } });
+  const client = fakeClient({ fail: { 'black-forest-labs/flux-3-image': { msg: '500 upstream error', status: 500 } } });
   const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'a fox', count: 2, enhance: false });
   assert.ok(r.complete);
-  assert.deepEqual(r.models, ['x-ai/grok-imagine-image-2.0', 'openai/gpt-5-image-mini']);
+  assert.deepEqual(r.models, ['black-forest-labs/flux-3-image', 'openai/gpt-5-image-mini']);
   assert.equal(r.images[1].model, 'openai/gpt-5-image-mini');
-  assert.ok(!['x-ai/grok-imagine-image-2.0', 'openai/gpt-5-image-mini'].includes(r.images[0].model));
+  assert.ok(!['black-forest-labs/flux-3-image', 'openai/gpt-5-image-mini'].includes(r.images[0].model));
   assert.match(r.errors[0], /500 upstream error/);
 });
 
@@ -428,6 +440,14 @@ test('hook shows progress while images land, then the grid; words in the prompt 
   assert.equal(shown[0], '_Generating images… 1 of 2 ready_\n\n✓ One');
   assert.equal(shown[1], '_Generating images… 2 of 2 ready_\n\n✓ One · ✓ Two');
   assert.match(shown[2], /^<div style="display:grid/);
+});
+
+test("hook maps Vane's optimization mode to the price tier", async () => {
+  const seen = [];
+  const generator = async (args) => { seen.push(args.tier); return { images: [], requested: 4, complete: false, errors: [] }; };
+  const io = { emit: () => 'b', update: () => {}, generator };
+  for (const mode of ['speed', 'balanced', 'quality', undefined, 'other']) await handleImageRequest('draw a fox', { ...io, mode });
+  assert.deepEqual(seen, ['budget', 'value', 'premium', undefined, undefined]);
 });
 
 test('generate calls onProgress per image, and a throwing listener does not fail the run', async () => {

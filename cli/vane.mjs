@@ -75,8 +75,9 @@ Image generation (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane):
                          generators: Flux, Recraft, Seedream, ...); default: whichever fits best
       --image-model <id> Use exactly these models (repeatable or comma list); see --list-image-models
       --list-image-models [filter]  List image models with price, kind (chat/images) and families
-      --tier <t>         value (most capable at or below the median price; default) | budget (cheapest)
-                         | premium (most capable)
+      --tier <t>         value (default) | budget | premium: the middle, cheapest and dearest third of
+                         the family's models by price, so each tier uses different models. In Vane's
+                         web UI the mode picks it: Speed = budget, Balanced = value, Quality = premium
       --family <f>       ${FAMILIES.join(' | ')}; default from the prompt
       --aspect <r>       ${ASPECT_RATIOS.join(' | ')} (default 1:1, or as the prompt says: "widescreen", "16:9")
       --size <s>         ${IMAGE_SIZES.join(' | ')} (models that support it)

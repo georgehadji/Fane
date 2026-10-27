@@ -3,15 +3,17 @@
 // is answered with generated images instead of a text answer, using the same pipeline as
 // `vane --image` and the OpenRouter key from Vane's own provider settings.
 import { readFile } from 'node:fs/promises';
+import { TIER_FOR_MODE } from './catalogue.mjs';
 import { isImageRequest, parseImageOptions } from './intent.mjs';
 import { renderProgress, renderResult } from './present.mjs';
 import { DEFAULT_TEXT_MODEL, createImageGenerator } from './generate.mjs';
 import { createOpenRouterClient, findOpenRouterKey } from './openrouter.mjs';
 import { safeDownload } from './download.mjs';
 
+// mode is Vane's optimization mode (speed | balanced | quality), which picks the price tier.
 // emit(markdown) -> blockId, update(blockId, markdown). Returns false when the query is not an
 // image request (Vane then answers as usual). Dependencies are injectable for tests.
-export async function handleImageRequest(query, { emit, update, configPath, log = (m) => console.log(`fane: ${m}`), readConfig, generator } = {}) {
+export async function handleImageRequest(query, { emit, update, configPath, mode, log = (m) => console.log(`fane: ${m}`), readConfig, generator } = {}) {
   if (!isImageRequest(query)) return false;
   const id = emit('_Generating images…_');
   let apiKey = null;
@@ -31,7 +33,7 @@ export async function handleImageRequest(query, { emit, update, configPath, log 
   });
   const done = [];
   const onProgress = (p) => { done.push(p); update(id, renderProgress(done, p.total)); };
-  const result = await generate({ prompt: query, format: 'jpeg', ...parseImageOptions(query), onProgress });
+  const result = await generate({ prompt: query, format: 'jpeg', ...(TIER_FOR_MODE[mode] && { tier: TIER_FOR_MODE[mode] }), ...parseImageOptions(query), onProgress });
   update(id, renderResult(result, query));
   return true;
 }

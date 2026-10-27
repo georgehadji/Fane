@@ -12,6 +12,8 @@ export const TOKENS_PER_IMAGE = 1290;
 export const FAMILIES = ['vector', 'photoreal', 'text_in_image', 'design', 'general', 'reference_edit'];
 export const TIERS = ['value', 'budget', 'premium'];
 export const DEFAULT_TIER = 'value';
+// Vane's optimization mode picks the tier: Speed -> budget, Balanced -> value, Quality -> premium.
+export const TIER_FOR_MODE = { speed: 'budget', balanced: 'value', quality: 'premium' };
 export const FALLBACKS_PER_IMAGE = 4;
 // Aspect ratios Fane accepts, with the words that describe them to a model that ignores image_config.
 export const ASPECT_WORDS = { '1:1': 'square', '16:9': 'wide landscape', '9:16': 'tall portrait', '4:3': 'landscape', '3:4': 'portrait', '3:2': 'landscape', '2:3': 'portrait', '21:9': 'ultra-wide panorama' };
@@ -97,25 +99,33 @@ const byCapabilityDesc = (a, b) => {
 
 const byPrice = (a, b) => a.price - b.price;
 
-// Value for money: the most capable models priced at or below the family's median price,
-// then the pricier ones cheapest first. The median moves with the live catalogue.
-function byValue(pool) {
-  const prices = pool.map(m => m.price).sort((a, b) => a - b);
-  const mid = prices.length >> 1;
-  const median = prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
-  return [...pool.filter(m => m.price <= median).sort(byCapabilityDesc), ...pool.filter(m => m.price > median).sort(byPrice)];
+// Each tier owns a price band of the family: the cheapest third (budget), the middle third
+// (value), the dearest third (premium). The bands do not overlap, so the three tiers never
+// use the same primary. Inside the band the most capable models come first; the models of
+// the other bands follow, nearest band first, and become the fallbacks. The bands move with
+// the live catalogue.
+function split(pool, tier) {
+  const byP = [...pool].sort(byPrice);
+  const lo = Math.round(byP.length / 3), hi = Math.round((2 * byP.length) / 3);
+  const [from, to] = { budget: [0, lo], value: [lo, hi], premium: [hi, byP.length] }[tier];
+  const centre = (from + to - 1) / 2;
+  const band = byP.slice(from, to).sort(byCapabilityDesc);
+  const others = byP.map((m, i) => ({ m, d: Math.abs(i - centre) })).filter(({ m }) => !band.includes(m)).sort((a, b) => a.d - b.d).map(({ m }) => m);
+  return { band, others };
 }
 
-// Family members in tier order: best value, cheapest first (budget) or most capable first
-// (premium). SVG models are the only members of "vector" and never appear in any other
-// family: an SVG answer to a photo prompt is broken, not cheaper.
-export function candidates(catalogue, family, tier, needsReference, via) {
+// Family members in tier order. SVG models are the only members of "vector" and never appear
+// in any other family: an SVG answer to a photo prompt is broken, not cheaper.
+function tierPool(catalogue, family, tier, needsReference, via) {
   const wantSvg = family === 'vector';
   const pool = catalogue
     .filter(m => m.families.has(family) && emitsSvg(m) === wantSvg && (needsReference ? m.acceptsImageInput : !m.requiresReference) && (!via || viaOf(m) === via))
     .sort((a, b) => a.id.localeCompare(b.id)); // deterministic ties
-  if (tier === 'premium') return pool.sort(byCapabilityDesc);
-  return tier === 'budget' ? pool.sort(byPrice) : byValue(pool);
+  return split(pool, tier);
+}
+export function candidates(...args) {
+  const { band, others } = tierPool(...args);
+  return [...band, ...others];
 }
 
 function take(pool, count, picked, labs, allowRepeatLab = false) {
@@ -143,14 +153,22 @@ function dealFallbacks(primaries, rest) {
 export function selectModels(catalogue, { family = 'general', tier = DEFAULT_TIER, count = 4, needsReference = false, via } = {}) {
   if (!FAMILIES.includes(family)) family = 'general';
   if (!TIERS.includes(tier)) tier = DEFAULT_TIER;
-  const pool = candidates(catalogue, family, tier, needsReference, via);
+  const own = tierPool(catalogue, family, tier, needsReference, via);
+  const pool = [...own.band, ...own.others];
   if (family === 'vector') {
     const primaries = pool.slice(0, count);
     return { primaries, fallbacks: dealFallbacks(primaries, pool.slice(count)) };
   }
-  const wider = family === 'general' ? pool : candidates(catalogue, 'general', tier, needsReference, via);
+  const wide = family === 'general' ? own : tierPool(catalogue, 'general', tier, needsReference, via);
+  const wider = [...wide.band, ...wide.others];
   const primaries = [];
   const labs = new Set();
+  // Stay inside the tier's own price band first (distinct labs, then repeats), so the three
+  // tiers use different models; only then borrow from the neighbouring bands.
+  take(own.band, count, primaries, labs);
+  take(wide.band, count, primaries, labs);
+  take(own.band, count, primaries, labs, true);
+  take(wide.band, count, primaries, labs, true);
   take(pool, count, primaries, labs);
   take(wider, count, primaries, labs);
   take(pool, count, primaries, labs, true);

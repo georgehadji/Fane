@@ -10,7 +10,7 @@ const { FILES, CONFIG_JSON, FANE_IMAGE_DIR } = require('./lib/vane');
 // Vane's end-of-answer bookkeeping, as in the chat route's own tail.
 const FINISH = 'a.emit("end",{});await i.A.update(j.messages).set({status:"completed",responseBlocks:a.getAllBlocks()}).where((0,k.Uo)((0,k.eq)(j.messages.chatId,b.chatId),(0,k.eq)(j.messages.messageId,b.messageId))).execute()';
 
-const HOOK = `if(await(async()=>{try{let H=await import(${JSON.stringify(`file://${FANE_IMAGE_DIR}/vane-hook.mjs`)});return await H.handleImageRequest(b.followUp,{configPath:${JSON.stringify(CONFIG_JSON)},emit:x=>{let B={id:crypto.randomUUID(),type:"text",data:x};a.emitBlock(B);return B.id},update:(I,x)=>{let B=a.getBlock(I);B&&(B.data=x,a.updateBlock(I,[{op:"replace",path:"/data",value:x}]))}})}catch(E){console.log("fane: image hook unavailable:",E&&E.message);return!1}})()){${FINISH};return}/*fane:image-chat*/`;
+const HOOK = `if(await(async()=>{try{let H=await import(${JSON.stringify(`file://${FANE_IMAGE_DIR}/vane-hook.mjs`)});return await H.handleImageRequest(b.followUp,{mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},emit:x=>{let B={id:crypto.randomUUID(),type:"text",data:x};a.emitBlock(B);return B.id},update:(I,x)=>{let B=a.getBlock(I);B&&(B.data=x,a.updateBlock(I,[{op:"replace",path:"/data",value:x}]))}})}catch(E){console.log("fane: image hook unavailable:",E&&E.message);return!1}})()){${FINISH};return}/*fane:image-chat*/`;
 
 const CLASSIFY = 'let d=await (0,e.L)({chatHistory:b.chatHistory,enabledSources:b.config.sources,query:b.followUp,llm:b.config.llm}),l=h.u.executeAll(';
 
@@ -20,6 +20,14 @@ const TARGETS = [
     file: FILES.chatRoute,
     from: CLASSIFY,
     to: HOOK + CLASSIFY,
+    marker: '/*fane:image-chat*/', // hooks installed before `mode` was passed carry it too
+  },
+  {
+    // Upgrade for a Vane that already has the older hook: hand over Vane's optimization mode.
+    name: 'image hook receives the optimization mode',
+    file: FILES.chatRoute,
+    from: 'handleImageRequest(b.followUp,{configPath:',
+    to: 'handleImageRequest(b.followUp,{mode:b.config.mode,configPath:',
   },
 ];
 
