@@ -7,6 +7,7 @@ This is **not a fork** of Vane. It is a small toolkit for the official Docker im
 | What | Why |
 |---|---|
 | `cli/` | `vane "<question>"`: ask Vane from any shell or agent and get a cited answer plus sources (text or JSON). No extra server needed. |
+| `patches/patch-image-ui.js` | No "Search images" / "Search videos" buttons under an answer made of generated images (they search the web for pictures about the question, and Vane's auto-search setting would click them for you). The image hook ends its answers with an invisible HTML comment; Vane's message component leaves the side column out when it sees it. A browser chunk, so a normal reload picks it up. Normal answers keep the buttons. |
 | `patches/patch-image-serve.js` | Serves the images Fane generates (`cli/image/store.mjs` writes them next to Vane's `config.json`). Vane has no route for such files and does not serve files added to `public/` after it started, so this adds a GET to its `/api/uploads` route. Only Fane's own hashed file names are served. |
 | `patches/patch-theme-toggle.js` | A one-click light/dark toggle in the sidebar, above the settings button. Vane already has both themes, but switching meant Settings → Preferences → Theme. The choice is saved like the setting (desktop sidebar only). |
 | `patches/patch-toolcall-empty-args.js` | Fixes `Error: is empty`, which crashes or hangs every search with Anthropic/OpenAI models through OpenRouter ([Vane#1150](https://github.com/ItzCrazyKns/Vane/issues/1150)). |

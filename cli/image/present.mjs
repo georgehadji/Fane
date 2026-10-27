@@ -6,6 +6,12 @@ import { imageSubject } from './intent.mjs';
 import { explainFailure } from './policy.mjs';
 import { isStoredUrl } from './store.mjs';
 
+// Ends every answer the hook writes. An HTML comment shows nothing; patches/patch-image-ui.js uses
+// it to leave Vane's "Search images / Search videos" buttons out of these answers
+// (patches/lib/vane.js holds the same string; a test keeps the two equal).
+export const ANSWER_MARKER = '<!--fane:image-answer-->';
+export const tagged = (markdown) => `${markdown}\n\n${ANSWER_MARKER}`;
+
 export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 export const altText = (subject, i, n, name) => `Image ${i} of ${n}: ${subject}${name ? ` (${name})` : ''}`;

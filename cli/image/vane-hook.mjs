@@ -7,7 +7,7 @@
 import { readFile } from 'node:fs/promises';
 import { TIER_FOR_MODE } from './catalogue.mjs';
 import { isImageEdit, isImageRequest, parseImageOptions, pickReferenceIndex } from './intent.mjs';
-import { renderProgress, renderResult } from './present.mjs';
+import { renderProgress, renderResult, tagged } from './present.mjs';
 import { DEFAULT_TEXT_MODEL, createImageGenerator } from './generate.mjs';
 import { createImageStore, storeDirFor, storedUrlsIn } from './store.mjs';
 import { createOpenRouterClient, findOpenRouterKey } from './openrouter.mjs';
@@ -39,14 +39,14 @@ async function earlierImages(query, { history, lastAnswer, store }) {
 export async function handleImageRequest(query, { emit, update, configPath, mode, history, lastAnswer, store = configPath ? createImageStore({ dir: storeDirFor(configPath) }) : null, log = (m) => console.log(`fane: ${m}`), readConfig, generator } = {}) {
   const earlier = await earlierImages(query, { history, lastAnswer, store });
   if (!earlier && !isImageRequest(query)) return false;
-  const id = emit(earlier ? '_Editing the image…_' : '_Generating images…_');
+  const id = emit(tagged(earlier ? '_Editing the image…_' : '_Generating images…_'));
   let apiKey = null;
   try {
     const raw = readConfig ? await readConfig() : await readFile(configPath, 'utf8');
     apiKey = findOpenRouterKey(JSON.parse(raw).modelProviders);
   } catch (err) { log(`could not read Vane config: ${err.message}`); }
   if (!apiKey && !generator) {
-    update(id, "Image generation needs an OpenRouter provider: in Settings → Models, add an OpenAI-compatible provider with Base URL https://openrouter.ai/api/v1 and your OpenRouter API key.");
+    update(id, tagged("Image generation needs an OpenRouter provider: in Settings → Models, add an OpenAI-compatible provider with Base URL https://openrouter.ai/api/v1 and your OpenRouter API key."));
     return true;
   }
   let references = [];
@@ -55,7 +55,7 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
     const index = pickReferenceIndex(query, earlier.length);
     try { references = [await store.get(earlier[index])]; editedImage = index + 1; } catch (err) {
       log(`earlier image not readable: ${err.message}`);
-      update(id, 'The earlier image is no longer stored, so I cannot edit it. Describe the picture you want and I will make new images.');
+      update(id, tagged('The earlier image is no longer stored, so I cannot edit it. Describe the picture you want and I will make new images.'));
       return true;
     }
   }
@@ -74,7 +74,7 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
   const onProgress = (p) => {
     queue = queue.then(async () => {
       done.push({ ...p.image, slot: p.slot, url: await keep(p.image) });
-      update(id, renderProgress(done, p.total, query));
+      update(id, tagged(renderProgress(done, p.total, query)));
     });
   };
   // An edit instruction is sent as written: the prompt enhancer would turn "make it blue" into a new scene.
@@ -82,6 +82,6 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
   await queue;
   // Stored images are linked, not embedded; one that could not be stored is embedded as before.
   const images = await Promise.all(result.images.map(async (i) => ({ ...i, url: done.find(d => d.model === i.model)?.url ?? await keep(i) })));
-  update(id, renderResult({ ...result, images, editedImage }, query));
+  update(id, tagged(renderResult({ ...result, images, editedImage }, query)));
   return true;
 }

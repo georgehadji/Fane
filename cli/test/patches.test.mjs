@@ -80,3 +80,12 @@ test('the serving patch adds a GET without touching the POST handler', () => {
   const out = planPatch({ [t.file]: `(()=>{try{${bundle.replace('x;', '')}}catch(e){}})()` }, [t]);
   assert.deepEqual(out.errors, []);
 });
+
+test('the answer marker is the same in the hook and in the browser patch', async () => {
+  const { IMAGE_ANSWER_MARKER } = require('../../patches/lib/vane.js');
+  const { ANSWER_MARKER, tagged } = await import('../image/present.mjs');
+  assert.equal(ANSWER_MARKER, IMAGE_ANSWER_MARKER);
+  assert.ok(tagged('x').endsWith(ANSWER_MARKER));
+  const { TARGETS: [t] } = require('../../patches/patch-image-ui.js');
+  assert.ok(t.to.includes(`!h.includes(${JSON.stringify(ANSWER_MARKER)})`));
+});

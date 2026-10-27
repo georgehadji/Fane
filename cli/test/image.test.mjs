@@ -426,7 +426,8 @@ test('hook ignores questions and answers image requests with markdown images', a
 test('hook shows progress while images land, then the grid; words in the prompt set count and shape', async () => {
   const shown = [];
   let n = 0;
-  const io = { emit: () => 'b', update: (id, md) => shown.push(md) };
+  let firstEmit = null;
+  const io = { emit: (md) => { firstEmit = md; return 'b'; }, update: (id, md) => shown.push(md) };
   const generator = async (args) => {
     args.onProgress({ ready: 1, total: 2, slot: 0, model: 'a/one', name: 'A: One', image: { dataUrl: PNG_URL, model: 'a/one', name: 'A: One' } });
     args.onProgress({ ready: 2, total: 2, slot: 1, model: 'b/two', name: 'B: Two', image: { dataUrl: PNG_URL, model: 'b/two', name: 'B: Two' } });
@@ -437,9 +438,10 @@ test('hook shows progress while images land, then the grid; words in the prompt 
   await handleImageRequest('create 2 images of a fox, widescreen', { ...io, generator });
   assert.equal(seen[0].count, 2);
   assert.equal(seen[0].aspect, '16:9');
-  assert.equal(shown[0], '_Generating images… 1 of 2 ready_\n\n✓ One');
-  assert.equal(shown[1], '_Generating images… 2 of 2 ready_\n\n✓ One · ✓ Two');
+  assert.equal(shown[0], '_Generating images… 1 of 2 ready_\n\n✓ One\n\n<!--fane:image-answer-->');
+  assert.equal(shown[1], '_Generating images… 2 of 2 ready_\n\n✓ One · ✓ Two\n\n<!--fane:image-answer-->');
   assert.match(shown[2], /^<div style="display:grid/);
+  assert.ok(shown.every(md => md.endsWith('<!--fane:image-answer-->')) && firstEmit.endsWith('<!--fane:image-answer-->')); // every answer carries the marker
 });
 
 test('hook links stored images, and embeds one that cannot be stored', async () => {
@@ -466,7 +468,7 @@ test('hook: finished images are stored on arrival, shown at once, and linked onc
   };
   await handleImageRequest('draw a fox', { emit: () => 'b', update: (id, md) => shown.push(md), log: () => {}, generator, store });
   assert.equal(stored.length, 2); // once per image, not again for the final answer
-  assert.match(shown[0], /^<div style="display:grid[^]*1 of 2 ready_$/);
+  assert.match(shown[0], /^<div style="display:grid[^]*1 of 2 ready_\n\n<!--fane:image-answer-->$/);
   assert.equal(shown[0].split('<img ').length - 1, 1);
   assert.equal(shown[1].split('<img ').length - 1, 2);
   assert.ok(shown[1].indexOf('/api/uploads?fane-image=2') < shown[1].indexOf('/api/uploads?fane-image=1')); // slot order, not arrival order

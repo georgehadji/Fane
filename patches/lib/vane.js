@@ -9,6 +9,8 @@ module.exports = {
     searchRoute: `${SERVER}/app/api/search/route.js`,
     chatRoute: `${SERVER}/app/api/chat/route.js`,
     uploadsRoute: `${SERVER}/app/api/uploads/route.js`,
+    // Browser chunk with the message component (the answer and its side column); fixed by the pinned digest.
+    messageClient: '/home/vane/public/_next/static/chunks/2415-6f80633347836171.js',
     // Browser chunk with the sidebar; the hash in the name is fixed by the pinned digest.
     layoutClient: '/home/vane/public/_next/static/chunks/app/layout-dae1640c324f0337.js',
   },
@@ -16,6 +18,8 @@ module.exports = {
   SCRAPE_FAILED_TITLE: 'Failed to scrape',
   // Vane's settings (providers and their API keys).
   CONFIG_JSON: '/home/vane/data/config.json',
+  // Ends every answer of the image hook (cli/image/present.mjs ANSWER_MARKER; a test keeps them equal).
+  IMAGE_ANSWER_MARKER: '<!--fane:image-answer-->',
   // Where generated images are stored: next to CONFIG_JSON, on the data volume. cli/image/store.mjs
   // derives the same path from the config path (a test keeps them equal).
   IMAGE_STORE_DIR: '/home/vane/data/fane-images',
