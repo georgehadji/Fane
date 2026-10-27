@@ -58,8 +58,15 @@ export function renumber(article, sources) {
 const HEADING = { en: 'Sources', el: 'Πηγές' };
 export function sourcesSection(used, lang) {
   if (!used.length) return '';
-  const safe = (s) => String(s || '').replace(/[\[\]\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return `\n\n## ${HEADING[lang] || HEADING.en}\n\n${used.map((s, i) => `${i + 1}. [${safe(s.title) || s.url}](${s.url})`).join('\n')}\n`;
+  const clean = (s) => String(s || '').replace(/[\[\]\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // pages with a placeholder title ("sample", "Microsoft Word - file.docx") are named by their site instead
+  const JUNK = /^(?:sample|untitled|index|home|document|microsoft word\b.*|.{0,3})$/i;
+  const label = (s) => {
+    const title = clean(s.title);
+    if (title && !JUNK.test(title)) return title;
+    try { return new URL(s.url).hostname.replace(/^www\./, ''); } catch { return s.url; }
+  };
+  return `\n\n## ${HEADING[lang] || HEADING.en}\n\n${used.map((s, i) => `${i + 1}. [${label(s)}](${s.url})`).join('\n')}\n`;
 }
 
 // Sentence-length spread (std / mean). Machine text is even; people vary. Under ~0.3 reads flat.

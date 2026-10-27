@@ -131,6 +131,9 @@ test('sourcesSection is written from real sources, in the article language', () 
   assert.match(sourcesSection(SOURCES.slice(0, 1), 'el'), /## Πηγές/);
   assert.equal(sourcesSection([], 'en'), '');
   assert.match(sourcesSection([{ title: 'a [b]\nc', url: 'https://x.org' }], 'en'), /\[a b c\]/);
+  const junk = sourcesSection([{ title: 'sample', url: 'https://www.aspete.gr/a.pdf' }, { title: 'Microsoft Word - fulltext096113.docx', url: 'https://jestr.org/f.pdf' }, { title: '', url: 'not a url' }], 'en');
+  assert.match(junk, /1\. \[aspete\.gr\]\(https:\/\/www\.aspete\.gr\/a\.pdf\)\n2\. \[jestr\.org\]/);
+  assert.match(junk, /3\. \[not a url\]/);
 });
 
 test('sentences skips headings and fragments; rhythm needs enough sentences', () => {
@@ -258,6 +261,7 @@ test('role call: JSON roles must return JSON; response_format is dropped when th
   assert.deepEqual(r.data, { claims: [] });
   assert.equal(seen.length, 2);
   assert.equal(seen[1].response_format, undefined);
+  assert.deepEqual(seen[0].reasoning, { effort: 'low' }); // thinking models must not spend the whole budget thinking
   const bad = await createRoleCaller({ client: stub([reply('not json at all')]) })('critique', { system: 's', user: 'u' }, { chain: ['m'], maxTokens: 100 });
   assert.equal(bad.ok, false);
   assert.match(bad.errors[0], /not JSON/);

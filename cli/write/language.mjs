@@ -16,11 +16,11 @@ const LETTER = /\p{L}/gu;
 
 // 'el' when a third or more of the letters are Greek; 'en' otherwise. A mostly-Latin prompt that
 // quotes a Greek word stays English; "Γράψε ένα άρθρο για AI" is Greek.
-export function detectLanguage(text) {
+export function greekShare(text) {
   const letters = String(text || '').match(LETTER)?.length || 0;
-  if (!letters) return 'en';
-  return (String(text).match(GREEK_LETTER)?.length || 0) / letters >= 0.33 ? 'el' : 'en';
+  return letters ? (String(text).match(GREEK_LETTER)?.length || 0) / letters : 0;
 }
+export const detectLanguage = (text) => (greekShare(text) >= 0.33 ? 'el' : 'en');
 
 // A phrase or stem not glued to other letters (JS \b only knows ASCII letters).
 const stem = (s) => new RegExp(`(?<!\\p{L})${s}`, 'gu');

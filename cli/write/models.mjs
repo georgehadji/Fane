@@ -14,6 +14,11 @@ export const PHASES = {
   quality: ['queries', 'outline', 'draft', 'factcheck', 'critique', 'revise', 'style', 'copy', 'audit'],
 };
 
+// Sent with every call. The first model trial found thinking models (Mistral Large, Qwen Max, Cohere ...)
+// spending the whole token budget on reasoning and returning no text (finish_reason "length", 0 words);
+// models without reasoning ignore the parameter. The trial (scripts/article-trial.mjs) uses the same value.
+export const REASONING = { effort: 'low' };
+
 export const DEFAULT_WORDS = 900;
 export const MIN_WORDS = 300;
 export const MAX_WORDS = 2500;

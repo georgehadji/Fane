@@ -176,7 +176,9 @@ vane --article "tidal power in Greece" --words 900 --out tidal.md
 vane "γράψε ένα άρθρο για την παλιρροϊκή ενέργεια" -o quality --article-model vendor/model-a,vendor/model-b   # slugs from vane --list-openrouter
 ```
 
-The default model is one cheap model for every role (no fallback) until per-tier model chains exist; pass `--article-model` for real use. The chat hook in Vane's web UI does not write articles yet.
+**Which models.** Without `--article-model`, each phase gets a chain of models from the price band of the mode: Speed the cheapest third of the models that passed the trial, Balanced the middle, Quality the dearest. Neighbouring phases (draft, critique, fact-check …) start with models from different labs, and each chain has up to three fallbacks from the same band. `vane --list-article-models -o quality --lang el` shows the chains.
+
+OpenRouter's catalogue says nothing about writing quality or Greek, so a model is only used by default after it passed a live trial (`node scripts/article-trial.mjs --key-from-vane`, results in `cli/write/trial.json`): a short article in English and in Greek with the real prompt, and a JSON answer. A pass means not cut off, no leaked reasoning, the right language, valid citations and no Latin letters in Greek words. The trial of 2026-10-27 tried 40 models for about $1.06; 27 passed all three. Models that think (Mistral Large 4, Cohere Command A+, Elorian Glimpse, and others) spent the whole token budget thinking and returned no text, so every call asks for low reasoning effort (`REASONING` in `cli/write/models.mjs`); with that, 9 more models passed. A Speed Greek article of about 400 words took 47 s and cost about $0.006. The chat hook in Vane's web UI does not write articles yet.
 
 ### Citation check (`--verify`)
 

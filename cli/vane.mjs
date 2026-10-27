@@ -12,7 +12,8 @@ import { imageSubject, isImageRequest } from './image/intent.mjs';
 import { ASPECT_RATIOS, DEFAULT_IMAGES, DEFAULT_TEXT_MODEL, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
 import { parseImageOptions } from './image/intent.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions } from './write/intent.mjs';
-import { LANGUAGES } from './write/language.mjs';
+import { buildTextCatalogue, selectChains } from './write/catalogue.mjs';
+import { LANGUAGES, detectLanguage } from './write/language.mjs';
 import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
 import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient, findOpenRouterKey } from './image/openrouter.mjs';
 
@@ -99,7 +100,10 @@ Articles (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; sources come 
       --tier <t>         budget | value | premium, the same as --mode speed | balanced | quality
       --lang <l>         ${LANGUAGES.join(' | ')}; default from the topic's script (Greek letters mean el)
       --words <n>        Target length (${MIN_WORDS}-${MAX_WORDS}, default ${DEFAULT_WORDS}), or write "800 words" / "800 λέξεις" in the topic
-      --article-model <id>  Models for every phase, first one primary and the rest its fallbacks (comma list)
+      --article-model <id>  Models for every phase, first one primary and the rest its fallbacks (comma list).
+                         Default: per phase, models that passed the trial (scripts/article-trial.mjs) in the
+                         price band of the mode: Speed the cheapest third, Balanced the middle, Quality the dearest
+      --list-article-models  Show the models each phase would use for -o <mode> and --lang <l>
       --out <file>       Write the article (Markdown) to a file instead of printing it
 
 Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURCES, VANE_MODE,
@@ -147,6 +151,7 @@ export function parseCli(argv) {
       'key-from-vane': { type: 'boolean', default: false },
       'no-auto-image': { type: 'boolean', default: false },
       article: { type: 'boolean', default: false },
+      'list-article-models': { type: 'boolean', default: false },
       'no-auto-article': { type: 'boolean', default: false },
       lang: { type: 'string' },
       words: { type: 'string' },
@@ -180,7 +185,7 @@ export function parseCli(argv) {
     if (values.size) values.size = values.size.toUpperCase();
     if (values.stream) throw new UsageError('--stream does not apply to --image');
   }
-  if (values.article) {
+  if (values.article || values['list-article-models']) {
     values['article-model'] = values['article-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
     if (values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
     if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
@@ -657,6 +662,32 @@ function printArticleReport(r) {
   for (const d of r.degraded) say(`  degraded: ${d}`);
 }
 
+// Models that passed scripts/article-trial.mjs, from cli/write/trial.json ({} when the file is missing).
+async function loadTrial() {
+  const { readFile } = await import('node:fs/promises');
+  try { return JSON.parse(await readFile(new URL('./write/trial.json', import.meta.url), 'utf8')); } catch { return { models: {} }; }
+}
+
+// Chains of the mode's price band, from the models that passed the trial for this language.
+async function defaultChains({ mode, lang, client }) {
+  const trial = await loadTrial();
+  const chosen = selectChains(buildTextCatalogue(await client.models()), trial.models || {}, { mode, lang });
+  if (!chosen) throw new UsageError(`No text model has passed the trial for ${lang === 'el' ? 'Greek' : 'English'}. Pass --article-model <id>[,<fallback>...], or run node scripts/article-trial.mjs.`);
+  return { ...chosen, trialDate: trial.updated };
+}
+
+async function listArticleModels(opts) {
+  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const lang = opts.lang ?? (opts.query ? detectLanguage(opts.query) : 'en');
+  const client = createOpenRouterClient();
+  const chosen = await defaultChains({ mode, lang, client });
+  const price = new Map(buildTextCatalogue(await client.models()).map(m => [m.id, m]));
+  const show = (id) => `${id} ($${price.get(id)?.priceIn}/${price.get(id)?.priceOut})`;
+  if (opts.json) return console.log(JSON.stringify({ mode, language: lang, trialDate: chosen.trialDate, pool: chosen.pool, band: chosen.band, chains: chosen.chains }, null, 2));
+  console.log(`${mode}, ${lang === 'el' ? 'Greek' : 'English'}: ${chosen.pool} models passed the trial (${chosen.trialDate || 'undated'}); this mode's price band: ${chosen.band.join(', ')}`);
+  for (const [role, chain] of Object.entries(chosen.chains)) console.log(`  ${role.padEnd(10)}${chain.map(show).join('  >  ')}`);
+}
+
 async function runArticle(opts) {
   if (!opts.query) throw new UsageError('Missing topic. Example: vane --article "tidal power in Greece"');
   const apiKey = await resolveOpenRouterKey(opts);
@@ -671,13 +702,19 @@ async function runArticle(opts) {
     }
     return [];
   };
-  const write = createArticlePipeline({ client: createOpenRouterClient({ apiKey }), retrieve, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
+  const client = createOpenRouterClient({ apiKey });
+  const write = createArticlePipeline({ client, retrieve, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
+  const topic = articleTopic(opts.query);
+  const lang = opts.lang ?? detectLanguage(topic);
+  const explicit = opts['article-model'].length > 0;
+  const chosen = explicit ? null : await defaultChains({ mode, lang, client });
   const r = await write({
-    topic: articleTopic(opts.query),
+    topic,
     mode,
-    lang: opts.lang,
+    lang,
     words: opts.words ?? parseArticleOptions(opts.query).words,
     models: opts['article-model'],
+    chains: chosen?.chains,
     onProgress: (e) => { if (!opts.json && e.status !== 'running') process.stderr.write(`vane: ${e.phase} ${e.status}${e.model ? ` (${e.model}, ${(e.ms / 1000).toFixed(0)} s)` : ''}${e.phase === 'sources' && e.note ? `: ${e.note}` : ''}\n`); },
   });
   if (!r.ok) throw new Error(r.error);
@@ -756,6 +793,7 @@ async function main() {
   if (opts.doctor) { if (await doctor(opts)) process.exitCode = 1; return; }
   if (opts.image) return runImage(opts);
   if (opts.article) return runArticle(opts);
+  if (opts['list-article-models']) return listArticleModels(opts);
   if (opts['list-image-models']) return listImageModels(opts.query, opts.json);
   if (opts['list-openrouter']) return listOpenRouter(opts.query, opts.json);
   if (opts['add-model'] !== undefined) {

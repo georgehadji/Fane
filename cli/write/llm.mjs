@@ -7,7 +7,7 @@
 //  - JSON roles: no parseable JSON object
 // Errors 401/402 (bad key, no credits) hit every model alike and stop the chain.
 import { THINKING_LEAK } from './checks.mjs';
-import { isJsonRole } from './models.mjs';
+import { REASONING, isJsonRole } from './models.mjs';
 
 const FATAL = new Set([401, 402]);
 
@@ -34,6 +34,7 @@ export function createRoleCaller({ client, log = () => {} }) {
         max_tokens: maxTokens,
         temperature: temperature ?? (json ? 0.2 : 0.7),
         usage: { include: true },
+        reasoning: REASONING,
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
         ...(json ? { response_format: { type: 'json_object' } } : {}),
       };
