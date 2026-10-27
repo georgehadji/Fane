@@ -21,14 +21,25 @@ export function extractJson(text) {
   try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
 }
 
+// Some models answer without usage.cost (minimax-m3.1-flash, grok-4.7 in the trial), so an edit on Speed showed
+// no cost at all; then the cost is estimated from the token counts and `prices` (USD per million tokens).
+export const costOf = (usage, price) => (typeof usage?.cost === 'number' ? usage.cost
+  : price ? ((usage?.prompt_tokens || 0) * price.in + (usage?.completion_tokens || 0) * price.out) / 1e6 : 0);
+
 // -> { ok: true, text, data?, model, fallback, attempts, cost } | { ok: false, fatal, errors, attempts, cost }
 // `fallback` is true when a model after the first one answered.
-export function createRoleCaller({ client, log = () => {} }) {
-  return async function call(role, { system, user }, { chain, maxTokens, temperature }) {
+// A network failure ("fetch failed": no HTTP status, not a timeout) hits every model alike. Two live Quality
+// runs lost the connection for minutes and spent each phase's whole chain in seconds, so the next model waits.
+export const NETWORK_WAIT_MS = 10_000;
+const isNetworkError = (err) => !err.status && err.name !== 'TimeoutError' && err.name !== 'AbortError';
+
+export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new Promise(r => setTimeout(r, ms)) }) {
+  return async function call(role, { system, user }, { chain, maxTokens, temperature, prices }) {
     const json = isJsonRole(role);
     const attempts = [];
-    let cost = 0;
+    let cost = 0, offline = 0;
     for (const [i, model] of chain.entries()) {
+      if (offline) await sleep(NETWORK_WAIT_MS * offline);
       const body = {
         model,
         max_tokens: maxTokens,
@@ -49,12 +60,14 @@ export function createRoleCaller({ client, log = () => {} }) {
         }
       } catch (err) {
         const status = err.status;
-        attempts.push({ model, problem: String(err.message || err).slice(0, 160) });
+        offline = isNetworkError(err) ? offline + 1 : 0;
+        const cause = err.cause?.code || err.cause?.message;
+        attempts.push({ model, problem: `${String(err.message || err)}${cause ? ` (${cause})` : ''}`.slice(0, 160) });
         log(`${role}: ${model} failed (${attempts.at(-1).problem})`);
         if (FATAL.has(status)) return { ok: false, fatal: true, status, errors: attempts.map(a => `${a.model}: ${a.problem}`), attempts, cost };
         continue;
       }
-      if (typeof res?.usage?.cost === 'number') cost += res.usage.cost;
+      cost += costOf(res?.usage, prices?.[model]);
       const choice = res?.choices?.[0];
       const raw = textOf(choice?.message?.content);
       const text = stripThinking(raw);

@@ -58,12 +58,6 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
       say(quiet([escapeHtml(`No text model has passed the trial for ${LANGUAGE_NAMES[lang]}: run node scripts/article-trial.mjs, or ask in English.`)]));
       return true;
     }
-    if (earlier) {
-      const edit = editor || createArticleEditor({ client, log });
-      const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, mode: useMode, chains: chosen.chains });
-      say(r.ok ? renderArticleResult(r) : renderArticleFailure({ ...r, edit: true }, lang));
-      return true;
-    }
     // Vane sometimes finds no sources for a query that worked a minute ago: one retry.
     const retrieve = async (q) => {
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -72,6 +66,16 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
       }
       return [];
     };
+    if (earlier) {
+      const edit = editor || createArticleEditor({ client, log });
+      const onEdit = (e) => {
+        if (e.phase === 'sources' && e.status === 'done') researchDone();
+        if (e.status === 'running') { state.running = e.phase; say(renderArticleProgress(state)); }
+      };
+      const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, mode: useMode, chains: chosen.chains, prices: chosen.prices, retrieve: research ? retrieve : undefined, onProgress: onEdit });
+      say(r.ok ? renderArticleResult(r) : renderArticleFailure({ ...r, edit: true }, lang));
+      return true;
+    }
     // Updates are applied in order, one at a time.
     let queue = Promise.resolve();
     const onProgress = (e) => {
@@ -84,7 +88,7 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
       if (e.phase !== 'done') queue = queue.then(() => say(renderArticleProgress(state)));
     };
     const write = pipeline || createArticlePipeline({ client, retrieve, log });
-    const r = await write({ topic, mode: useMode, lang, words: parseArticleOptions(query).words, chains: chosen.chains, onProgress });
+    const r = await write({ topic, mode: useMode, lang, words: parseArticleOptions(query).words, chains: chosen.chains, prices: chosen.prices, onProgress });
     await queue;
     say(r.ok ? renderArticleResult(r) : renderArticleFailure(r, lang));
   } catch (err) {

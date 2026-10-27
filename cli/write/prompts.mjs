@@ -24,15 +24,17 @@ const HUMAN_RULES = {
 - No filler or throat-clearing ("It is important to note", "In today's world", "When it comes to"), no hedging stacks, no upbeat generic ending ("the future looks bright", "paves the way"). End on the last real point.
 - Prefer the specific detail (a number, a name, a place, a date) to the general claim.`,
   el: `Γράψε σαν άνθρωπος με άποψη, όχι σαν δελτίο τύπου. (Instructions are in Greek on purpose: these are the Greek patterns to avoid.)
-- Πες τι συνέβη ή τι ισχύει, απλά. Μην λες στον αναγνώστη πόσο σημαντικό είναι: όχι «καθοριστικό ρόλο», «κομβικό», «ζωτικής σημασίας», «στο επίκεντρο», «διαχρονική αξία», «αποτελεί μαρτυρία», «σημείο καμπής».
-- Όχι διαφημιστικά επίθετα: «μοναδικός», «εντυπωσιακός», «συναρπαστικός», «πρωτοποριακός», «κορυφαίος», «ανεπανάληπτος». Όχι «πολυδιάστατος», «ολιστικός», «δυναμικό τοπίο», «ευρύ φάσμα».
-- Όχι μετοχές στο τέλος της πρότασης που προσθέτουν βάθος στα λόγια: «…, αναδεικνύοντας τη σημασία του», «…, προσφέροντας νέες δυνατότητες», «…, ενισχύοντας…». Γράψε το γεγονός και σταμάτα.
-- Όχι «δεν είναι απλώς Χ, αλλά Ψ» και «όχι μόνο… αλλά και…» ως αντανακλαστικό. Όχι τριάδες από ανάγκη.
-- Όχι παραγεμίσματα: «Αξίζει να σημειωθεί ότι», «Είναι σημαντικό να τονιστεί», «Σε έναν κόσμο που…», «Στη σημερινή εποχή», «Ας δούμε», «Σε τελική ανάλυση», «Εν κατακλείδι».
-- Όχι αόριστες αναφορές: «οι ειδικοί υποστηρίζουν», «έρευνες δείχνουν», «είναι γνωστό ότι» χωρίς αριθμημένη πηγή.
-- Όχι γενικό αισιόδοξο κλείσιμο: «ανοίγει νέους ορίζοντες», «ταξίδι ανακάλυψης», «το μέλλον προμηνύεται…». Τελείωσε στο τελευταίο ουσιαστικό σημείο.
-- Άλλαξε το μήκος των προτάσεων επίτηδες: μερικές σύντομες, μερικές μακριές. Λίγες παύλες, χωρίς emoji, χωρίς έντονα γράμματα για έμφαση.
-- Προτίμησε τη συγκεκριμένη λεπτομέρεια (αριθμός, όνομα, τόπος, ημερομηνία) από τον γενικό ισχυρισμό.`,
+- Πες τι συνέβη ή τι ισχύει, απλά. Μη λες στον αναγνώστη πόσο σημαντικό είναι: όχι «καθοριστικό ρόλο», «διαδραματίζει σημαντικό ρόλο», «κομβικό», «ζωτικής σημασίας», «στο επίκεντρο», «διαχρονική αξία», «αποτελεί μαρτυρία», «σημείο καμπής».
+- Όχι διαφημιστικά επίθετα: «μοναδικός», «εντυπωσιακός», «συναρπαστικός», «πρωτοποριακός», «κορυφαίος», «ανεπανάληπτος», «μαγευτικός». Όχι «πολυδιάστατος», «ολιστικός», «δυναμικό τοπίο», «ευρύ φάσμα», «διάφορες πτυχές».
+- Όχι μετοχές στο τέλος της πρότασης που δίνουν ψεύτικο βάθος: «…, αναδεικνύοντας τη σημασία του», «…, προσφέροντας νέες δυνατότητες», «…, ενισχύοντας…». Γράψε το γεγονός και σταμάτα.
+- Προτίμησε το ρήμα από το ουσιαστικό: «αυξήθηκε», όχι «σημειώθηκε αύξηση»· «έγινε», όχι «πραγματοποιήθηκε»· «χρησιμοποιεί», όχι «προβαίνει στη χρήση».
+- Όχι «δεν είναι απλώς Χ, αλλά Ψ» και «όχι μόνο… αλλά και…» από συνήθεια. Όχι απαριθμήσεις τριών στοιχείων μόνο για τον ρυθμό.
+- Όχι γεμίσματα: «Αξίζει να σημειωθεί ότι», «Είναι σημαντικό να τονιστεί», «Είναι γεγονός ότι», «Σε έναν κόσμο που…», «Στη σημερινή εποχή», «Ας δούμε», «Σε τελική ανάλυση», «Εν κατακλείδι».
+- Όχι αόριστες αναφορές: «οι ειδικοί υποστηρίζουν», «έρευνες δείχνουν», «σύμφωνα με μελέτες», «είναι γνωστό ότι» χωρίς αριθμημένη πηγή.
+- Όχι γενικό αισιόδοξο κλείσιμο: «ανοίγει νέους ορίζοντες», «ταξίδι ανακάλυψης», «το μέλλον προμηνύεται…», «μόνο ο χρόνος θα δείξει». Κλείσε με το τελευταίο ουσιαστικό σημείο.
+- Εναλλάσσε συνειδητά το μήκος των προτάσεων: άλλες σύντομες, άλλες μεγάλες. Λίγες παύλες, χωρίς emoji, χωρίς έντονα γράμματα για έμφαση.
+- Προτίμησε τη συγκεκριμένη λεπτομέρεια (αριθμός, όνομα, τόπος, ημερομηνία) από τον γενικό ισχυρισμό.
+- Γράψε μόνο λέξεις και γραμματικούς τύπους που υπάρχουν στα νέα ελληνικά (π.χ. «να βγει», όχι «να βγειστεί»). Αν δεν είσαι βέβαιος για έναν τύπο, διάλεξε απλούστερη διατύπωση.`,
 };
 
 const LANGUAGE_RULES = {
@@ -101,11 +103,11 @@ export const prompts = {
     user: `Article:\n<article>\n${article}\n</article>\n\nFix grammar, punctuation, spelling, inconsistent terminology and formatting, run-ons and tense. Do not change sentence structure, word choice that is correct, facts or [n] citations. ${lengthRule(article, words)} Output the full article only.`,
   }),
 
-  // A follow-up request on a finished article ("shorter", "rewrite the intro"). The sources are listed by
-  // title only: the edit works with what the article already says, so it adds no new facts.
-  rewrite: ({ lang, article, sources, instruction }) => ({
+  // A follow-up request on a finished article ("shorter", "rewrite the intro"). The article's own sources are
+  // listed by title only (their text is not kept); `newFacts`: a search for this request added sources with excerpts.
+  rewrite: ({ lang, article, sources, instruction, newFacts = false }) => ({
     system: `You are an editor revising a finished article on the author's request. ${header(lang)}\n\n${HUMAN_RULES[lang] || HUMAN_RULES.en}`,
-    user: `${sourceBlock(sources, { excerpt: 0 })}\n\nArticle:\n<article>\n${article}\n</article>\n\nRequest from the author (do exactly this and nothing else): ${instruction}\n\nThe article is now ${wordCount(article)} words; when the request names a length, aim at it closely.\nRules: change only what the request asks for; keep the rest of the text as it is. Add no fact that is not already in the article. Keep the "# " title and "## " headings unless the request is about them, keep each [n] citation next to the claim it supports, and use only the numbers listed above. Add no sources list. Output the full revised article only.`,
+    user: `${sourceBlock(sources, { excerpt: newFacts ? 900 : 0 })}\n\nArticle:\n<article>\n${article}\n</article>\n\nRequest from the author (do exactly this and nothing else): ${instruction}\n\nThe article is now ${wordCount(article)} words; when the request names a length, aim at it closely.\nRules: change only what the request asks for; keep the rest of the text as it is. ${newFacts ? 'Add no fact that is not already in the article or in a source excerpt above, and cite each new fact with the number of the source that says it.' : 'Add no fact that is not already in the article.'} Keep the "# " title and "## " headings unless the request is about them, keep each [n] citation next to the claim it supports, and use only the numbers listed above. Add no sources list. Output the full revised article only.`,
   }),
 
   audit: ({ lang, article, ledger }) => ({

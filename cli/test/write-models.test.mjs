@@ -91,6 +91,10 @@ test('selectChains: JSON roles use only models that answered the JSON trial; the
   for (const role of ['outline', 'factcheck', 'critique', 'audit', 'queries']) assert.ok(!chains[role].includes('alpha/m1'), role);
   assert.equal(chains.draft[0], 'alpha/m1'); // fewest stock phrases writes the draft
   assert.deepEqual(chains.queries.map(id => id.split('/')[1]), ['m1', 'm1']); // the two cheapest that answer JSON
+  // with the trial's combined score, the score decides and stock phrases alone do not
+  trial['alpha/m1'] = { en: { ...passing(1), score: 20 }, el: passing(1), json: { ok: false } };
+  trial['beta/m1'] = { en: { ...passing(9), score: 2 }, el: passing(9), json: { ok: true } };
+  assert.equal(selectChains(catalogue, trial, { mode: 'speed' }).chains.draft[0], 'beta/m1');
 });
 
 test('selectChains copes with a pool smaller than a band', () => {
@@ -101,6 +105,16 @@ test('selectChains copes with a pool smaller than a band', () => {
 
 const SRC = [{ title: 't', url: 'https://x.org/1', content: 'c' }, { title: 'u', url: 'https://x.org/2', content: 'd' }];
 const words = (n, seed) => Array.from({ length: n }, (_, i) => `${seed}${i % 7}`).join(' ');
+
+test('judgeTrialDraft scores invented numbers, uncited text and a missed length against a model', () => {
+  const clean = Array.from({ length: 10 }, (_, i) => (i % 2 ? `Tides rise twice a day on the coast of the islands, and the turbines turn with them [1].` : `Homes were supplied [1].`)).join(' ');
+  const base = judgeTrialDraft(`# T\n\n${clean}`, { lang: 'en', sources: SRC, target: 120 });
+  const invented = judgeTrialDraft(`# T\n\n${clean} It made 977 jobs in 2031 [1].`, { lang: 'en', sources: SRC, target: 120 });
+  const uncited = judgeTrialDraft(`# T\n\n${clean.replace(/ \[1\]/g, '')} One cited line about homes [1].`, { lang: 'en', sources: SRC, target: 120 });
+  assert.ok(invented.score > base.score + 5 && invented.invented >= 2, JSON.stringify([base, invented]));
+  assert.ok(uncited.score > base.score + 3);
+  assert.ok(judgeTrialDraft(`# T\n\n${clean} ${clean}`, { lang: 'en', sources: SRC, target: 120 }).score > base.score);
+});
 
 test('judgeTrialDraft passes a clean article and names what failed otherwise', () => {
   const en = `# Title\n\n${words(60, 'tide')}. ${words(50, 'wave')} [1]. ${words(10, 'sea')} [2].`;

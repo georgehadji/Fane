@@ -44,6 +44,7 @@ const USAGE = `Usage: vane "<question>" [options]
        vane --remove-model <slug> [--provider <name>]
        vane --doctor
        vane --article "<topic>" [-o speed|balanced|quality] [--lang el|en] [--words ${DEFAULT_WORDS}] [--out article.md]
+       vane --edit-article article.md "<change>" [-o speed|balanced|quality] [--out new.md]
        vane --image "<prompt>" [-n ${DEFAULT_IMAGES}] [--tier ${TIERS.join('|')}] [--family <f>] [--aspect 1:1] [--out-dir dir]
 
 Options:
@@ -105,6 +106,8 @@ Articles (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; sources come 
                          price band of the mode: Speed the cheapest third, Balanced the middle, Quality the dearest
       --list-article-models  Show the models each phase would use for -o <mode> and --lang <l>
       --out <file>       Write the article (Markdown) to a file instead of printing it
+      --edit-article <f> Change an article written by --article: "make it shorter", "translate it to Greek",
+                         "add a paragraph about costs" (requests that add something search with Vane first)
 
 Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURCES, VANE_MODE,
      OPENROUTER_API_KEY, VANE_IMAGE_TEXT_MODEL (prompt enhancement/intent, default ${IMAGE_TEXT_MODEL})
@@ -157,6 +160,7 @@ export function parseCli(argv) {
       words: { type: 'string' },
       'article-model': { type: 'string', multiple: true, default: [] },
       out: { type: 'string' },
+      'edit-article': { type: 'string' },
       url: { type: 'string', default: DEFAULTS.url },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -185,7 +189,7 @@ export function parseCli(argv) {
     if (values.size) values.size = values.size.toUpperCase();
     if (values.stream) throw new UsageError('--stream does not apply to --image');
   }
-  if (values.article || values['list-article-models']) {
+  if (values.article || values['list-article-models'] || values['edit-article'] !== undefined) {
     values['article-model'] = values['article-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
     if (values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
     if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
@@ -660,11 +664,11 @@ const MODE_FOR_TIER = Object.fromEntries(Object.entries(TIER_FOR_MODE).map(([mod
 function printArticleReport(r) {
   const say = (s) => process.stderr.write(`${s}\n`);
   const cost = r.cost ? ` · ≈ $${r.cost.toFixed(4)}` : '';
-  say(`\nvane: ${r.words} words (target ${r.targetWords}), ${r.language === 'el' ? 'Greek' : 'English'}, ${r.mode} · ${r.sources.length} sources cited · ${r.calls} model calls${cost} · ${Math.round(r.ms / 1000)} s`);
-  for (const p of r.phases) say(`  ${p.status.padEnd(9)}${p.phase.padEnd(10)}${p.model || ''}${p.words ? `  ${p.words} words` : ''}${p.note && p.status !== 'ok' ? `  (${p.note})` : ''}`);
-  if (r.claimSupport !== null) say(`  claims supported by their sources: ${Math.round(r.claimSupport * 100)}% of ${r.ledger.length} checked`);
+  say(`\nvane: ${r.words} words${r.targetWords ? ` (target ${r.targetWords})` : ''}, ${r.language === 'el' ? 'Greek' : 'English'}, ${r.mode} · ${r.sources.length} sources cited · ${r.calls} model calls${cost} · ${Math.round(r.ms / 1000)} s`);
+  for (const p of r.phases || []) say(`  ${p.status.padEnd(9)}${p.phase.padEnd(10)}${p.model || ''}${p.words ? `  ${p.words} words` : ''}${p.note && p.status !== 'ok' ? `  (${p.note})` : ''}`);
+  if (r.claimSupport != null) say(`  claims supported by their sources: ${Math.round(r.claimSupport * 100)}% of ${r.ledger.length} checked`);
   if (r.audit) say(`  audit: ${r.audit.score} (${r.audit.passes ? 'passed' : 'failed'}${r.audit.retried ? ', after a retry' : ''})`);
-  if (r.repaired) say(`  repaired ${r.repaired} Greek word${r.repaired === 1 ? '' : 's'} with Latin look-alike letters`);
+  if (r.repaired) say(`  repaired ${r.repaired} Greek spelling slip${r.repaired === 1 ? '' : 's'} (Latin look-alike letters, a dropped final ν)`);
   for (const i of r.checks.items) if (i.level !== 'ok') say(`  ${i.level === 'fail' ? 'FAIL' : 'warn'}  ${i.name}: ${i.detail}`);
   for (const d of r.degraded) say(`  degraded: ${d}`);
 }
@@ -722,8 +726,13 @@ async function runArticle(opts) {
     words: opts.words ?? parseArticleOptions(opts.query).words,
     models: opts['article-model'],
     chains: chosen?.chains,
+    prices: chosen?.prices,
     onProgress: (e) => { if (!opts.json && e.status !== 'running') process.stderr.write(`vane: ${e.phase} ${e.status}${e.model ? ` (${e.model}, ${(e.ms / 1000).toFixed(0)} s)` : ''}${e.phase === 'sources' && e.note ? `: ${e.note}` : ''}\n`); },
   });
+  await writeArticleResult(r, opts);
+}
+
+async function writeArticleResult(r, opts) {
   if (!r.ok) throw new Error(r.error);
   if (opts.out) {
     const { writeFile } = await import('node:fs/promises');
@@ -735,6 +744,37 @@ async function runArticle(opts) {
     if (!opts.out) console.log(r.article);
     printArticleReport(r);
   }
+}
+
+// vane --edit-article article.md "make it shorter": the follow-up edit of Vane's chat, on a file from --article.
+async function runArticleEdit(opts) {
+  const file = opts['edit-article'];
+  if (!opts.query) throw new UsageError(`Missing the change. Example: vane --edit-article ${file || 'article.md'} "make it shorter"`);
+  const { readFile } = await import('node:fs/promises');
+  const [{ createArticleEditor, parseArticleAnswer, targetLanguage }, { chainsFor }] = await Promise.all([import('./write/edit.mjs'), import('./write/models.mjs')]);
+  let text;
+  try { text = await readFile(file, 'utf8'); } catch (err) { throw new UsageError(`Cannot read ${file}: ${err.message}`); }
+  const earlier = parseArticleAnswer(text);
+  if (!earlier?.sources.length) throw new UsageError(`${file} does not look like an article from vane --article (a "# " title, at least 80 words, a Sources list).`);
+  const apiKey = await resolveOpenRouterKey(opts);
+  const client = createOpenRouterClient({ apiKey });
+  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const lang = opts.lang ?? targetLanguage(opts.query, earlier.lang);
+  const explicit = opts['article-model'].length > 0;
+  const chosen = explicit ? { chains: chainsFor(opts['article-model']) } : await defaultChains({ mode, lang, client });
+  // Vane is started only when the change needs a search.
+  const retrieve = async (query) => {
+    const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { sources } = await search({ ...opts, query, stream: false, mode }, providers);
+      if (sources.length) return sources;
+    }
+    return [];
+  };
+  const log = (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); };
+  const edit = createArticleEditor({ client, log });
+  const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: opts.query, lang, mode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: (e) => { if (e.status !== 'running') log(`${e.phase} ${e.status}${e.note ? `: ${e.note}` : ''}`); } });
+  await writeArticleResult(r, opts);
 }
 
 async function readReference(file) {
@@ -799,6 +839,7 @@ async function main() {
   if (opts.help) return console.log(USAGE);
   if (opts.doctor) { if (await doctor(opts)) process.exitCode = 1; return; }
   if (opts.image) return runImage(opts);
+  if (opts['edit-article'] !== undefined) return runArticleEdit(opts);
   if (opts.article) return runArticle(opts);
   if (opts['list-article-models']) return listArticleModels(opts);
   if (opts['list-image-models']) return listImageModels(opts.query, opts.json);

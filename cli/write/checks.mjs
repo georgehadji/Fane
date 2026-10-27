@@ -72,7 +72,11 @@ export function linkCitations(text, used) {
 }
 
 const HEADING = { en: 'Sources', el: 'Πηγές' };
-export function sourcesSection(used, lang) {
+// `html` is for Vane's web UI: it rewrites every "[...]" of an answer that has sources, split at its commas
+// ("[Earth, moon and sun](url)" showed as "[Earth]" and a link "moon and sun"), so links there are <a> tags.
+const htmlText = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const htmlHref = (u) => safeUrl(u).replace(/"/g, '%22').replace(/</g, '%3C').replace(/>/g, '%3E');
+export function sourcesSection(used, lang, { html = false } = {}) {
   if (!used.length) return '';
   const clean = (s) => String(s || '').replace(/[\[\]\n]+/g, ' ').replace(/\s+/g, ' ').trim();
   // pages with a placeholder title ("sample", "Microsoft Word - file.docx") are named by their site instead
@@ -80,9 +84,10 @@ export function sourcesSection(used, lang) {
   const label = (s) => {
     const title = clean(s.title);
     if (title && !JUNK.test(title)) return title;
-    try { return new URL(s.url).hostname.replace(/^www\./, '') || s.url; } catch { return s.url; }
+    try { return new URL(s.url).hostname.replace(/^www\./, '') || s.url; } catch { return String(s.url || ''); }
   };
-  const link = (s) => (isWebUrl(s.url) ? `[${label(s)}](${safeUrl(s.url)})` : label(s));
+  const link = (s) => (!isWebUrl(s.url) ? (html ? htmlText(label(s)) : label(s))
+    : html ? `<a href="${htmlHref(s.url)}">${htmlText(label(s))}</a>` : `[${label(s)}](${safeUrl(s.url)})`);
   return `\n\n## ${HEADING[lang] || HEADING.en}\n\n${used.map((s, i) => `${i + 1}. ${link(s)}`).join('\n')}\n`;
 }
 

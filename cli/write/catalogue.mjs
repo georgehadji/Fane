@@ -10,8 +10,8 @@
 // come first, one lab at a time, so neighbouring roles (draft, critique, fact-check ...) get models
 // from different labs where the pool allows, and each chain ends in fallbacks from other labs.
 
-import { THINKING_LEAK, checkCitations } from './checks.mjs';
-import { countTells, findHomoglyphs, greekShare, wordCount } from './language.mjs';
+import { THINKING_LEAK, checkCitations, rhythm } from './checks.mjs';
+import { countTells, findHomoglyphs, greekShare, greekTypography, wordCount } from './language.mjs';
 import { extractJson } from './llm.mjs';
 
 export const FALLBACKS_PER_ROLE = 3;
@@ -79,11 +79,12 @@ const ROLE_ORDER = ['draft', 'critique', 'factcheck', 'revise', 'audit', 'polish
 const BANDS = { speed: [0, 1 / 3], balanced: [1 / 3, 2 / 3], quality: [2 / 3, 1] };
 
 // trial: { [modelId]: { en: { ok, tellsPerThousand }, el: { ok, tellsPerThousand }, json: { ok } } }
-// -> { chains: { role: [id...] }, pool: n, band: [id...] } | null when no model passed for `lang`.
+// -> { chains: { role: [id...] }, pool: n, band: [id...], prices: { id: { in, out } } } | null when no model passed for `lang`.
 export function selectChains(catalogue, trial, { mode = 'balanced', lang = 'en' } = {}) {
   const pool = catalogue.filter(m => trial?.[m.id]?.[lang]?.ok);
   if (!pool.length) return null;
-  const tells = (m) => trial[m.id][lang].tellsPerThousand ?? 99;
+  // the trial's combined score; a trial.json written before it existed has stock phrases only
+  const tells = (m) => trial[m.id][lang].score ?? trial[m.id][lang].tellsPerThousand ?? 99;
   const better = (a, b) => tells(a) - tells(b) || b.created - a.created;
   const byPrice = [...pool].sort((a, b) => a.price - b.price);
   const n = byPrice.length;
@@ -106,19 +107,24 @@ export function selectChains(catalogue, trial, { mode = 'balanced', lang = 'en' 
   // the query-writing call is cheap whatever the mode: the cheapest verified models that answer JSON
   chains.queries = byPrice.filter(m => trial[m.id]?.json?.ok).slice(0, 2).map(m => m.id);
   if (!chains.queries.length) chains.queries = chains.outline;
-  return { chains, pool: n, band: band.map(m => m.id) };
+  // USD per million tokens, for the models that report no usage.cost (llm.mjs estimates their cost)
+  const prices = Object.fromEntries(pool.map(m => [m.id, { in: m.priceIn, out: m.priceOut }]));
+  return { chains, pool: n, band: band.map(m => m.id), prices };
 }
 
 // ---- the live trial: what counts as a pass ----
 
 // A short article written with the real draft prompt (scripts/article-trial.mjs). `finish` is the
-// provider's finish_reason. -> { ok, problems, words, tellsPerThousand }
-export function judgeTrialDraft(text, { lang, sources, finish = 'stop' }) {
+// provider's finish_reason. -> { ok, problems, words, tellsPerThousand, score }
+// `score` ranks the models that pass (lower is better). Stock phrases alone did not separate them: in the
+// first trial all 27 that passed had 0 per 1000 words. So it adds numbers that are in no cited source, the
+// share of uncited sentences, the miss on the length, flat sentence rhythm and Greek typography faults.
+export function judgeTrialDraft(text, { lang, sources, finish = 'stop', target = 150 }) {
   const problems = [];
   const words = wordCount(text);
   if (finish !== 'stop') problems.push(`finish_reason ${finish}`);
   if (THINKING_LEAK.test(text)) problems.push('reasoning in place of an answer');
-  if (words < 70 || words > 450) problems.push(`${words} words for a target of 150`);
+  if (words < target * 0.45 || words > target * 3) problems.push(`${words} words for a target of ${target}`);
   const greek = greekShare(text);
   if (lang === 'el' && greek < 0.75) problems.push('not written in Greek');
   if (lang === 'en' && greek > 0.05) problems.push('not written in English');
@@ -126,7 +132,13 @@ export function judgeTrialDraft(text, { lang, sources, finish = 'stop' }) {
   const c = checkCitations(text, sources);
   if (c.invalid.length) problems.push(`cites source ${c.invalid[0]}, which does not exist`);
   else if (!c.used.length) problems.push('no citations');
-  return { ok: !problems.length, problems, words, tellsPerThousand: countTells(text, lang).perThousand };
+  const tellsPerThousand = countTells(text, lang).perThousand;
+  const invented = c.numbersMissing.reduce((n, m) => n + m.numbers.length, 0);
+  const uncited = c.cited + c.uncited ? c.uncited / (c.cited + c.uncited) : 1;
+  const { cv } = rhythm(text);
+  const typography = lang === 'el' ? greekTypography(text).reduce((n, f) => n + f.count, 0) : 0;
+  const score = tellsPerThousand + 3 * invented + 5 * uncited + 10 * Math.abs(words - target) / target + (cv === null ? 2 : 20 * Math.max(0, 0.35 - cv)) + typography;
+  return { ok: !problems.length, problems, words, tellsPerThousand, invented, score: Math.round(score * 100) / 100 };
 }
 
 // The query-writing prompt answered as JSON: a "queries" array of at least two strings.

@@ -10,7 +10,7 @@ const NBSP = ' ';
 
 const LABELS = {
   en: { rewrite: 'Trimming to the length', edit: 'Editing the article', sources: 'Researching sources', queries: 'Writing search queries', outline: 'Planning the outline', draft: 'Writing the draft', factcheck: 'Checking the facts', critique: 'Reviewing the argument', revise: 'Revising', polish: 'Polishing', style: 'Editing the style', copy: 'Copy editing', audit: 'Final check' },
-  el: { rewrite: 'Περικοπή στο μήκος', edit: 'Επεξεργασία του κειμένου', sources: 'Αναζήτηση πηγών', queries: 'Διατύπωση αναζητήσεων', outline: 'Σχεδιασμός δομής', draft: 'Γράψιμο του κειμένου', factcheck: 'Έλεγχος γεγονότων', critique: 'Κριτική ανάγνωση', revise: 'Αναθεώρηση', polish: 'Επιμέλεια', style: 'Επιμέλεια ύφους', copy: 'Γλωσσική επιμέλεια', audit: 'Τελικός έλεγχος' },
+  el: { rewrite: 'Περικοπή στο ζητούμενο μήκος', edit: 'Επεξεργασία του κειμένου', sources: 'Αναζήτηση πηγών', queries: 'Διατύπωση αναζητήσεων', outline: 'Σχεδιασμός δομής', draft: 'Συγγραφή του κειμένου', factcheck: 'Έλεγχος γεγονότων', critique: 'Κριτική ανάγνωση', revise: 'Αναθεώρηση', polish: 'Επιμέλεια', style: 'Επιμέλεια ύφους', copy: 'Γλωσσική επιμέλεια', audit: 'Τελικός έλεγχος' },
 };
 const WORDS = {
   en: { words: 'words', sources: 'sources', source: 'source', draft: 'Draft. Checking and editing next…', modes: { speed: 'Speed', balanced: 'Balanced', quality: 'Quality' } },
@@ -34,7 +34,7 @@ export function renderArticleProgress(state) {
   const status = quiet([escapeHtml(current), done.length ? escapeHtml(done.join(' · ')) : '']);
   if (!state.draft) return status;
   const { text, used } = renumber(cleanMarkdown(state.draft.text), state.draft.sources);
-  return `${linkCitations(text, used).trimEnd()}${sourcesSection(used, lang)}\n\n${status}`;
+  return `${linkCitations(text, used).trimEnd()}${sourcesSection(used, lang, { html: true }).trimEnd()}\n\n${status}`;
 }
 
 // The finished article and one status paragraph: size, sources, cost, time, mode, then what went
@@ -50,9 +50,9 @@ export function renderArticleResult(r) {
     W.modes[r.mode] || r.mode,
   ].filter(Boolean).join(' · ');
   const notes = [...new Set([...r.degraded, ...r.checks.items.filter(i => i.level !== 'ok').map(i => `${i.name}: ${i.detail}`)])].slice(0, 6);
-  // r.article already ends with the sources list; only the [n] marks in the text become links
-  const [body, ...rest] = cleanMarkdown(r.article).split(/\n\n(?=## (?:Sources|Πηγές)\n)/);
-  return `${[linkCitations(body, r.sources), ...rest].join('\n\n').trimEnd()}\n\n${quiet([escapeHtml(summary), ...notes.map(n => escapeHtml(n))])}`;
+  // r.article ends with the Markdown sources list; the web answer writes its own, with HTML links
+  const [body] = cleanMarkdown(r.article).split(/\n\n(?=## (?:Sources|Πηγές)\n)/);
+  return `${linkCitations(body, r.sources).trimEnd()}${sourcesSection(r.sources, lang, { html: true }).trimEnd()}\n\n${quiet([escapeHtml(summary), ...notes.map(n => escapeHtml(n))])}`;
 }
 
 // A run that produced no article.

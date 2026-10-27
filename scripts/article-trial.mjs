@@ -20,12 +20,16 @@ import { REASONING } from '../cli/write/models.mjs';
 import { prompts } from '../cli/write/prompts.mjs';
 
 const TRIAL_FILE = fileURLToPath(new URL('../cli/write/trial.json', import.meta.url));
+// A topic that invites stock phrases ("a beacon of hope", "the future of energy"), sources full of numbers
+// (a model that invents or bends one is caught by judgeTrialDraft's score) and one that disagrees with another.
 const SOURCES = [
-  { title: 'Tidal energy in Orkney', url: 'https://example.org/orkney', content: 'The Orkney test site supplied about 1,200 homes in 2023 and produced 2 TWh. Turbines sit on the seabed and are serviced by boat.' },
-  { title: 'Costs of marine power', url: 'https://example.org/costs', content: 'Costs fell by 40% between 2015 and 2023, but remain above onshore wind. Tides are predictable twice a day.' },
-  { title: 'Environmental effects', url: 'https://example.org/effects', content: 'Monitoring found no change in local seal numbers. Noise from turbines is low.' },
+  { title: 'Tidal energy in Orkney', url: 'https://example.org/orkney', content: 'The Orkney test site supplied about 1,200 homes in 2023 and produced 2 TWh since 2016. Turbines sit on the seabed at 35 metres and are serviced by boat. The site employs 46 people in Stromness.' },
+  { title: 'Costs of marine power', url: 'https://example.org/costs', content: 'Costs fell by 40% between 2015 and 2023, to about 180 pounds per megawatt hour, but remain above onshore wind at 50 pounds. Tides are predictable twice a day, which grid operators value.' },
+  { title: 'Environmental effects', url: 'https://example.org/effects', content: 'Five years of monitoring found no change in local seal numbers. Noise from turbines is low. Seabirds that dive near turbines were tracked; 3 collisions were recorded.' },
+  { title: 'A sceptical view', url: 'https://example.org/sceptic', content: 'Critics say subsidies of 211 pounds per megawatt hour in the 2022 auction show tidal power is still far from competitive, and that only 10 MW were built in Scotland in a decade.' },
 ];
-const TOPICS = { en: 'tidal power in Orkney', el: 'η παλιρροϊκή ενέργεια στις Ορκάδες' };
+const TOPICS = { en: 'whether tidal power has a future in Orkney', el: 'αν η παλιρροϊκή ενέργεια έχει μέλλον στις Ορκάδες' };
+const TARGET_WORDS = 350; // long enough for sentence rhythm and stock phrases to show (the first trial used 150)
 const MAX_TOKENS = 12000; // room for models that think before they write
 
 const { values } = parseArgs({
@@ -49,8 +53,8 @@ async function apiKey() {
   return key;
 }
 
-// Rough cost of one candidate: two 150-word articles and a short JSON answer; thinking models spend more tokens.
-const estimate = (m) => (m.priceOut * (m.reasoning ? 2 * 3000 + 800 : 2 * 450 + 150) + m.priceIn * 3 * 1200) / 1e6;
+// Rough cost of one candidate: two 350-word articles and a short JSON answer; thinking models spend more tokens.
+const estimate = (m) => (m.priceOut * (m.reasoning ? 2 * 3500 + 800 : 2 * 1100 + 150) + m.priceIn * 3 * 1500) / 1e6;
 
 async function ask(client, model, { system, user }, { json = false } = {}) {
   const started = Date.now();
@@ -78,9 +82,9 @@ async function trialOne(client, model) {
   const out = { price: { in: model.priceIn, out: model.priceOut } };
   let cost = 0;
   for (const lang of ['en', 'el']) {
-    const r = await ask(client, model, prompts.draft({ topic: TOPICS[lang], lang, words: 150, sources: SOURCES, outline: null }));
+    const r = await ask(client, model, prompts.draft({ topic: TOPICS[lang], lang, words: TARGET_WORDS, sources: SOURCES, outline: null }));
     cost += r.cost;
-    const verdict = r.error ? { ok: false, problems: [r.error], words: 0, tellsPerThousand: null } : judgeTrialDraft(r.text, { lang, sources: SOURCES, finish: r.finish });
+    const verdict = r.error ? { ok: false, problems: [r.error], words: 0, tellsPerThousand: null } : judgeTrialDraft(r.text, { lang, sources: SOURCES, finish: r.finish, target: TARGET_WORDS });
     out[lang] = { ...verdict, ms: r.ms };
   }
   const j = await ask(client, model, prompts.queries({ topic: TOPICS.en, lang: 'en' }), { json: true });
@@ -119,7 +123,7 @@ try {
     saved.models[m.id] = r;
     const mark = (x) => (x.ok ? 'ok  ' : 'FAIL');
     const problems = [...new Set([r.en, r.el, r.json].flatMap(x => x.problems || []))];
-    console.log(`${m.id.padEnd(46)} en ${mark(r.en)} el ${mark(r.el)} json ${mark(r.json)}  tells ${r.en.tellsPerThousand ?? '-'}/${r.el.tellsPerThousand ?? '-'}  $${r.cost.toFixed(4)}${problems.length ? `  (${problems.join('; ')})` : ''}`);
+    console.log(`${m.id.padEnd(46)} en ${mark(r.en)} el ${mark(r.el)} json ${mark(r.json)}  score ${r.en.score ?? '-'}/${r.el.score ?? '-'}  $${r.cost.toFixed(4)}${problems.length ? `  (${problems.join('; ')})` : ''}`);
   });
 } finally {
   saved.updated = new Date().toISOString().slice(0, 10);

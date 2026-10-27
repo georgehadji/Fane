@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { LANGUAGES, countTells, detectLanguage, findHomoglyphs, fold, greekTypography, repairHomoglyphs, wordCount } from '../write/language.mjs';
+import { LANGUAGES, countTells, detectLanguage, findHomoglyphs, fold, greekTypography, repairFinalNu, repairHomoglyphs, wordCount } from '../write/language.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions } from '../write/intent.mjs';
 import { checkCitations, renumber, rhythm, runChecks, sentences, sourcesSection } from '../write/checks.mjs';
 import { AUDIT_DIMENSIONS, auditResult, claimLedger, claimSupportRatio } from '../write/gate.mjs';
 import { DEFAULT_WORDS, PHASES, chainsFor, clampWords, tokensFor } from '../write/models.mjs';
 import { createRoleCaller, extractJson } from '../write/llm.mjs';
 import { createArticlePipeline } from '../write/pipeline.mjs';
+import { parseArticleAnswer } from '../write/edit.mjs';
 import { prompts, sourceBlock } from '../write/prompts.mjs';
 import { OpenRouterError } from '../image/openrouter.mjs';
 
@@ -35,6 +36,18 @@ test('countTells finds Greek stock phrases whatever the accents or case', () => 
   const labels = Object.fromEntries(t.hits.map(h => [h.label, h.count]));
   assert.ok(labels['significance'] >= 1 && labels['participle-tail'] === 1 && labels['filler'] >= 2 && labels['promotional'] === 1 && labels['generic-conclusion'] === 1 && labels['vague-attribution'] === 1, JSON.stringify(labels));
   assert.ok(t.perThousand > 100);
+});
+
+test('countTells: the noun-heavy Greek style and "διαδραματίζει ... ρόλο" count; the plain verb does not', () => {
+  assert.equal(countTells('Η μονάδα διαδραματίζει καθοριστικό ρόλο. Σημειώθηκε αύξηση κατά 40%. Το έργο πραγματοποιήθηκε το 2016· αξιοποιώντας τις παλίρροιες. Μόνο ο χρόνος θα δείξει.', 'el').total, 5);
+  assert.equal(countTells('Η παραγωγή αυξήθηκε κατά 40% το 2023. Το έργο έγινε το 2016.', 'el').total, 0);
+});
+
+test('repairFinalNu puts back the final ν of την, στην, μην where Greek keeps it, and nowhere else', () => {
+  const r = repairFinalNu('Οι επιδράσεις στη ξηρά. Τη πόλη. Μη ανησυχείς. ΣΤΗ ΑΘΗΝΑ. Στη θάλασσα, τη Λέσβο, μη λες. Το παιδί, το κόστος.');
+  assert.equal(r.text, 'Οι επιδράσεις στην ξηρά. Την πόλη. Μην ανησυχείς. ΣΤΗΝ ΑΘΗΝΑ. Στη θάλασσα, τη Λέσβο, μη λες. Το παιδί, το κόστος.');
+  assert.deepEqual(r.fixed, ['στη ξηρά', 'Τη πόλη', 'Μη ανησυχείς', 'ΣΤΗ ΑΘΗΝΑ']);
+  assert.equal(repairFinalNu('μητέρα στήθος τηλέφωνο').fixed.length, 0); // only the whole words
 });
 
 test('countTells: plain Greek and plain English have none; English stock phrases are found', () => {
@@ -198,7 +211,7 @@ test('phases per mode: Speed 2 model calls, Balanced 6, Quality 8 (sources are f
 });
 
 test('token budgets: Greek needs more than English, nothing falls back to a 2048 default', () => {
-  assert.ok(tokensFor('draft', 900, 'el') > tokensFor('draft', 900, 'en') * 1.3);
+  assert.ok(tokensFor('draft', 900, 'el') - tokensFor('draft', 900, 'en') > 900 * 2); // the answer part, on top of the same thinking headroom
   assert.ok(tokensFor('outline', 900, 'el') >= 7000); // the first live run: an outline cut off at 3880 tokens by three models
   for (const role of ['queries', 'outline', 'draft', 'factcheck', 'critique', 'revise', 'polish', 'style', 'copy', 'audit']) assert.ok(tokensFor(role, 900, 'en') >= 1400, role);
   assert.equal(clampWords(10), 300);
@@ -251,6 +264,25 @@ test('role call: a cut-off, an empty answer and leaked reasoning each move on to
   assert.equal(r.fallback, true);
   assert.deepEqual(r.attempts.map(a => a.problem), ['cut off at 100 tokens', 'empty answer', 'reasoning in place of an answer', null]);
   assert.ok(Math.abs(r.cost - 0.004) < 1e-9);
+});
+
+test('role call: after a network failure the next model waits, longer each time; an HTTP error does not wait', async () => {
+  const net = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+  const waits = [];
+  const r = await createRoleCaller({ client: stub([net(), net(), reply('An answer.')]), sleep: async (ms) => { waits.push(ms); } })('draft', { system: 's', user: 'u' }, { chain: ['m1', 'm2', 'm3'], maxTokens: 100 });
+  assert.equal(r.model, 'm3');
+  assert.deepEqual(waits, [10_000, 20_000]);
+  assert.match(r.attempts[0].problem, /fetch failed \(ECONNRESET\)/);
+  const none = [];
+  await createRoleCaller({ client: stub([new OpenRouterError('503 busy', 503), reply('ok')]), sleep: async (ms) => { none.push(ms); } })('draft', { system: 's', user: 'u' }, { chain: ['m1', 'm2'], maxTokens: 100 });
+  assert.deepEqual(none, []);
+});
+
+test('role call: a model that reports no cost is priced from its token counts', async () => {
+  const r = await createRoleCaller({ client: stub([reply('An answer.', { usage: { prompt_tokens: 2000, completion_tokens: 1000 } })]) })('draft', { system: 's', user: 'u' }, { chain: ['m'], maxTokens: 100, prices: { m: { in: 0.15, out: 0.6 } } });
+  assert.ok(Math.abs(r.cost - 0.0009) < 1e-12);
+  const reported = await createRoleCaller({ client: stub([reply('An answer.', { usage: { cost: 0.002, prompt_tokens: 2000, completion_tokens: 1000 } })]) })('draft', { system: 's', user: 'u' }, { chain: ['m'], maxTokens: 100, prices: { m: { in: 0.15, out: 0.6 } } });
+  assert.equal(reported.cost, 0.002); // the provider's own figure wins
 });
 
 test('role call: <think> blocks are removed from a good answer', async () => {
@@ -384,8 +416,19 @@ test('a draft far over the target is cut back by one extra call, and the report 
   assert.ok(r.words < 350 && r.degraded.length === 0);
 });
 
+test('a trim that lands over the cap gets one more pass, and no more than that', async () => {
+  const c = fake({ draft: article(500), rewrite: (n) => article(n === 1 ? 420 : 300) });
+  const r = await run(c, { mode: 'speed' });
+  assert.deepEqual(c.calls.map(x => x.role), ['outline', 'draft', 'rewrite', 'rewrite']);
+  assert.match(c.calls[3].body.messages[1].content, new RegExp(`it is ${wordCount(article(420))} words, so remove about ${wordCount(article(420)) - 300}`));
+  assert.ok(r.words <= 330 && r.degraded.length === 0);
+  const stuck = fake({ draft: article(500), rewrite: (n) => article(460 - n * 40) });
+  await run(stuck, { mode: 'speed' });
+  assert.equal(stuck.calls.filter(x => x.role === 'rewrite').length, 2);
+});
+
 test('an edit that grows the text past the target is cut back; a draft within a quarter of the target is not touched', async () => {
-  const c = fake({ revise: article(480), rewrite: article(320) });
+  const c = fake({ revise: article(480), rewrite: article(300) });
   const r = await run(c, { mode: 'balanced' });
   assert.deepEqual(c.calls.map(x => x.role), ['outline', 'draft', 'factcheck', 'critique', 'revise', 'rewrite', 'polish']);
   assert.ok(r.words < 350);
@@ -524,4 +567,14 @@ test('parseCli: article options are validated', () => {
   assert.throws(() => parseCli(['--article', 'x', '--tier', 'gold']), /Invalid --tier/);
   assert.throws(() => parseCli(['--article', 'x', '--stream']), /--stream does not apply/);
   assert.equal(parseCli(['write an article about tides']).article, false); // routing happens in main(), by isArticleRequest
+  const e = parseCli(['--edit-article', 'a.md', 'make it shorter', '--article-model', 'a/x,b/y']);
+  assert.deepEqual([e['edit-article'], e.query, e['article-model']], ['a.md', 'make it shorter', ['a/x', 'b/y']]);
+  assert.throws(() => parseCli(['--edit-article', 'a.md', 'x', '--lang', 'fr']), /Invalid --lang/);
+});
+
+test('a file written by vane --article reads back for an edit', () => {
+  const body = `# Tides\n\n${'Tides move water twice a day near the coast [1]. '.repeat(12)}Costs fell [2].`;
+  const p = parseArticleAnswer(`${body}${sourcesSection([{ title: 'A, b', url: 'https://example.org/a' }, { title: 'Beta', url: 'https://example.org/b' }], 'en')}`);
+  assert.equal(p.body, body);
+  assert.deepEqual(p.sources.map(s => [s.title, s.url]), [['A, b', 'https://example.org/a'], ['Beta', 'https://example.org/b']]);
 });

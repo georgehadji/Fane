@@ -250,6 +250,28 @@ test('pipeline: enhance, two labs in parallel, Image API for pure generators', a
   assert.deepEqual(flux.body, { model: 'black-forest-labs/flux-3-image-klein', prompt: 'an enhanced prompt', n: 1, aspect_ratio: '16:9', resolution: '2K' });
 });
 
+test('pipeline: an edit that ignored the reference is rejected and the chain moves on; a failed check keeps the image', async () => {
+  const REF = 'data:image/png;base64,REF';
+  const client = fakeClient();
+  const draw = client.chat;
+  let verdicts = ['no', 'yes'];
+  client.chat = async (body) => {
+    if (body.model !== 'x/cheap') return draw(body);
+    client.calls.push({ endpoint: 'check', body });
+    return { choices: [{ message: { content: verdicts.shift() } }] };
+  };
+  const r = await createImageGenerator({ client, download: async () => null, textModel: 'x/cheap' })({ prompt: 'make it a pencil sketch', count: 1, enhance: false, references: [REF] });
+  assert.ok(r.ok);
+  const checks = client.calls.filter(c => c.endpoint === 'check');
+  assert.equal(checks.length, 2);
+  assert.deepEqual(checks[0].body.messages[0].content.slice(1).map(p => p.image_url.url), [REF, PNG_URL]);
+  assert.match(r.errors[0], /ignored the reference image/);
+  assert.notEqual(r.images[0].model, r.models[0]); // the primary's picture was rejected, a fallback's kept
+  client.chat = async (body) => { if (body.model === 'x/cheap') throw new Error('503'); return draw(body); };
+  const kept = await createImageGenerator({ client, download: async () => null, textModel: 'x/cheap' })({ prompt: 'make it blue', count: 1, enhance: false, references: [REF] });
+  assert.equal(kept.images[0].model, kept.models[0]);
+});
+
 test('pipeline: hybrid models use chat completions with modalities and image_config', async () => {
   const client = fakeClient();
   const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'a poster that says "Open"', count: 1, enhance: false, family: 'text_in_image' });

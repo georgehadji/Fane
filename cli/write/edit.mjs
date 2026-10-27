@@ -4,7 +4,7 @@
 // citations renumbered, sources list written by code, checks run. Pure except for the injected client.
 import { ANSWER_MARKER } from '../image/present.mjs';
 import { checkCitations, renumber, runChecks, sourcesSection } from './checks.mjs';
-import { detectLanguage, fold, repairHomoglyphs, wordCount } from './language.mjs';
+import { detectLanguage, fold, repairFinalNu, repairHomoglyphs, wordCount } from './language.mjs';
 import { createRoleCaller } from './llm.mjs';
 import { DEFAULT_MODE, tokensFor } from './models.mjs';
 import { prompts } from './prompts.mjs';
@@ -15,6 +15,11 @@ const EN_EDIT = new RegExp(String.raw`^\s*(?:(?:ok(?:ay)?|now|and|but|then|pleas
 const EL_EDIT = new RegExp(String.raw`^\s*(?:(?:ok|τωρα|και|αλλα|παρακαλω|μπορεισ να|θα μπορουσεσ να)\s+)*(?:κανε|συντομευσε|κοντυνε|μικρυνε|μεγαλωσε|επεκτεινε|απλοποιησε|ξαναγραψε|γραψε ξανα|αναδιατυπωσε|αλλαξε|αντικαταστησε|διορθωσε|βελτιωσε|ενημερωσε|προσθεσε|αφαιρεσε|διαγραψε|σβησε|μεταφρασε|πιο|λιγο|περισσοτερο|λιγοτερο|πολυ)(?![\p{L}])`, 'iu');
 
 export const isArticleEdit = (text) => EN_EDIT.test(String(text || '')) || EL_EDIT.test(fold(String(text || '')));
+
+// "add a section on costs", "πρόσθεσε μια παράγραφο για ...": facts the article does not have yet, so the edit
+// searches first. Other edits ("shorter", "more formal") work with what the article already says.
+const NEW_FACTS = /\b(?:add|include|expand|extend|elaborate|cover|mention|more (?:about|on|detail))\b|(?:^|[^\p{L}])(?:προσθεσ|συμπεριλαβ|επεκτειν|αναπτυξ|αναφερ|περισσοτερα (?:για|σχετικα))/u;
+export const needsNewFacts = (instruction) => NEW_FACTS.test(fold(String(instruction || '')).toLowerCase());
 
 // "translate it to English", "στα αγγλικά": the language the edited article should be in, else `fallback`.
 export function targetLanguage(instruction, fallback) {
@@ -35,9 +40,13 @@ export function parseArticleAnswer(answer) {
   const [head, list = ''] = text.split(SOURCES_AT);
   if (!/^\s*#\s+\S/m.test(head) || wordCount(head) < 80) return null;
   const sources = [];
+  const unescape = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
   for (const line of list.split('\n')) {
-    const m = /^(\d+)\.\s+(?:\[(.*)\]\((\S+)\)|(.+))$/.exec(line.trim());
-    if (m) sources[Number(m[1]) - 1] = { title: m[2] ?? m[4], url: m[3] || '', content: '' };
+    // "1. <a href="url">title</a>" (the web answer since 2026-10), "1. [title](url)" or a bare title
+    const a = /^(\d+)\.\s+<a href="([^"]*)">(.*)<\/a>$/.exec(line.trim());
+    const m = a ? null : /^(\d+)\.\s+(?:\[(.*)\]\((\S+)\)|(.+))$/.exec(line.trim());
+    if (a) sources[Number(a[1]) - 1] = { title: unescape(a[3]), url: a[2], content: '' };
+    else if (m) sources[Number(m[1]) - 1] = { title: m[2] ?? unescape(m[4]), url: m[3] || '', content: '' };
   }
   const body = head
     .replace(new RegExp(`\\[([${SUP}]+)\\]\\([^)\\s]*\\)`, 'g'), (_, sup) => `[${[...sup].map(c => SUP.indexOf(c)).join('')}]`)
@@ -46,23 +55,40 @@ export function parseArticleAnswer(answer) {
   return { body, sources: Array.from(sources, s => s || { title: '', url: '', content: '' }), lang: detectLanguage(body) };
 }
 
+// How many sources a search for an edit may add.
+export const MAX_NEW_SOURCES = 8;
+
 // -> { ok, article, language, mode, words, sources, degraded, checks, calls, cost, ms } | { ok: false, error }
-// Same shape as the article pipeline's result, so renderArticleResult shows it.
+// Same shape as the article pipeline's result, so renderArticleResult shows it. `retrieve(query)` (Vane's
+// research, optional) is used when the request asks for something new; found pages are added after the old sources.
 export function createArticleEditor({ client, log = () => {}, now = Date.now }) {
   const call = createRoleCaller({ client, log });
-  return async function editArticle({ body, sources, instruction, lang, mode = DEFAULT_MODE, chains, onProgress = () => {} }) {
+  return async function editArticle({ body, sources, instruction, lang, mode = DEFAULT_MODE, chains, prices, retrieve, onProgress = () => {} }) {
     const t0 = now();
     lang ||= detectLanguage(body);
     const emit = (e) => { try { onProgress(e); } catch { /* a throwing listener must not stop the edit */ } };
+    const degraded = [];
+    let fresh = [];
+    if (retrieve && needsNewFacts(instruction)) {
+      emit({ phase: 'sources', status: 'running' });
+      const title = /^\s*#\s+(.+)$/m.exec(body)?.[1].trim() || '';
+      let found = [];
+      try { found = await retrieve(title ? `${title}: ${instruction}` : instruction); } catch (err) { log(`search for the edit failed: ${err.message}`); }
+      const seen = new Set(sources.map(s => s.url).filter(Boolean));
+      for (const s of found || []) if (s?.url && !seen.has(s.url) && fresh.length < MAX_NEW_SOURCES) { seen.add(s.url); fresh.push({ title: s.title || s.url, url: s.url, content: s.content || '' }); }
+      emit({ phase: 'sources', status: 'done', note: `${fresh.length} new sources` });
+      if (!fresh.length) degraded.push('the search found no new sources: the edit could only use what the article already says');
+    }
+    const all = [...sources, ...fresh];
     emit({ phase: 'edit', status: 'running' });
     // "longer" can grow the text: room for half as much again.
-    const r = await call('rewrite', prompts.rewrite({ lang, article: body, sources, instruction }), { chain: chains.draft, maxTokens: tokensFor('draft', Math.ceil(wordCount(body) * 1.5), lang) });
+    const r = await call('rewrite', prompts.rewrite({ lang, article: body, sources: all, instruction, newFacts: fresh.length > 0 }), { chain: chains.draft, maxTokens: tokensFor('draft', Math.ceil(wordCount(body) * 1.5), lang), prices });
     emit({ phase: 'edit', status: r.ok ? 'ok' : 'failed' });
     const base = { language: lang, mode, calls: r.attempts.length, cost: r.cost };
     if (!r.ok) return { ok: false, fatal: r.fatal, status: r.status, error: `the edit failed: ${r.errors.join('; ')}`, ...base };
+    sources = all;
 
-    const degraded = [];
-    const next = lang === 'el' ? repairHomoglyphs(r.text).text : r.text;
+    const next = lang === 'el' ? repairFinalNu(repairHomoglyphs(r.text).text).text : r.text;
     if (/^\s*#\s/m.test(body) && !/^\s*#\s/m.test(next)) return { ok: false, error: 'the edit lost the title, so the article was not changed', ...base };
     if (wordCount(next) < wordCount(body) * 0.25) return { ok: false, error: 'the edit left less than a quarter of the text, so the article was not changed', ...base };
     const raw = checkCitations(next, sources);

@@ -6,7 +6,7 @@ import { cleanMarkdown, renderArticleFailure, renderArticleProgress, renderArtic
 import { handleArticleRequest } from '../write/vane-hook.mjs';
 import { ANSWER_MARKER, tagged } from '../image/present.mjs';
 import { sourcesSection } from '../write/checks.mjs';
-import { isArticleEdit, parseArticleAnswer, targetLanguage } from '../write/edit.mjs';
+import { isArticleEdit, needsNewFacts, parseArticleAnswer, targetLanguage } from '../write/edit.mjs';
 
 const require = createRequire(import.meta.url);
 const { planPatch } = require('../../patches/lib/apply-targets.js');
@@ -37,7 +37,7 @@ test('progress without a draft is one status paragraph, in the language of the a
 test('progress with a draft shows it numbered from 1 with its sources, above the status', () => {
   const html = renderArticleProgress({ lang: 'en', phases: [{ phase: 'draft', status: 'ok' }], running: 'factcheck', draft: { text: '# Tides\n\nCosts fell [3]. Homes [1].', sources: SOURCES } });
   assert.ok(html.startsWith('# Tides\n\nCosts fell [¹](https://example.org/c). Homes [²](https://example.org/a).')); // links, not "[n]": Vane would turn that into a chip for its own sources
-  assert.match(html, /## Sources\n\n1\. \[Wind versus tide\]\(https:\/\/example\.org\/c\)\n2\. \[Tidal energy in Orkney\]/);
+  assert.match(html, /## Sources\n\n1\. <a href="https:\/\/example\.org\/c">Wind versus tide<\/a>\n2\. <a href="https:\/\/example\.org\/a">Tidal energy in Orkney<\/a>\n\n<p/);
   assert.match(html, /Draft\. Checking and editing next…/);
   assert.ok(html.indexOf('## Sources') < html.indexOf('<p role="status"'));
 });
@@ -55,7 +55,15 @@ test('the result is the article followed by one summary paragraph', () => {
   assert.match(renderArticleResult(RESULT({ language: 'el', sources: [{}, {}] })), /412 λέξεις · 2 πηγές/);
 });
 
-test('citations in the finished article become superscript links; the sources list is left as it is', () => {
+test('a source title with a comma is written as an HTML link, and read back by the editor', () => {
+  // Vane rewrites any "[...]" in an answer with sources, split at its commas: "[Earth, moon and sun](url)" showed as "[Earth]" + a link
+  const html = renderArticleResult(RESULT({ sources: [{ title: 'The Earth, moon & sun', url: 'https://example.org/a?x=1&y="2"' }] }));
+  assert.match(html, /\n1\. <a href="https:\/\/example\.org\/a\?x=1&y=%222%22">The Earth, moon &amp; sun<\/a>\n/);
+  const back = parseArticleAnswer(html.replace('Costs fell', `${'Filler words for length. '.repeat(20)}Costs fell`));
+  assert.deepEqual(back.sources, [{ title: 'The Earth, moon & sun', url: 'https://example.org/a?x=1&y=%222%22', content: '' }]);
+});
+
+test('citations in the finished article become superscript links; the sources list is written again from the sources', () => {
   const html = renderArticleResult(RESULT({
     article: '# T\n\nA claim [1]. Two [1, 2]. A third [12].\n\n## Sources\n\n1. [A](https://example.org/a)\n2. [B](https://example.org/b)\n',
     sources: [{ url: 'https://example.org/a' }, { url: 'https://example.org/b' }],
@@ -63,7 +71,7 @@ test('citations in the finished article become superscript links; the sources li
   assert.match(html, /A claim \[¹\]\(https:\/\/example\.org\/a\)\./);
   assert.match(html, /Two \[¹\]\(https:\/\/example\.org\/a\) \[²\]\(https:\/\/example\.org\/b\)\./);
   assert.match(html, /A third ¹²\./); // no source 12: a plain superscript
-  assert.match(html, /## Sources\n\n1\. \[A\]\(https:\/\/example\.org\/a\)\n2\. \[B\]/);
+  assert.match(html, /## Sources\n\n1\. <a href="https:\/\/example\.org\/a">example\.org<\/a>\n2\. <a href="https:\/\/example\.org\/b">example\.org<\/a>\n\n<p/);
   assert.doesNotMatch(html, /\[\d+\]/);
 });
 
@@ -275,6 +283,30 @@ test('"make it shorter" after an article edits it in one call, without a new sea
   assert.match(final, /## Sources/);
   assert.match(final, /words · 3 sources · ≈ \$0\.00\d( · \d+s)? · Speed/); // the fake clock is instant
   assert.ok(final.endsWith(ANSWER_MARKER));
+});
+
+test('edits that ask for something new are told apart from rewording', () => {
+  for (const q of ['add a paragraph about costs', 'expand the history section', 'say more about Orkney', 'πρόσθεσε μια παράγραφο για το κόστος', 'Επέκτεινε την εισαγωγή']) assert.equal(needsNewFacts(q), true, q);
+  for (const q of ['make it shorter', 'more formal please', 'translate it to Greek', 'κάνε το πιο σύντομο', 'rewrite the conclusion']) assert.equal(needsNewFacts(q), false, q);
+});
+
+test('"add a paragraph about costs" searches first, and the new source can be cited', async () => {
+  const u = ui();
+  const NEW = { title: 'Tidal costs, 2026', url: 'https://example.org/costs', content: 'Tidal power costs about 300 euros per megawatt hour.' };
+  const client = editClient(`${draft}\n\nTidal power costs about 300 euros per megawatt hour [4].`);
+  const searched = [];
+  let closed = 0;
+  await handleArticleRequest('add a paragraph about costs', { ...u, mode: 'speed', client, trial: TRIAL, lastAnswer: async () => previous(), research: async (q) => { searched.push(q); return [SOURCES[0], NEW]; }, researchDone: () => { closed++; } });
+  assert.deepEqual(searched, ['Tides at work: add a paragraph about costs']);
+  assert.equal(closed, 1);
+  assert.match(client.calls[0], /\[4\] Tidal costs, 2026 \(https:\/\/example\.org\/costs\)\nTidal power costs about 300 euros/); // only the page that is new
+  assert.match(client.calls[0], /or in a source excerpt above/);
+  const final = u.blocks.get('b1');
+  assert.match(final, /megawatt hour \[⁴\]\(https:\/\/example\.org\/costs\)\./);
+  assert.match(final, /4\. <a href="https:\/\/example\.org\/costs">Tidal costs, 2026<\/a>/);
+  const nothing = ui();
+  await handleArticleRequest('add a paragraph about costs', { ...nothing, mode: 'speed', client: editClient(), trial: TRIAL, lastAnswer: async () => previous(), research: async () => [] });
+  assert.match(nothing.blocks.get('b1'), /found no new sources/);
 });
 
 test('an edit that loses the title or most of the text is refused and says so', async () => {

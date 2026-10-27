@@ -113,6 +113,28 @@ export function createImageGenerator({ client, download, textModel = null, log =
     throw new Error(`no image in response${text ? ` (model replied: ${text.slice(0, 120)})` : ''}`);
   }
 
+  // An edit from a model that ignored the reference is a new picture, not an edit (a live run: the primaries
+  // timed out, FLUX.2 Pro and Grok Imagine drew a new oak tree for "make it a pencil sketch", and the catalogue
+  // lists both as taking image input). The text model sees the original beside each edited image; "no" rejects
+  // it and the chain moves on. Without a text model, or when the check itself fails, the image is kept.
+  async function keepsReference(reference, dataUrl, prompt) {
+    if (!textModel || !/^data:image\/(?:png|jpeg|webp|gif)/.test(dataUrl)) return true;
+    try {
+      const res = await client.chat({
+        model: textModel,
+        max_tokens: 10,
+        temperature: 0,
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: `The first image is an original; the second should be an edit of it, as asked: "${prompt}". Answer with one word: yes if the second keeps the original's main subject and composition (its style, colours or details may change as asked), no if it shows a different scene or subject.` },
+          { type: 'image_url', image_url: { url: reference } },
+          { type: 'image_url', image_url: { url: dataUrl } },
+        ] }],
+      }, 30_000);
+      const c = res?.choices?.[0]?.message?.content;
+      return !/^\W*no\b/i.test(Array.isArray(c) ? c.map(p => p?.text || '').join('') : String(c ?? ''));
+    } catch (err) { log(`edit check failed, keeping the image: ${err.message}`); return true; }
+  }
+
   // Runs the chains whose slot in `images` is still empty, all in parallel; each chain tries
   // its models in order until one draws. A key/credit error stops every chain.
   async function attempt(prompt, chains, images, opts, onImage) {
@@ -121,7 +143,11 @@ export function createImageGenerator({ client, download, textModel = null, log =
     await Promise.all(chains.map(async (chain, slot) => {
       for (const m of images[slot] ? [] : chain) {
         if (fatal) return;
-        try { images[slot] = { ...(await generateOne(m, prompt, opts)), model: m }; onImage(slot); return; } catch (err) {
+        try {
+          const drawn = await generateOne(m, prompt, opts);
+          if (opts.references.length && !(await keepsReference(opts.references[0], drawn.dataUrl, prompt))) throw new Error('ignored the reference image (drew a different picture)');
+          images[slot] = { ...drawn, model: m }; onImage(slot); return;
+        } catch (err) {
           errors.push(`${m.id}: ${err.message}`);
           if (FATAL.has(err.status)) fatal ||= err;
         }

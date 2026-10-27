@@ -8,7 +8,7 @@
 // `degraded`, so a weakened run is never presented as a clean one.
 import { checkCitations, renumber, runChecks, sourcesSection } from './checks.mjs';
 import { AUDIT_DIMENSIONS, MIN_CLAIM_SUPPORT, auditResult, claimLedger, claimSupportRatio } from './gate.mjs';
-import { countTells, detectLanguage, repairHomoglyphs, wordCount } from './language.mjs';
+import { countTells, detectLanguage, repairFinalNu, repairHomoglyphs, wordCount } from './language.mjs';
 import { createRoleCaller } from './llm.mjs';
 import { DEFAULT_MODE, MODES, PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
 import { prompts } from './prompts.mjs';
@@ -21,6 +21,9 @@ export const EXTRA_QUERIES = 1;
 // A text more than a quarter over the target is cut back by one extra call (a live Quality run: draft 543 words,
 // after revise 813, after the audit's retry 899, for a target of 500).
 export const MAX_OVER = 1.25;
+// A trim goes on (at most TRIM_PASSES calls) until the text is within the cap the editing prompts state.
+export const LENGTH_CAP = 1.1;
+export const TRIM_PASSES = 2;
 
 const pct = (x) => `${Math.round(x * 100)}%`;
 const titleOf = (text) => /^\s*#\s+(.+)$/m.exec(text)?.[1].trim() || '';
@@ -30,7 +33,7 @@ class Stop extends Error {}
 export function createArticlePipeline({ client, retrieve, log = () => {}, now = Date.now }) {
   const call = createRoleCaller({ client, log });
 
-  return async function writeArticle({ topic, mode = DEFAULT_MODE, lang, words, models, chains, onProgress = () => {} }) {
+  return async function writeArticle({ topic, mode = DEFAULT_MODE, lang, words, models, chains, prices, onProgress = () => {} }) {
     if (!MODES.includes(mode)) throw new Error(`unknown mode "${mode}"`);
     const t0 = now();
     lang ||= detectLanguage(topic);
@@ -45,7 +48,9 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
     async function step(role, ctx) {
       emit({ phase: role, status: 'running' });
       const started = now();
-      const r = await call(role, prompts[role]({ topic, lang, words, ...ctx }), { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, words, lang) });
+      // an editor writes the whole article back, which may already be longer than the target
+      const size = Math.max(words, ctx.article ? wordCount(ctx.article) : 0);
+      const r = await call(role, prompts[role]({ topic, lang, words, ...ctx }), { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, size, lang), prices });
       calls += r.attempts.length;
       cost += r.cost;
       const rec = { phase: role, model: r.model || null, status: r.ok ? (r.fallback ? 'fallback' : 'ok') : 'failed', ms: now() - started, note: r.ok ? (r.fallback ? `${r.attempts.filter(a => a.problem).map(a => `${a.model}: ${a.problem}`).join('; ')}` : '') : r.errors.join('; ') };
@@ -66,8 +71,9 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
     const fix = (text) => {
       if (lang !== 'el') return text;
       const r = repairHomoglyphs(text);
-      repaired += r.fixed.length;
-      return r.text;
+      const nu = repairFinalNu(r.text);
+      repaired += r.fixed.length + nu.fixed.length;
+      return nu.text;
     };
     // Run an editing role and keep its text when it passes `refuse`.
     async function edit(role, ctx) {
@@ -85,19 +91,22 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       await trim();
       return true;
     }
-    // Cut a text that ran over the target back toward it. The result must be shorter and still an article.
+    // Cut a text that ran over the target back toward it, again while it is still over the editors' cap
+    // (one live trim went from 785 to 651 words for 500). Each result must be shorter and still an article.
     async function trim() {
       if (wordCount(body) <= words * MAX_OVER) return;
-      const before = wordCount(body);
-      const r = await step('rewrite', { article: body, sources, instruction: `Cut it to about ${words} words. Drop repetition and the least important detail first. Keep the thesis, the title, the headings and the claims that carry the argument, with their [n] citations.` });
-      const why = !r.ok ? (r.errors.at(-1) || 'no answer') : wordCount(r.text) >= before ? 'not shorter' : refuse(body, r.text, 0.4);
-      if (why) {
-        phases.at(-1).status = r.ok ? 'rejected' : 'failed';
-        degraded.push(`trimming from ${before} words to the target of ${words} failed (${why}): the longer text was kept`);
-        return;
+      for (let pass = 0; pass < TRIM_PASSES && wordCount(body) > words * LENGTH_CAP; pass++) {
+        const before = wordCount(body);
+        const r = await step('rewrite', { article: body, sources, instruction: `Cut it to about ${words} words: it is ${before} words, so remove about ${before - words}. Drop repetition and the least important detail first, then merge or drop whole paragraphs; shortening sentences alone will not get there. Keep the thesis, the title, the headings and the claims that carry the argument, with their [n] citations.` });
+        const why = !r.ok ? (r.errors.at(-1) || 'no answer') : wordCount(r.text) >= before ? 'not shorter' : refuse(body, r.text, 0.4);
+        if (why) {
+          phases.at(-1).status = r.ok ? 'rejected' : 'failed';
+          degraded.push(`trimming from ${before} words to the target of ${words} failed (${why}): the longer text was kept`);
+          return;
+        }
+        phases.at(-1).words = wordCount(r.text);
+        body = fix(r.text);
       }
-      phases.at(-1).words = wordCount(r.text);
-      body = fix(r.text);
     }
 
     let sources = [], body = '';
