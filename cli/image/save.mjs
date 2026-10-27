@@ -9,7 +9,9 @@ export const EXTENSIONS = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp
 
 export function slugify(text, max = 40) {
   const s = String(text).toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}\s-]/gu, '').trim().replace(/[\s_-]+/g, '-');
-  return s.slice(0, max).replace(/-+$/, '') || 'image';
+  if (s.length <= max) return s || 'image';
+  const cut = s.slice(0, max + 1);
+  return (cut.includes('-') ? cut.slice(0, cut.lastIndexOf('-')) : s.slice(0, max)) || 'image'; // whole words only
 }
 
 export const fileNameFor = (prompt, index, modelId, mime) =>

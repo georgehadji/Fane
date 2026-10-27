@@ -78,6 +78,14 @@ test('reference images need models that accept image input', () => {
   assert.ok(r.primaries.length && r.primaries.every(m => m.acceptsImageInput));
 });
 
+test('style/edit models that require references are used only when references are given', () => {
+  const cat = buildCatalogue([...ENTRIES, entry('recraft/recraft-v4-styles-vector-cheap', { pricing: { prompt: '0', image_output: '0.0000001' } }), entry('krea/k3-edit', { pricing: { prompt: '0', image: '0.0001' } })]);
+  const ids = (sel) => [...sel.primaries, ...sel.fallbacks].map(m => m.id);
+  assert.ok(!ids(selectModels(cat, { family: 'vector', count: 4 })).includes('recraft/recraft-v4-styles-vector-cheap'));
+  assert.ok(!ids(selectModels(cat, { family: 'general', count: 8 })).includes('krea/k3-edit'));
+  assert.ok(ids(selectModels(cat, { family: 'reference_edit', count: 8, needsReference: true })).includes('krea/k3-edit'));
+});
+
 // ---- intent -------------------------------------------------------------
 
 test('rules classify family and tier', () => {
@@ -155,6 +163,8 @@ test('download follows redirects with a re-check and sniffs the bytes', async ()
 
 test('file names are safe and never overwrite', async () => {
   assert.equal(slugify('A Fox, in "Snow"! / ../etc'), 'a-fox-in-snow-etc');
+  assert.equal(slugify('minimal SVG logo for a coffee shop called Fane'), 'minimal-svg-logo-for-a-coffee-shop'); // 40-char cap, cut at a word boundary
+  assert.equal(slugify('x'.repeat(60)), 'x'.repeat(40));
   assert.equal(fileNameFor('fox', 0, 'black-forest-labs/flux', 'image/svg+xml'), 'fox-1-black-forest-labs.svg');
   const dir = mkdtempSync(join(tmpdir(), 'fane-img-'));
   try {

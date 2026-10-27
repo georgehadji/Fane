@@ -53,6 +53,9 @@ export function toModelInfo(entry) {
   if (price === null) return null;
   const acceptsImageInput = (arch.input_modalities || []).includes('image');
   return {
+    // Style-transfer and edit models refuse to run without reference images ("input_references:
+    // must have between 1 and 10 items"); the catalogue does not say so, the id does.
+    requiresReference: acceptsImageInput && /-(styles|edit)(-|$)/.test(entry.id),
     id: entry.id,
     name: entry.name || entry.id,
     lab: entry.id.split('/')[0],
@@ -87,7 +90,7 @@ const byCapabilityDesc = (a, b) => {
 export function candidates(catalogue, family, tier, needsReference) {
   const wantSvg = family === 'vector';
   const pool = catalogue
-    .filter(m => m.families.has(family) && emitsSvg(m) === wantSvg && (m.acceptsImageInput || !needsReference))
+    .filter(m => m.families.has(family) && emitsSvg(m) === wantSvg && (needsReference ? m.acceptsImageInput : !m.requiresReference))
     .sort((a, b) => a.id.localeCompare(b.id)); // deterministic ties
   return tier === 'premium' ? pool.sort(byCapabilityDesc) : pool.sort((a, b) => a.price - b.price);
 }
