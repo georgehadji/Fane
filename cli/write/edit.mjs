@@ -9,12 +9,19 @@ import { createRoleCaller } from './llm.mjs';
 import { DEFAULT_MODE, tokensFor } from './models.mjs';
 import { prompts } from './prompts.mjs';
 
-// The verbs that start an edit request. Questions ("why", "what", "explain") never match.
+// The verbs that start an edit request. Questions ("why", "what", "explain"), anything with a question mark
+// ("?", or ";" in Greek), thanks and praise ("Πολύ καλό, ευχαριστώ!") are not edits: Vane answers them.
 const EN_EDIT = new RegExp(String.raw`^\s*(?:(?:ok(?:ay)?|now|and|but|then|please|can you|could you|would you)[,.]?\s+)*(?:make|shorten|lengthen|expand|trim|cut|condense|simplify|tighten|reword|rephrase|rewrite|revise|edit|change|replace|fix|improve|update|add|remove|delete|drop|translate|convert|redo|polish|adjust|extend|soften|sharpen|shorter|longer|simpler|more|less|too|slightly|a bit|a little)(?![\p{L}])`, 'iu');
 // Over folded text: no accents, final sigma as sigma.
 const EL_EDIT = new RegExp(String.raw`^\s*(?:(?:ok|τωρα|και|αλλα|παρακαλω|μπορεισ να|θα μπορουσεσ να)\s+)*(?:κανε|συντομευσε|κοντυνε|μικρυνε|μεγαλωσε|επεκτεινε|απλοποιησε|ξαναγραψε|γραψε ξανα|αναδιατυπωσε|αλλαξε|αντικαταστησε|διορθωσε|βελτιωσε|ενημερωσε|προσθεσε|αφαιρεσε|διαγραψε|σβησε|μεταφρασε|πιο|λιγο|περισσοτερο|λιγοτερο|πολυ)(?![\p{L}])`, 'iu');
 
-export const isArticleEdit = (text) => EN_EDIT.test(String(text || '')) || EL_EDIT.test(fold(String(text || '')));
+const NOT_EDIT = /\?|\bthank|ευχαριστ|μπραβο|^\s*(?:πολυ|too|so|really|very)\s+(?:καλο|ωραιο|τελειο|ενδιαφερον|good|great|nice|interesting|perfect)(?!\p{L})/u;
+export function isArticleEdit(text) {
+  const t = String(text || '');
+  // ";" is the Greek question mark (fold() turns U+037E into it); in English it is only a semicolon
+  if (NOT_EDIT.test(fold(t)) || (/;/.test(fold(t)) && /[α-ω]/.test(fold(t)))) return false;
+  return EN_EDIT.test(t) || EL_EDIT.test(fold(t));
+}
 
 // "add a section on costs", "πρόσθεσε μια παράγραφο για ...": facts the article does not have yet, so the edit
 // searches first. Other edits ("shorter", "more formal") work with what the article already says.
@@ -94,7 +101,7 @@ export function createArticleEditor({ client, log = () => {}, now = Date.now }) 
     const raw = checkCitations(next, sources);
     if (raw.invalid.length) degraded.push(`removed citations to sources that do not exist: ${raw.invalid.map(n => `[${n}]`).join(' ')}`);
     const { text, used } = renumber(next, sources);
-    const checks = runChecks(text, { lang, sources: used, targetWords: wordCount(text) });
+    const checks = runChecks(text, { lang, sources: used.length ? used : sources, targetWords: wordCount(text) });
     for (const i of checks.items) if (i.level === 'fail') degraded.push(`check "${i.name}" failed: ${i.detail}`);
     return {
       ok: true,

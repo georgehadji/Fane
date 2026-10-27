@@ -195,7 +195,8 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const raw = checkCitations(body, sources);
       if (raw.invalid.length) degraded.push(`removed citations to sources that do not exist: ${raw.invalid.map(n => `[${n}]`).join(' ')}`);
       const { text, used } = renumber(body, sources);
-      const checks = runChecks(text, { lang, sources: used, targetWords: words });
+      // with no citation at all `used` is empty, and the citation check must still see the sources to fail
+      const checks = runChecks(text, { lang, sources: used.length ? used : sources, targetWords: words });
       for (const i of checks.items) if (i.level === 'fail') degraded.push(`check "${i.name}" failed: ${i.detail}`);
       emit({ phase: 'done', status: 'done' });
       return {

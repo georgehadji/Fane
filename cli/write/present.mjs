@@ -20,8 +20,12 @@ const words = (lang) => WORDS[lang] || WORDS.en;
 const labels = (lang) => LABELS[lang] || LABELS.en;
 
 // Model text may carry HTML (or a page may have talked it into writing some): tags are removed,
-// the Markdown stays.
-export const cleanMarkdown = (text) => String(text || '').replace(/<(?=[a-zA-Z/!?])[^>]*>/g, '');
+// the Markdown stays. Repeated until nothing changes: one pass turned "<<img …>img onerror=…>" into a tag.
+export function cleanMarkdown(text) {
+  let s = String(text || ''), prev;
+  do { prev = s; s = s.replace(/<(?=[a-zA-Z/!?])[^>]*>/g, ''); } while (s !== prev);
+  return s;
+}
 
 // What the user sees while the pipeline runs. `state`: { lang, phases: [{ phase, status }],
 // running: phase | null, draft: { text, sources } | null }. Once a draft exists it is shown, with

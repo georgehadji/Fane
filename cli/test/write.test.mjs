@@ -139,6 +139,18 @@ test('renumber numbers cited sources by first appearance and drops numbers that 
   assert.deepEqual(r.used.map(s => s.url), ['https://example.org/c', 'https://example.org/a', 'https://example.org/d']);
 });
 
+test('renumber and checkCitations read ranges like [2–3]', () => {
+  const r = renumber('Built in 2023 [2–3]. Costs fell [3]. Both [1-2].', SOURCES);
+  assert.equal(r.text, 'Built in 2023 [1, 2]. Costs fell [2]. Both [1, 3].');
+  assert.deepEqual(r.used.map(s => s.url), ['https://example.org/b', 'https://example.org/c', 'https://example.org/a']);
+  assert.deepEqual(checkCitations('The isles had five arrays by then [2–4].', SOURCES).used, [2, 3, 4]);
+});
+
+test('checkCitations does not flag numbers when the cited source has no text (an article read back for an edit)', () => {
+  const bare = SOURCES.map(s => ({ ...s, content: '' }));
+  assert.deepEqual(checkCitations('Tidal arrays supplied 1,200 homes in 2023 [1].', bare).numbersMissing, []);
+});
+
 test('sourcesSection is written from real sources, in the article language', () => {
   assert.match(sourcesSection(SOURCES.slice(0, 2), 'en'), /## Sources\n\n1\. \[Tidal energy in Orkney\]\(https:\/\/example\.org\/a\)\n2\./);
   assert.match(sourcesSection(SOURCES.slice(0, 1), 'el'), /## Πηγές/);
@@ -528,6 +540,13 @@ test('a citation to a source that does not exist is removed and reported', async
   assert.ok(r.degraded.some(d => /removed citations to sources that do not exist: \[9\]/.test(d)));
   assert.doesNotMatch(r.article, /\[9\]/);
   assert.equal(r.checks.ok, true);
+});
+
+test('a draft that cites nothing fails the citation check instead of passing clean', async () => {
+  const r = await run(fake({ draft: `# Tides at work\n\n## The case\n\n${prose(300, { cite: false })}` }), { mode: 'speed' });
+  assert.equal(r.ok, true);
+  assert.equal(r.checks.ok, false);
+  assert.ok(r.degraded.some(d => /check "citations" failed: no citations/.test(d)), r.degraded.join(' | '));
 });
 
 test('Greek: English search queries are written, Latin look-alikes are repaired, the sources list is headed Πηγές', async () => {

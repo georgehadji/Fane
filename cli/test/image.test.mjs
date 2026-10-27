@@ -182,6 +182,11 @@ test('private and loopback addresses are refused', async () => {
   for (const ip of ['8.8.8.8', '172.32.0.1', '2606:4700::1111']) assert.ok(!isPrivateAddress(ip), ip);
   await assert.rejects(safeDownload('http://example.com/a.png'), /refusing http:/);
   await assert.rejects(safeDownload('https://internal.test/a.png', { resolve: async () => [{ address: '10.0.0.5' }] }), /private address/);
+  // new URL() turns [::ffff:127.0.0.1] into ::ffff:7f00:1; other IPv6 forms embed IPv4 too
+  for (const ip of ['::ffff:7f00:1', '::ffff:a00:1', '::ffff:a9fe:a9fe']) assert.ok(isPrivateAddress(ip), ip);
+  assert.ok(!isPrivateAddress('::ffff:808:808'));
+  const never = async () => { throw new Error('fetched'); };
+  for (const u of ['https://[::ffff:127.0.0.1]/x.png', 'https://[::7f00:1]/x.png', 'https://[64:ff9b::7f00:1]/x.png', 'https://[2002:7f00:1::]/x.png']) await assert.rejects(safeDownload(u, { fetchImpl: never }), /private address/, u);
 });
 
 test('download follows redirects with a re-check and sniffs the bytes', async () => {
@@ -501,6 +506,9 @@ test('hook: finished images are stored on arrival, shown at once, and linked onc
 test('isImageEdit reads edits, not questions; pickReferenceIndex finds "the second one"', () => {
   for (const q of ['make it a watercolour', 'Now at night', 'ok, add a red hat', 'can you make the second one darker', 'in the style of Monet', 'with a blue sky', 'more contrast']) assert.ok(isImageEdit(q), q);
   for (const q of ['what is this fox called?', 'why is it orange', 'explain the lighting', 'thanks', 'draw a cat']) assert.ok(!isImageEdit(q), q);
+  // other tasks and questions after an image answer are not edits
+  for (const q of ['In which year was the Parthenon built?', 'In which year was the Parthenon built', 'Make a list of the 10 tallest buildings', 'Give me a summary of the war', 'Use Python to sort a list', 'with whom did he work?', 'can you make it brighter?']) assert.ok(!isImageEdit(q), q);
+  for (const q of ['give it a vintage look', 'use a warmer palette', 'try a darker background', 'make a version with snow', 'make the sky darker']) assert.ok(isImageEdit(q), q);
   assert.equal(pickReferenceIndex('make it darker', 4), 0);
   assert.equal(pickReferenceIndex('make the second one darker', 4), 1);
   assert.equal(pickReferenceIndex('change image 3 to blue', 4), 2);
@@ -582,6 +590,9 @@ test('generate calls onProgress per image, and a throwing listener does not fail
 test('isImageRequest accepts counts and shape words, not coding questions', () => {
   for (const q of ['create 2 widescreen images of a lighthouse', 'make three different pictures of a fox', 'generate a high-res wallpaper of a beach', 'create a new square logo for a bakery']) assert.ok(isImageRequest(q), q);
   for (const q of ['make the image responsive', 'create a React image carousel', 'create a user icon component', 'how do I resize an image in CSS']) assert.ok(!isImageRequest(q), q);
+  // the word after the noun decides: these are about software or figures of speech
+  for (const q of ['Generate an image classifier in PyTorch', 'Create an image gallery component in React', 'make a drawing app in JavaScript', 'Create a render pipeline in three.js', 'Make a picture-perfect itinerary for Rome', 'paint a picture of how inflation works']) assert.ok(!isImageRequest(q), q);
+  for (const q of ['create an image', 'make a logo: a fox', 'generate a photo showing a harbour', 'create a picture in the style of Monet', 'make an image that says hello']) assert.ok(isImageRequest(q), q);
 });
 
 test('parseImageOptions reads count and shape from the prompt, ignoring scene words', () => {

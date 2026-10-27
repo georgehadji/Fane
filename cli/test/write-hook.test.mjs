@@ -23,6 +23,9 @@ const SOURCES = [
 test('cleanMarkdown removes HTML tags and keeps Markdown and plain angle brackets', () => {
   assert.equal(cleanMarkdown('# T\n\nA <img src=x onerror=alert(1)> b <script>x</script> and 3 < 4 > 2 **bold**'), '# T\n\nA  b x and 3 < 4 > 2 **bold**');
   assert.equal(cleanMarkdown('<!-- hidden -->text'), 'text');
+  // nested tags do not rebuild a tag once the inner one is removed
+  assert.doesNotMatch(cleanMarkdown('<<img src=x onerror=alert(1)>img src=x onerror=alert(1)>'), /<img/);
+  assert.doesNotMatch(cleanMarkdown('<<iframe>iframe src="https://evil.example">'), /<iframe/);
 });
 
 test('progress without a draft is one status paragraph, in the language of the article', () => {
@@ -169,6 +172,12 @@ test('a Greek request is researched in Greek and English and answered with Greek
   assert.match(u.events[0][1], /Αναζήτηση πηγών…/);
 });
 
+test('a Greek request about a Latin-script name is still written in Greek', async () => {
+  const u = ui();
+  await handleArticleRequest('γράψε ένα άρθρο για το iPhone 17', { ...u, mode: 'speed', client: fakeClient(), trial: TRIAL, research: async () => SOURCES });
+  assert.match(u.events[0][1], /Αναζήτηση πηγών…/);
+});
+
 test('research that finds nothing is tried twice, then reported as the reason', async () => {
   const u = ui();
   let n = 0;
@@ -234,6 +243,9 @@ test('the article and image patches apply in either order, and again, to the sam
 test('edit requests are recognised in English and Greek; questions and new topics are not', () => {
   for (const q of ['make it shorter', 'Please shorten the introduction', 'rewrite the conclusion', 'now translate it to English', 'add a paragraph about costs', 'more formal please', 'κάνε το πιο σύντομο', 'Ξαναγράψε την εισαγωγή', 'μετάφρασέ το στα αγγλικά', 'πιο απλά, παρακαλώ']) assert.equal(isArticleEdit(q), true, q);
   for (const q of ['what is tidal power', 'why did you cite source 2', 'explain the second section', 'ποια είναι η πηγή 3', 'tell me more']) assert.equal(isArticleEdit(q), false, q);
+  // praise, thanks and questions after an article are for Vane to answer, not paid rewrites
+  for (const q of ['Πολύ καλό, ευχαριστώ!', 'Πολύ ενδιαφέρον. Ποιος το χρηματοδοτεί;', 'Πολύ ενδιαφέρον. Ποιος το χρηματοδοτεί;', 'a bit confusing, why did costs fall?', 'less is more?', 'too good, thanks']) assert.equal(isArticleEdit(q), false, q);
+  for (const q of ['shorten it; keep the title', 'too long', 'πολύ μεγάλο, κόψ\' το']) assert.equal(isArticleEdit(q), true, q);
 });
 
 test('the language of an edit follows a translation request only when the language ends the sentence', () => {
@@ -324,6 +336,9 @@ test('an edit keeps Vane in charge when the previous answer is not an article, o
   assert.equal(await handleArticleRequest('make it shorter', { ...u, client, trial: TRIAL, lastAnswer: async () => 'Tidal power is a form of hydropower.', research: async () => SOURCES }), false);
   assert.equal(await handleArticleRequest('make an image of a tidal turbine', { ...u, client, trial: TRIAL, lastAnswer: async () => previous(), research: async () => SOURCES }), false);
   assert.equal(await handleArticleRequest('make it shorter', { ...u, client, trial: TRIAL, research: async () => SOURCES }), false); // no previous answer at all
+  // Vane's own answer: a "# " title and citations, but no sources list of ours
+  const vaneAnswer = `# Tidal power\n\n${'Tidal turbines in Orkney supplied about 1,200 homes last winter [1]. Costs fell by 40% once the designs settled [2]. '.repeat(6)}`;
+  assert.equal(await handleArticleRequest('make it shorter', { ...u, client, trial: TRIAL, lastAnswer: async () => vaneAnswer, research: async () => SOURCES }), false);
   assert.deepEqual([u.events, client.calls], [[], []]);
 });
 

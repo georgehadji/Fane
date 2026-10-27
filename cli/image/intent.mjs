@@ -14,7 +14,9 @@ const RULES = [
 
 // "create an image of ...", "draw me a logo for ...": a request for a picture, not a question.
 // Vane's answer pipeline can only write text, so the CLI sends these to the image pipeline.
-const IMAGE_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:create|generate|make|draw|paint|render|design|produce|illustrate)\s+(?:me\s+|us\s+)?(?:(?:an?|some|\d+|one|two|three|four|five|six|seven|eight)\s+)?(?:(?:new|different|separate|wide|widescreen|landscape|portrait|tall|vertical|square|detailed|realistic|beautiful|high[- ]res(?:olution)?)\s+){0,2}(?:image|picture|pic|photo(?:graph)?|illustration|drawing|painting|sketch|logo|icon|poster|wallpaper|artwork|render(?:ing)?|portrait|cartoon)s?\b/i;
+const IMAGE_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:create|generate|make|draw|paint|render|design|produce|illustrate)\s+(?:me\s+|us\s+)?(?:(?:an?|some|\d+|one|two|three|four|five|six|seven|eight)\s+)?(?:(?:new|different|separate|wide|widescreen|landscape|portrait|tall|vertical|square|detailed|realistic|beautiful|high[- ]res(?:olution)?)\s+){0,2}(?:image|picture|pic|photo(?:graph)?|illustration|drawing|painting|sketch|logo|icon|poster|wallpaper|artwork|render(?:ing)?|portrait|cartoon)s?\b(?=\s*$|\s*[.,:;!]|\s+(?:of\b(?!\s+(?:how|why)\b)|showing|depicting|featuring|with|for|that|which|where|about|from|at|on|to|like|in\s+(?:the\s+|an?\s+)?style)\b)/i;
+// The lookahead after the noun: "an image classifier in PyTorch", "a drawing app", "a picture-perfect trip" and
+// "a picture of how inflation works" are not requests for a picture.
 // Drawing verbs need no noun ("draw a fox"), except figures of speech ("draw a conclusion").
 const DRAW_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:draw|paint|sketch|illustrate)\s+(?:me\s+|us\s+)?(?:an?|the|some|\d+|my|our)\s+(?!(?:conclusions?|comparisons?|distinctions?|parallels?|lines? between|picture of (?:the|how|why|what))\b)/i;
 export const isImageRequest = (text) => IMAGE_REQUEST.test(String(text || '')) || DRAW_REQUEST.test(String(text || ''));
@@ -82,8 +84,16 @@ export function parseImageOptions(text) {
 // night", "add a hat", "in the style of ...". The caller only asks this when the previous
 // answer was Fane's images, so the words may be short. Questions are not edits.
 const EDIT_START = /^\s*(?:(?:ok(?:ay)?|now|and|but|then|please|can you|could you)[,.]?\s+)*(?:make|turn|change|add|remove|replace|redo|recolou?r|restyle|try|give|put|keep|use|same|again|more|less|in|at|as|during|under|with|without|but)\b/i;
-const QUESTION_START = /^\s*(?:what|why|how|who|when|where|which|is|are|does|do|did|explain|tell|describe)\b/i;
-export const isImageEdit = (text) => EDIT_START.test(String(text || '')) && !QUESTION_START.test(String(text || ''));
+const QUESTION_START = /^\s*(?:(?:what|why|how|who|when|where|which|is|are|does|do|did|explain|tell|describe)\b|(?:in|at|with|for|from|by|to)\s+(?:which|what|whom|whose)\b)/i;
+// "give", "use", "try" and "make a ..." also start other tasks ("Use Python to sort a list", "Make a list of ..."),
+// so they count only with a word that points at the picture.
+const BROAD_START = /^\s*(?:(?:ok(?:ay)?|now|and|but|then|please|can you|could you)[,.]?\s+)*(?:give|use|try|make\s+(?:me\s+)?(?:an?|some)\b)/i;
+const REFERS = /\b(?:it|its|them|this|that|these|those|images?|pictures?|photos?|ones?|versions?|style|look|background|colou?rs?|filter|lighting|palette|tones?)\b/i;
+export function isImageEdit(text) {
+  const t = String(text || '');
+  if (!EDIT_START.test(t) || QUESTION_START.test(t) || /\?["'”’)]*\s*$/.test(t)) return false;
+  return !BROAD_START.test(t) || REFERS.test(t);
+}
 
 // Which of the earlier images an edit means: "the second one", "image 3", "#2"; the first by default.
 const ORDINALS = { first: 0, '1st': 0, second: 1, '2nd': 1, third: 2, '3rd': 2, fourth: 3, '4th': 3 };

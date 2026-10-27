@@ -40,6 +40,10 @@ test('number not in the cited source is flagged even when the words match', () =
 test('thousands separators match', () => {
   const v = verifyCitations('Sales reached 1,250 units in the reported quarter for the company[1].', [{ title: '', content: 'sales reached 1250 units in the reported quarter for the company' }]);
   assert.equal(v.supported, 1);
+  const big = 'The project cost 1,250,000 dollars according to the county council[1].';
+  const w = verifyCitations(big, [{ title: '', content: big.replace('[1].', '.') }]);
+  assert.equal(w.supported, 1);
+  assert.deepEqual(w.numbersMissing, []);
 });
 
 test('citation number without a source is reported', () => {

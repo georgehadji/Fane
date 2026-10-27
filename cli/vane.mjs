@@ -210,6 +210,16 @@ export function parseCli(argv) {
   return { ...values, model: values.model ?? DEFAULTS.model, modelExplicit, sources, timeoutMs: timeoutSec * 1000, query: positionals.join(' ').trim() };
 }
 
+// A query that asks for an image or an article goes there without --image/--article. The arguments are parsed
+// again with that flag, so the image or article options are checked as when it is typed (-n abc, --tier bogus).
+// -> the options for runImage / runArticle, or null for a search.
+export function autoRoute(opts, argv) {
+  if (opts['list-models']) return null;
+  if (!opts['no-auto-image'] && isImageRequest(opts.query)) return parseCli(['--image', ...argv]);
+  if (!opts['no-auto-article'] && isArticleRequest(opts.query)) return parseCli(['--article', ...argv]);
+  return null;
+}
+
 async function getProviders(url) {
   const res = await fetch(`${url}/api/providers`, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`GET /api/providers failed: HTTP ${res.status}`);
@@ -474,7 +484,8 @@ export function splitSentences(md) {
 export function verifyCitations(message, sources, { threshold = THRESHOLD } = {}) {
   const srcText = sources.map(s => `${s.title || ''} ${s.content || ''}`);
   const srcTok = srcText.map(tokenize);
-  const srcNum = srcText.map(t => t.replace(/(\d),(\d{3})/g, '$1$2'));
+  // lookahead, so "1,250,000" loses both commas (consuming the digit left "1250,000")
+  const srcNum = srcText.map(t => t.replace(/(\d),(?=\d{3})/g, '$1'));
   const r = { sentences: 0, cited: 0, supported: 0, uncited: 0, supportRate: null, weak: [], numbersMissing: [], invalidCitations: [] };
   for (const sentence of splitSentences(message)) {
     const cites = [...sentence.matchAll(CITE_RE)].flatMap(m => m[1].split(',').map(Number));
@@ -716,7 +727,8 @@ async function runArticle(opts) {
   const client = createOpenRouterClient({ apiKey });
   const write = createArticlePipeline({ client, retrieve, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
   const topic = articleTopic(opts.query);
-  const lang = opts.lang ?? detectLanguage(topic);
+  // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
+  const lang = opts.lang ?? detectLanguage(opts.query);
   const explicit = opts['article-model'].length > 0;
   const chosen = explicit ? null : await defaultChains({ mode, lang, client });
   const r = await write({
@@ -857,13 +869,14 @@ async function main() {
     return console.log(`Removed "${opts['remove-model']}" from Vane provider "${provider.name}".`);
   }
   if (!opts['list-models'] && !opts.query) throw new UsageError('Missing question.\n\n' + USAGE);
-  if (!opts['list-models'] && !opts['no-auto-image'] && isImageRequest(opts.query)) {
+  const routed = autoRoute(opts, process.argv.slice(2));
+  if (routed?.image) {
     process.stderr.write('vane: this asks for an image, so it goes to image generation (same as --image; --no-auto-image to search instead).\n');
-    return runImage({ ...opts, image: true });
+    return runImage(routed);
   }
-  if (!opts['list-models'] && !opts['no-auto-article'] && isArticleRequest(opts.query)) {
+  if (routed) {
     process.stderr.write('vane: this asks for an article, so it goes to article writing (same as --article; --no-auto-article to search instead).\n');
-    return runArticle({ ...opts, article: true });
+    return runArticle(routed);
   }
   const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);
   if (opts['list-models']) return printModels(providers, opts.json);

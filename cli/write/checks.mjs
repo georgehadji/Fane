@@ -6,8 +6,12 @@
 // "Sources" list is written by code (sourcesSection), so a model cannot invent a URL.
 import { LANGUAGE_NAMES, countTells, findHomoglyphs, greekTypography, wordCount } from './language.mjs';
 
-const CITE = /\[(\d{1,2}(?:\s*[,;]\s*\d{1,2})*)\]/g;
-const citeNumbers = (group) => group.split(/[,;]/).map(s => Number(s.trim()));
+// "[3]", "[1, 4]" and ranges "[2–4]" (models write them although the prompt asks for lists)
+const CITE = /\[(\d{1,2}(?:\s*[-–]\s*\d{1,2})?(?:\s*[,;]\s*\d{1,2}(?:\s*[-–]\s*\d{1,2})?)*)\]/g;
+const citeNumbers = (group) => group.split(/[,;]/).flatMap((s) => {
+  const [a, b = a] = s.split(/[-–]/).map(x => Number(x.trim()));
+  return b >= a && b - a < 20 ? Array.from({ length: b - a + 1 }, (_, i) => a + i) : [a, b];
+});
 
 // Sentences of the article body (headings, lists of sources and fragments left out).
 export function sentences(text) {
@@ -35,7 +39,8 @@ export function checkCitations(article, sources) {
     if (!cites.length) { uncited++; continue; }
     cited++;
     const valid = cites.filter(n => n >= 1 && n <= sources.length);
-    if (!valid.length) continue;
+    // an article read back for an edit has its sources' titles and links but not their text
+    if (!valid.some(n => sources[n - 1].content)) continue;
     const have = new Set(valid.flatMap(n => numbersIn(`${sources[n - 1].title || ''} ${sources[n - 1].content || ''}`)));
     const missing = numbersIn(s.replace(CITE, ' ')).filter(x => !have.has(x));
     if (missing.length) numbersMissing.push({ sentence: s, numbers: missing });

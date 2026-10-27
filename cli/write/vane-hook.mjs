@@ -34,10 +34,12 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   if (!isArticleRequest(query)) {
     if (isImageRequest(query) || !isArticleEdit(query)) return false;
     earlier = parseArticleAnswer(await previousAnswer(history, lastAnswer));
-    if (!earlier) return false;
+    // Vane's own answers have a "# " title too; ours end with a sources list (the CLI's --edit-article asks the same)
+    if (!earlier?.sources.length) return false;
   }
   const topic = earlier ? query : articleTopic(query);
-  const lang = earlier ? targetLanguage(query, earlier.lang) : detectLanguage(topic);
+  // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
+  const lang = earlier ? targetLanguage(query, earlier.lang) : detectLanguage(query);
   const state = { lang, phases: [], running: earlier ? 'edit' : 'sources', draft: null };
   const id = emit(tagged(renderArticleProgress(state)));
   const say = (markdown) => { try { update(id, tagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };

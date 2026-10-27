@@ -8,7 +8,10 @@ import { isIP } from 'node:net';
 import { sniffMime } from './extract.mjs';
 
 export function isPrivateAddress(ip) {
-  const v = String(ip).toLowerCase().replace(/^::ffff:/, '');
+  // IPv4-mapped IPv6, dotted (::ffff:127.0.0.1) or hex (::ffff:7f00:1, what new URL() makes of the dotted form)
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(String(ip).toLowerCase());
+  const v = hex ? [parseInt(hex[1], 16) >> 8, parseInt(hex[1], 16) & 255, parseInt(hex[2], 16) >> 8, parseInt(hex[2], 16) & 255].join('.')
+    : String(ip).toLowerCase().replace(/^::ffff:/, '');
   if (isIP(v) === 4) {
     const [a, b] = v.split('.').map(Number);
     return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
@@ -23,6 +26,8 @@ export async function safeDownload(url, { fetchImpl = fetch, resolve = lookup, m
     const u = new URL(current);
     if (u.protocol !== 'https:') throw new Error(`refusing ${u.protocol} image URL`);
     const host = u.hostname.replace(/^\[|\]$/g, '');
+    // IPv6 literals can embed an IPv4 address in many forms (::7f00:1, 64:ff9b::, 2002::); image hosts use names.
+    if (isIP(host) === 6) throw new Error(`refusing image URL on an IPv6 address (possibly a private address): ${host}`);
     const addresses = isIP(host) ? [{ address: host }] : await resolve(host, { all: true });
     if (!addresses.length || addresses.some(a => isPrivateAddress(a.address))) throw new Error(`refusing image URL on a private address: ${host}`);
     const res = await fetchImpl(current, { redirect: 'manual', signal: AbortSignal.timeout(20_000) });

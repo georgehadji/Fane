@@ -8,7 +8,8 @@ services:
     container_name: ${VANE_CONTAINER:-vane}
     restart: unless-stopped
     ports:
-      - "${VANE_PORT:-3000}:3000"
+      # Localhost only: Vane has no login and /api/config returns the provider API keys.
+      - "127.0.0.1:${VANE_PORT:-3000}:3000"
     volumes:
       - vane-data:/home/vane/data
       - ./patches:/fane/patches:ro

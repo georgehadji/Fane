@@ -3,7 +3,19 @@ import assert from 'node:assert/strict';
 
 // DEFAULTS read the environment at import time, so clear it first.
 for (const k of ['VANE_URL', 'VANE_CHAT_MODEL', 'VANE_EMBEDDING_MODEL', 'VANE_CONTAINER', 'VANE_SOURCES', 'VANE_MODE']) delete process.env[k];
-const { parseCli, resolveModel, findOpenRouterProvider } = await import('../vane.mjs');
+const { parseCli, resolveModel, findOpenRouterProvider, autoRoute } = await import('../vane.mjs');
+
+test('a query routed to images or articles has its options checked as if --image/--article was typed', () => {
+  const route = (...argv) => autoRoute(parseCli(argv), argv);
+  assert.deepEqual(route('make an image of a fox', '--image-model', 'a/x,b/y')['image-model'], ['a/x', 'b/y']);
+  assert.throws(() => route('make an image of a fox', '-n', 'abc'), /Invalid --count/);
+  assert.throws(() => route('make an image of a fox', '--tier', 'bogus'), /Invalid --tier/);
+  assert.deepEqual(route('write an article about tides', '--article-model', 'a/x,b/y')['article-model'], ['a/x', 'b/y']);
+  assert.throws(() => route('write an article about tides', '--lang', 'de'), /Invalid --lang/);
+  assert.equal(route('write an article about tides').article, true);
+  assert.equal(route('make an image of a fox', '--no-auto-image'), null);
+  assert.equal(route('what is tidal power'), null);
+});
 
 const providers = [
   { id: 'p1', name: 'Anthropic', chatModels: [{ key: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' }, { key: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }], embeddingModels: [] },
