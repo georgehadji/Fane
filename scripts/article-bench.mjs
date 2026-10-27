@@ -91,7 +91,7 @@ export function measureArticle(r, judge = {}) {
 export async function judgeArticle(call, model, r) {
   const article = articleBody(r), sources = r.sources || [], lang = r.language;
   const opts = (role) => ({ chain: [model], maxTokens: tokensFor(role, 0, lang) });
-  const out = { support: null, claims: null, audit: null, cost: 0, problems: [] };
+  const out = { support: null, claims: null, audit: null, cost: 0, problems: [], failed: [] };
   const f = await call('factcheck', prompts.factcheck({ lang, article, sources }), opts('factcheck'));
   out.cost += f.cost;
   if (f.fatal) throw new Error(`judge: ${f.errors[0]}`);
@@ -100,6 +100,8 @@ export async function judgeArticle(call, model, r) {
     ledger = claimLedger(f.data);
     out.claims = ledger.length;
     out.support = claimSupportRatio(ledger);
+    // why support moved: the first tuning run lost 0.08 and the saved metrics could not say which claims failed
+    out.failed = ledger.filter(c => c.verdict !== 'supported').map(({ claim, source, verdict, note }) => ({ claim, source, verdict, note }));
   } else out.problems.push(`fact-check: ${f.errors.at(-1)}`);
   const a = await call('audit', prompts.audit({ lang, article, ledger }), opts('audit'));
   out.cost += a.cost;
@@ -222,6 +224,7 @@ async function main() {
             spent += judge.cost;
             row = { ...row, ...measureArticle(out, judge), judgeCost: round(judge.cost, 4) };
             if (judge.problems.length) row.judgeProblems = judge.problems;
+            if (judge.failed.length) row.judgeFailed = judge.failed;
             if ((out.phases || []).some(p => p.model === values.judge)) row.selfJudged = true;
           }
           results.push(row);

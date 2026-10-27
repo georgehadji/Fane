@@ -36,6 +36,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
   return async function writeArticle({ topic, mode = DEFAULT_MODE, lang, words, models, chains, prices, onProgress = () => {} }) {
     if (!MODES.includes(mode)) throw new Error(`unknown mode "${mode}"`);
     const t0 = now();
+    const today = new Date(t0).toISOString().slice(0, 10); // prompts give figures their year and prefer new sources
     lang ||= detectLanguage(topic);
     words = clampWords(words);
     chains ||= chainsFor(models);
@@ -50,7 +51,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const started = now();
       // an editor writes the whole article back, which may already be longer than the target
       const size = Math.max(words, ctx.article ? wordCount(ctx.article) : 0);
-      const r = await call(role, prompts[role]({ topic, lang, words, ...ctx }), { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, size, lang), prices });
+      const r = await call(role, prompts[role]({ topic, lang, words, today, ...ctx }), { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, size, lang), prices });
       calls += r.attempts.length;
       cost += r.cost;
       const rec = { phase: role, model: r.model || null, status: r.ok ? (r.fallback ? 'fallback' : 'ok') : 'failed', ms: now() - started, note: r.ok ? (r.fallback ? `${r.attempts.filter(a => a.problem).map(a => `${a.model}: ${a.problem}`).join('; ')}` : '') : r.errors.join('; ') };
@@ -148,10 +149,14 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       await trim();
       emit({ phase: 'draft', status: 'preview', text: body, sources }); // lets a UI show the draft while the checks and edits run
 
-      // 4. Fact-check: a ledger of claims against their cited sources.
+      // 4. Fact-check (a ledger of claims against their cited sources) and the structural critique. Both read
+      // the same draft and neither needs the other, so they run at the same time.
+      const [f, c] = await Promise.all([
+        plan.includes('factcheck') ? step('factcheck', { article: body, sources }) : null,
+        plan.includes('critique') ? step('critique', { article: body }) : null,
+      ]);
       let ledger = [], claimSupport = null;
-      if (plan.includes('factcheck')) {
-        const f = await step('factcheck', { article: body, sources });
+      if (f) {
         if (f.ok) {
           ledger = claimLedger(f.data);
           claimSupport = claimSupportRatio(ledger);
@@ -159,10 +164,9 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
         } else degraded.push('the fact-check failed: claims were not verified by a model');
       }
 
-      // 5. Critique, then the developmental edit that acts on it and on the failed claims.
+      // 5. The developmental edit that acts on the critique and on the failed claims.
       let critique = null;
-      if (plan.includes('critique')) {
-        const c = await step('critique', { article: body });
+      if (c) {
         if (c.ok) critique = c.data;
         else degraded.push('the critique failed: no structural review');
       }

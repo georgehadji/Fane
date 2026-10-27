@@ -44,6 +44,7 @@ test('judgeArticle grades the final text without its sources list, with one fixe
   };
   const j = await judgeArticle(call, 'judge/model', result());
   assert.deepEqual([j.support, j.claims, j.audit, j.problems], [0.667, 3, 1, []]);
+  assert.deepEqual(j.failed.map(c => [c.claim, c.verdict]), [['c', 'unsupported']]);
   assert.ok(Math.abs(j.cost - 0.03) < 1e-9);
   assert.deepEqual(seen.map(s => s.opts.chain), [['judge/model'], ['judge/model']]);
   assert.ok(!seen[0].prompt.user.includes('## Sources'));

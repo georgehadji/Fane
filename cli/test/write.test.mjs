@@ -50,6 +50,14 @@ test('repairFinalNu puts back the final ν of την, στην, μην where Gre
   assert.equal(repairFinalNu('μητέρα στήθος τηλέφωνο').fixed.length, 0); // only the whole words
 });
 
+test('countTells: an article talking about its sources counts, in both languages; a cited fact does not', () => {
+  const en = countTells('None of these sources show the two methods tested together. The source does not give a year. Costs fell by 40% [2].', 'en');
+  assert.equal(en.hits.find(h => h.label === 'source-talk')?.count, 2);
+  const el = countTells('Η πηγή δεν δίνει σαφές έτος. Ούτε προκύπτει από τις πηγές ότι ο στόχος είναι δεσμευτικός. Οι πηγές δεν συμφωνούν.', 'el');
+  assert.equal(el.hits.find(h => h.label === 'source-talk')?.count, 3);
+  assert.equal(countTells('Η παραγωγή αυξήθηκε κατά 40% το 2023 [1]. Οι πηγές ενέργειας του νησιού είναι δύο.', 'el').total, 0);
+});
+
 test('countTells: plain Greek and plain English have none; English stock phrases are found', () => {
   assert.equal(countTells('Το φως του ήλιου ζεσταίνει τη θάλασσα. Τα κύματα φτάνουν στην ακτή το απόγευμα.', 'el').total, 0);
   assert.equal(countTells('The tide comes in twice a day. Boats leave at six.', 'en').total, 0);
@@ -393,6 +401,39 @@ test('Balanced: fact-check, critique, revision and one polish call', async () =>
   assert.equal(r.claimSupport, 1);
   assert.equal(r.ledger.length, 2);
   assert.equal(r.audit, null);
+});
+
+test('the fact-check and the critique run at the same time, and both reach the revision', async () => {
+  const base = fake();
+  let inflight = 0, most = 0;
+  const client = {
+    chat: async (body) => {
+      const slow = ['factcheck', 'critique'].includes(roleOf(body));
+      if (slow) { most = Math.max(most, ++inflight); await new Promise(r => setTimeout(r, 20)); inflight--; }
+      return base.chat(body);
+    },
+  };
+  const r = await run(client, { mode: 'quality' });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(most, 2);
+  assert.ok(r.phases.some(p => p.phase === 'factcheck' && p.status === 'ok') && r.phases.some(p => p.phase === 'critique' && p.status === 'ok'));
+  const revise = base.calls.find(x => x.role === 'revise').body.messages[1].content;
+  assert.match(revise, /"rigor":0\.8/); // the critique
+});
+
+test("today's date reaches the outline, draft, critique and revision prompts", async () => {
+  const c = fake();
+  const t = Date.UTC(2026, 9, 28, 12);
+  await createArticlePipeline({ client: c, retrieve: async () => SOURCES, now: () => t })({ topic: 'tidal power', words: 300, mode: 'quality' });
+  for (const role of ['outline', 'draft', 'critique', 'revise']) assert.match(c.calls.find(x => x.role === role).body.messages[1].content, /Today is 2026-10-28\./, role);
+  assert.doesNotMatch(c.calls.find(x => x.role === 'copy').body.messages[1].content, /Today is/);
+});
+
+test('every writing prompt forbids talking about the sources, in both languages', () => {
+  for (const lang of ['en', 'el']) {
+    const { system } = prompts.draft({ topic: 't', lang, words: 300, sources: SOURCES });
+    assert.match(system, lang === 'en' ? /never about the sources/ : /ποτέ για τις πηγές/, lang);
+  }
 });
 
 test('Quality: separate style and copy edit and a final audit', async () => {

@@ -37,6 +37,8 @@ const TELLS = {
     ['negative-parallelism', word('(?:not just|not only|it(?:\'|’)s not (?:just|merely|simply)|is not (?:just|merely|simply))')],
     ['generic-conclusion', word('(?:the future (?:looks|is) bright|paves the way|exciting times? (?:lie|are) ahead|journey of discovery|only time will tell)')],
     ['chatbot', word('(?:i hope this helps|let me know if|certainly!|great question|as an ai)')],
+    // the article talks about its evidence instead of its subject (a Quality run: "None of these sources show ...")
+    ['source-talk', word('(?:the (?:cited )?sources? (?:does not|doesn(?:\'|’)t|do not|don(?:\'|’)t|did not|says? nothing|gives? no|offers? no|provides? no)|none of (?:these|the|its|their) sources|no source (?:says|states|shows|gives)|according to the (?:available|cited) (?:data|sources|information|evidence))')],
   ],
   el: [
     ['participle-tail', new RegExp('[,;·]\\s+(?<!\\p{L})\\p{L}{4,}(?:οντασ|ωντασ)(?!\\p{L})', 'gu')],
@@ -48,6 +50,8 @@ const TELLS = {
     ['negative-parallelism', stem('(?:δεν ειναι απλωσ|δεν ειναι απλα|δεν αποτελει απλωσ|δεν αφορα μονο|οχι απλωσ)')],
     ['generic-conclusion', stem('(?:το μελλον (?:ειναι ευοιωνο|προμηνυεται)|ανοιγει νεουσ (?:οριζοντεσ|δρομουσ)|ανοιγουν νεουσ (?:οριζοντεσ|δρομουσ)|ταξιδι ανακαλυψησ|(?:παρα)?μενει να δουμε|μονο ο χρονοσ θα δειξει)')],
     ['chatbot', stem('(?:ελπιζω αυτο να βοηθα|φυσικα!|ασφαλωσ!|ωσ μοντελο|ωσ τεχνητη νοημοσυνη|θα ηθελεσ να)')],
+    // «Η πηγή δεν δίνει σαφές έτος», «Ούτε προκύπτει από τις πηγές» (a Quality run)
+    ['source-talk', stem('(?:(?:η|οι) πηγ(?:η|εσ) (?:\\p{L}+ )?δεν|καμια (?:απο τισ )?πηγ\\p{L}* δεν|προκυπτει απο τισ πηγεσ|απο τισ πηγεσ (?:δεν )?προκυπτει|επικαλειται η πηγη|συμφωνα με τα διαθεσιμα στοιχεια)')],
   ],
 };
 
