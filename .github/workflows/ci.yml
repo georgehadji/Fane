@@ -33,6 +33,5 @@ jobs:
           docker run --rm -u 0 --entrypoint sh -v "$PWD/patches:/p:ro" "$image" -c '
             set -e
             for pass in 1 2; do for f in /p/*.js; do node "$f"; done; done
-            # every patched bundle (each patch leaves a .bak) must still parse
-            cd /home/vane/.next/server
-            for b in $(find . -name "*.js.bak"); do node --check "${b%.bak}"; echo "parses: ${b%.bak}"; done'
+            # every patched bundle (each patch leaves a .bak) must still parse, server and browser
+            for b in $(find /home/vane/.next/server /home/vane/public/_next -name "*.js.bak"); do node --check "${b%.bak}"; echo "parses: ${b%.bak}"; done'

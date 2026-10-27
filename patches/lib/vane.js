@@ -8,6 +8,8 @@ module.exports = {
     llmParse: `${SERVER}/chunks/136.js`, // streamed tool-call argument parsing
     searchRoute: `${SERVER}/app/api/search/route.js`,
     chatRoute: `${SERVER}/app/api/chat/route.js`,
+    // Browser chunk with the sidebar; the hash in the name is fixed by the pinned digest.
+    layoutClient: '/home/vane/public/_next/static/chunks/app/layout-dae1640c324f0337.js',
   },
   // Title Vane's scraper returns instead of throwing when a page cannot be loaded.
   SCRAPE_FAILED_TITLE: 'Failed to scrape',
