@@ -3,6 +3,8 @@
 // Preferences -> Theme. The button calls next-themes' own setTheme, so the choice is stored
 // under the same localStorage key the settings page reads. Desktop sidebar only; the mobile
 // bottom bar has no settings button either.
+// The same sidebar's settings gear is a plain <div> with an onClick: no role, no tab stop, no name, so a
+// keyboard or screen-reader user could not open Settings. It becomes a labelled button (Enter/Space).
 const { run } = require('./lib/apply-targets');
 const { FILES } = require('./lib/vane');
 
@@ -15,6 +17,10 @@ const TOGGLE = `fane_theme=()=>{let{resolvedTheme:e,setTheme:t}=(0,a(70460).D)()
 
 const NEXT_TO = 'y=({children:e})=>(0,s.jsx)("div",{className:"flex flex-col items-center w-full",children:e}),v=';
 const SETTINGS = '(0,s.jsx)(u,{})]})}),(0,s.jsx)("div",{className:"fixed bottom-0';
+
+// The gear: `t(!0)` opens the settings dialog.
+const GEAR = 'onClick:()=>t(!0),children:(0,s.jsx)(p.A,{size:19,className:"cursor-pointer"})})';
+const GEAR_KEYS = 'role:"button",tabIndex:0,"aria-label":"Settings",onKeyDown:k=>{("Enter"===k.key||" "===k.key)&&(k.preventDefault(),t(!0))},';
 
 const TARGETS = [
   {
@@ -30,6 +36,13 @@ const TARGETS = [
     to: SETTINGS.replace('(0,s.jsx)(u,{})', '(0,s.jsxs)("div",{className:"flex flex-col items-center gap-y-3",children:[(0,s.jsx)(fane_theme,{}),(0,s.jsx)(u,{})]})'),
   },
 ];
+
+TARGETS.push({
+  name: 'settings gear is a labelled button',
+  file: FILES.layoutClient,
+  from: GEAR,
+  to: GEAR_KEYS + GEAR,
+});
 
 module.exports = { TARGETS };
 if (require.main === module) run('patch-theme-toggle', TARGETS);

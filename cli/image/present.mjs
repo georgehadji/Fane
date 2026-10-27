@@ -19,11 +19,17 @@ const NBSP = ' ';
 const DIM = 'opacity:0.7';
 
 // Status, summary and notes: one small dimmed block, one line each. Lines are already escaped.
-export const quiet = (lines) => `<p style="font-size:14px;${DIM}">${lines.filter(Boolean).join('<br>')}</p>`;
+// role="status": a screen reader announces progress and the final summary politely.
+export const quiet = (lines) => `<p role="status" style="font-size:14px;${DIM}">${lines.filter(Boolean).join('<br>')}</p>`;
 
 // & < > " are escaped. An apostrophe needs no escape (Vane shows &#39; literally), and one inside a
 // word is the curly one: don't -> don’t.
 export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]).replace(/(\w)'(\w)/g, '$1’$2');
+
+// Text for an attribute (alt): Vane does not decode entities there, so none are used. A pair of straight
+// quotes becomes curly ones, the rest of the characters that could end the attribute or open a tag are
+// replaced by look-alikes.
+export const attr = (s) => String(s ?? '').replace(/"([^"]*)"/g, '“$1”').replace(/"/g, '”').replace(/</g, '‹').replace(/>/g, '›').replace(/(\w)'(\w)/g, '$1’$2');
 
 export const altText = (subject, i, n, name) => `Image ${i} of ${n}: ${subject}${name ? ` (${name})` : ''}`;
 
@@ -39,6 +45,8 @@ export function formatDuration(ms) {
   return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
 }
 
+// The alt text leaves the model out: the caption (the figure's name) says it, and a screen reader would
+// read it twice.
 // Caption: the model in medium weight, its price dimmed; the model's own words, if any, on the next
 // line. The gap to the image (6px) is smaller than the gap between rows (20px), so a caption
 // belongs to the image above it.
@@ -46,7 +54,7 @@ const figure = (img, subject, i, n) => {
   // Vane's HTML parser trims the space at the edge of a span, so the gap after the name is a margin.
   const price = img.pricePerImage ? `· ≈${NBSP}$${img.pricePerImage.toFixed(3)}` : '';
   const words = img.text ? `<br><span style="${DIM}">${escapeHtml(img.text)}</span>` : '';
-  return `<figure style="margin:0"><a href="${src(img)}" target="_blank" rel="noopener"><img src="${src(img)}" alt="${escapeHtml(altText(subject, i, n, modelLabel(img)))}" width="100%" loading="lazy" style="display:block;margin:0;height:auto;border-radius:8px"></a><figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0.4em">${escapeHtml(modelLabel(img))}</span><span style="${DIM}">${price}</span>${words}</figcaption></figure>`;
+  return `<figure style="margin:0"><a href="${src(img)}" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="${src(img)}" alt="${attr(altText(subject, i, n))}" width="100%" loading="lazy" style="display:block;margin:0;height:auto;border-radius:8px"></a><figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0.4em">${escapeHtml(modelLabel(img))}</span><span style="${DIM}">${price}</span>${words}</figcaption></figure>`;
 };
 
 // The raw provider errors are code-like: small and in code type.

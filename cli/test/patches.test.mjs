@@ -89,3 +89,13 @@ test('the answer marker is the same in the hook and in the browser patch', async
   const { TARGETS: [t] } = require('../../patches/patch-image-ui.js');
   assert.ok(t.to.includes(`!h.includes(${JSON.stringify(ANSWER_MARKER)})`));
 });
+
+test('the settings gear patch makes a labelled, keyboard-operable button and keeps its click', () => {
+  const { TARGETS } = require('../../patches/patch-theme-toggle.js');
+  const gear = TARGETS.find(t => t.name === 'settings gear is a labelled button');
+  assert.ok(gear);
+  for (const need of ['role:"button"', 'tabIndex:0', '"aria-label":"Settings"', '"Enter"===k.key', '" "===k.key', 'k.preventDefault()']) assert.ok(gear.to.includes(need), need);
+  assert.ok(gear.to.includes(gear.from)); // the original onClick and icon are kept
+  const out = planPatch({ [gear.file]: `var f=(0,s.jsx)("div",{className:"c",${gear.from};` }, [gear]);
+  assert.deepEqual([out.errors, planPatch(out.next, [gear]).applied], [[], []]); // applies once, then a no-op
+});

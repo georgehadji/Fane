@@ -418,7 +418,7 @@ test('hook ignores questions and answers image requests with markdown images', a
   assert.equal(typeof seen[0].onProgress, 'function');
   assert.equal('count' in seen[0] || 'aspect' in seen[0], false);
   const md = blocks.get('b1');
-  assert.match(md, /<img src="data:image\/png;base64,[^"]+" alt="Image 1 of 1: donald duck in a playground \(FLUX\.2 Pro\)"/);
+  assert.match(md, /<img src="data:image\/png;base64,[^"]+" alt="Image 1 of 1: donald duck in a playground"/);
   assert.match(md, /<span style="font-weight:500;margin-right:0\.4em">FLUX\.2 Pro<\/span><span style="opacity:0\.7">· ≈ \$0\.002<\/span>/);
   assert.match(md, /Made 1 of 2 images\./);
 });
@@ -438,8 +438,8 @@ test('hook shows progress while images land, then the grid; words in the prompt 
   await handleImageRequest('create 2 images of a fox, widescreen', { ...io, generator });
   assert.equal(seen[0].count, 2);
   assert.equal(seen[0].aspect, '16:9');
-  assert.equal(shown[0], '<p style="font-size:14px;opacity:0.7">Generating images… 1 of 2 ready<br>✓ One</p>\n\n<!--fane:image-answer-->');
-  assert.equal(shown[1], '<p style="font-size:14px;opacity:0.7">Generating images… 2 of 2 ready<br>✓ One · ✓ Two</p>\n\n<!--fane:image-answer-->');
+  assert.equal(shown[0], '<p role="status" style="font-size:14px;opacity:0.7">Generating images… 1 of 2 ready<br>✓ One</p>\n\n<!--fane:image-answer-->');
+  assert.equal(shown[1], '<p role="status" style="font-size:14px;opacity:0.7">Generating images… 2 of 2 ready<br>✓ One · ✓ Two</p>\n\n<!--fane:image-answer-->');
   assert.match(shown[2], /^<div style="display:grid/);
   assert.ok(shown.every(md => md.endsWith('<!--fane:image-answer-->')) && firstEmit.endsWith('<!--fane:image-answer-->')); // every answer carries the marker
 });
