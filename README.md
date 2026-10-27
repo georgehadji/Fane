@@ -2,6 +2,8 @@
 
 Fixes and a headless CLI for a local [Vane](https://github.com/ItzCrazyKns/Vane) install (the AI search engine formerly called Perplexica).
 
+The project page is [`docs/index.html`](docs/index.html): static HTML, CSS and one script, no build. To publish it, turn on GitHub Pages for the `docs` folder (Settings → Pages → Deploy from a branch → `main` → `/docs`). Its pictures are real runs of `vane --image` (one prompt, three tiers, four images each), and its receipt uses the prices and model names of those runs.
+
 This is **not a fork** of Vane. It is a small toolkit for the official Docker image, aimed at making Vane usable by agents and API clients:
 
 | What | Why |

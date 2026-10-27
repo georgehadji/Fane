@@ -4,3 +4,4 @@ bench/results/
 *.log
 .DS_Store
 Thumbs.db
+.taste-skill/
