@@ -99,3 +99,15 @@ test('the settings gear patch makes a labelled, keyboard-operable button and kee
   const out = planPatch({ [gear.file]: `var f=(0,s.jsx)("div",{className:"c",${gear.from};` }, [gear]);
   assert.deepEqual([out.errors, planPatch(out.next, [gear]).applied], [[], []]); // applies once, then a no-op
 });
+
+test('the new-chat patch resets only when the address is "/" with messages on screen', () => {
+  const { TARGETS } = require('../../patches/patch-new-chat.js');
+  assert.equal(TARGETS.length, 1);
+  const [effect] = TARGETS;
+  assert.ok(effect.to.includes('"/"===location.pathname&&S.length>0&&(document.title="Chat - Vane",g(void 0),M([])')); // not on a new chat's own "/", which has no messages
+  assert.ok(effect.to.endsWith('f(!1))}),')); // no dependency list: runs on each render, the address is read live
+  assert.ok(effect.to.startsWith(effect.from)); // Vane's own chat-id effect is kept
+  assert.ok(!effect.to.includes('usePathname')); // Vane's import of next/navigation does not have it
+  const out = planPatch({ [effect.file]: `var x=()=>{let t={};${effect.from}0};` }, TARGETS);
+  assert.deepEqual([out.errors, planPatch(out.next, TARGETS).applied], [[], []]);
+});

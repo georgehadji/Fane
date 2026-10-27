@@ -9,6 +9,8 @@ module.exports = {
     searchRoute: `${SERVER}/app/api/search/route.js`,
     chatRoute: `${SERVER}/app/api/chat/route.js`,
     uploadsRoute: `${SERVER}/app/api/uploads/route.js`,
+    // Browser chunk with ChatProvider (the chat state: messages, chat id); fixed by the pinned digest.
+    chatClient: '/home/vane/public/_next/static/chunks/1220-5cd2adbf287bf784.js',
     // Browser chunk with the message component (the answer and its side column); fixed by the pinned digest.
     messageClient: '/home/vane/public/_next/static/chunks/2415-6f80633347836171.js',
     // Browser chunk with the sidebar; the hash in the name is fixed by the pinned digest.
