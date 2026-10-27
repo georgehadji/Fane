@@ -4,6 +4,7 @@
 // model is escaped before it goes into HTML.
 import { imageSubject } from './intent.mjs';
 import { explainFailure } from './policy.mjs';
+import { isStoredUrl } from './store.mjs';
 
 export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -12,7 +13,9 @@ export const altText = (subject, i, n, name) => `Image ${i} of ${n}: ${subject}$
 // OpenRouter names are "Provider: Model"; the reader wants the model.
 export const modelLabel = (img) => (img.name ? img.name.replace(/^[^:]+:\s*/, '') : img.model);
 
-const isImageUrl = (u) => /^data:image\/[a-z0-9.+-]+;base64,/i.test(u) && !/["'<>\s]/.test(u);
+// An image is shown from its stored link when it has one, else embedded as a data URL.
+const src = (img) => img.url || img.dataUrl;
+const isImageUrl = (u) => isStoredUrl(u) || /^data:image\/[a-z0-9.+-]+;base64,/i.test(u) && !/["'<>\s]/.test(u);
 
 export function formatDuration(ms) {
   const s = Math.round(ms / 1000);
@@ -22,7 +25,7 @@ export function formatDuration(ms) {
 const figure = (img, subject, i, n) => {
   const price = img.pricePerImage ? ` · ~$${img.pricePerImage.toFixed(3)}` : '';
   const words = img.text ? ` — ${escapeHtml(img.text)}` : '';
-  return `<figure style="margin:0"><a href="${img.dataUrl}" target="_blank" rel="noopener"><img src="${img.dataUrl}" alt="${escapeHtml(altText(subject, i, n, modelLabel(img)))}" width="100%" loading="lazy" style="height:auto;border-radius:8px"></a><figcaption><em>${escapeHtml(modelLabel(img))}${price}</em>${words}</figcaption></figure>`;
+  return `<figure style="margin:0"><a href="${src(img)}" target="_blank" rel="noopener"><img src="${src(img)}" alt="${escapeHtml(altText(subject, i, n, modelLabel(img)))}" width="100%" loading="lazy" style="height:auto;border-radius:8px"></a><figcaption><em>${escapeHtml(modelLabel(img))}${price}</em>${words}</figcaption></figure>`;
 };
 
 function failure(errors) {
@@ -40,7 +43,7 @@ export function renderProgress(done, total) {
 
 export function renderResult(result, prompt) {
   const subject = imageSubject(prompt);
-  const images = result.images.filter(i => isImageUrl(i.dataUrl));
+  const images = result.images.filter(i => isImageUrl(src(i)));
   if (!images.length) {
     const f = failure(result.errors);
     return [`**No images this time.** ${f.text}`, f.details].filter(Boolean).join('\n\n');

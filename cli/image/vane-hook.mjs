@@ -7,13 +7,15 @@ import { TIER_FOR_MODE } from './catalogue.mjs';
 import { isImageRequest, parseImageOptions } from './intent.mjs';
 import { renderProgress, renderResult } from './present.mjs';
 import { DEFAULT_TEXT_MODEL, createImageGenerator } from './generate.mjs';
+import { createImageStore, storeDirFor } from './store.mjs';
 import { createOpenRouterClient, findOpenRouterKey } from './openrouter.mjs';
 import { safeDownload } from './download.mjs';
 
+// store.put(dataUrl) -> link (default: files next to Vane's config.json, served by patch-image-serve).
 // mode is Vane's optimization mode (speed | balanced | quality), which picks the price tier.
 // emit(markdown) -> blockId, update(blockId, markdown). Returns false when the query is not an
 // image request (Vane then answers as usual). Dependencies are injectable for tests.
-export async function handleImageRequest(query, { emit, update, configPath, mode, log = (m) => console.log(`fane: ${m}`), readConfig, generator } = {}) {
+export async function handleImageRequest(query, { emit, update, configPath, mode, store = configPath ? createImageStore({ dir: storeDirFor(configPath) }) : null, log = (m) => console.log(`fane: ${m}`), readConfig, generator } = {}) {
   if (!isImageRequest(query)) return false;
   const id = emit('_Generating images…_');
   let apiKey = null;
@@ -34,6 +36,10 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
   const done = [];
   const onProgress = (p) => { done.push(p); update(id, renderProgress(done, p.total)); };
   const result = await generate({ prompt: query, format: 'jpeg', ...(TIER_FOR_MODE[mode] && { tier: TIER_FOR_MODE[mode] }), ...parseImageOptions(query), onProgress });
-  update(id, renderResult(result, query));
+  // Stored images are linked, not embedded; one that cannot be stored is embedded as before.
+  const images = await Promise.all(result.images.map(async (i) => {
+    try { return store ? { ...i, url: await store.put(i.dataUrl) } : i; } catch (err) { log(`image not stored, embedding it: ${err.message}`); return i; }
+  }));
+  update(id, renderResult({ ...result, images }, query));
   return true;
 }

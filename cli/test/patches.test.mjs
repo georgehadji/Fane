@@ -65,3 +65,18 @@ test('every patch declares well-formed targets on known Vane files', () => {
   }
   assert.ok(names.size >= 27);
 });
+
+test('the image store directory is the same in the patch constants and in store.mjs', async () => {
+  const { IMAGE_STORE_DIR, CONFIG_JSON } = require('../../patches/lib/vane.js');
+  const { storeDirFor } = await import('../image/store.mjs');
+  assert.equal(storeDirFor(CONFIG_JSON).split(String.fromCharCode(92)).join('/'), IMAGE_STORE_DIR);
+});
+
+test('the serving patch adds a GET without touching the POST handler', () => {
+  const { TARGETS: [t] } = require('../../patches/patch-image-serve.js');
+  assert.ok(t.to.includes('{GET:()=>fane_img,POST:()=>i}'));
+  assert.ok(t.to.endsWith('async function i(a){'));
+  const bundle = 'x;' + t.from + 'try{let b=await a.formData()}catch(a){}}';
+  const out = planPatch({ [t.file]: `(()=>{try{${bundle.replace('x;', '')}}catch(e){}})()` }, [t]);
+  assert.deepEqual(out.errors, []);
+});

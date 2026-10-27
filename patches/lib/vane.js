@@ -8,6 +8,7 @@ module.exports = {
     llmParse: `${SERVER}/chunks/136.js`, // streamed tool-call argument parsing
     searchRoute: `${SERVER}/app/api/search/route.js`,
     chatRoute: `${SERVER}/app/api/chat/route.js`,
+    uploadsRoute: `${SERVER}/app/api/uploads/route.js`,
     // Browser chunk with the sidebar; the hash in the name is fixed by the pinned digest.
     layoutClient: '/home/vane/public/_next/static/chunks/app/layout-dae1640c324f0337.js',
   },
@@ -15,6 +16,9 @@ module.exports = {
   SCRAPE_FAILED_TITLE: 'Failed to scrape',
   // Vane's settings (providers and their API keys).
   CONFIG_JSON: '/home/vane/data/config.json',
+  // Where generated images are stored: next to CONFIG_JSON, on the data volume. cli/image/store.mjs
+  // derives the same path from the config path (a test keeps them equal).
+  IMAGE_STORE_DIR: '/home/vane/data/fane-images',
   // Where Fane's image modules (cli/image) live in the container: docker-compose.yml mounts
   // them here and scripts/apply.mjs copies them here.
   FANE_IMAGE_DIR: '/fane/image',

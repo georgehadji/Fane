@@ -442,6 +442,19 @@ test('hook shows progress while images land, then the grid; words in the prompt 
   assert.match(shown[2], /^<div style="display:grid/);
 });
 
+test('hook links stored images, and embeds one that cannot be stored', async () => {
+  const shown = [];
+  const io = { emit: () => 'b', update: (id, md) => shown.push(md), log: () => {} };
+  const link = `/api/uploads?fane-image=${'e'.repeat(64)}.png`;
+  const generator = async () => ({ images: [{ dataUrl: PNG_URL, model: 'a/one' }, { dataUrl: PNG_URL, model: 'b/two' }], requested: 2, complete: true, errors: [] });
+  let n = 0;
+  const store = { put: async () => { if (++n === 2) throw new Error('disk full'); return link; } };
+  await handleImageRequest('draw a fox', { ...io, generator, store });
+  const md = shown.at(-1);
+  assert.equal(md.split(`<img src="${link}"`).length - 1, 1);
+  assert.equal(md.split('<img src="data:image/png;base64,').length - 1, 1);
+});
+
 test("hook maps Vane's optimization mode to the price tier", async () => {
   const seen = [];
   const generator = async (args) => { seen.push(args.tier); return { images: [], requested: 4, complete: false, errors: [] }; };
