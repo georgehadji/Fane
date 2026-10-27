@@ -5,7 +5,7 @@
 //  - Web pages are untrusted data: every source block says so, and no prompt acts on text inside it.
 //  - The draft is told the human-voice rules at write time (cheaper than undoing tells afterwards),
 //    with a rule set per language: the Greek one is native Greek, not a translation.
-import { LANGUAGE_NAMES } from './language.mjs';
+import { LANGUAGE_NAMES, wordCount } from './language.mjs';
 
 const JSON_ONLY = 'Reply with one JSON object and nothing else: no prose before or after, no code fence, no reasoning.';
 const NO_THINKING = 'Do not show your reasoning; output only the requested result.';
@@ -96,6 +96,13 @@ export const prompts = {
   copy: ({ lang, article }) => ({
     system: `You are a copy editor. Correctness only. ${header(lang)}`,
     user: `Article:\n<article>\n${article}\n</article>\n\nFix grammar, punctuation, spelling, inconsistent terminology and formatting, run-ons and tense. Do not change sentence structure, word choice that is correct, facts or [n] citations. Output the full article only.`,
+  }),
+
+  // A follow-up request on a finished article ("shorter", "rewrite the intro"). The sources are listed by
+  // title only: the edit works with what the article already says, so it adds no new facts.
+  rewrite: ({ lang, article, sources, instruction }) => ({
+    system: `You are an editor revising a finished article on the author's request. ${header(lang)}\n\n${HUMAN_RULES[lang] || HUMAN_RULES.en}`,
+    user: `${sourceBlock(sources, { excerpt: 0 })}\n\nArticle:\n<article>\n${article}\n</article>\n\nRequest from the author (do exactly this and nothing else): ${instruction}\n\nThe article is now ${wordCount(article)} words; when the request names a length, aim at it closely.\nRules: change only what the request asks for; keep the rest of the text as it is. Add no fact that is not already in the article. Keep the "# " title and "## " headings unless the request is about them, keep each [n] citation next to the claim it supports, and use only the numbers listed above. Add no sources list. Output the full revised article only.`,
   }),
 
   audit: ({ lang, article, ledger }) => ({

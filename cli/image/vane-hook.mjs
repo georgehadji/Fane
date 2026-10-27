@@ -15,7 +15,7 @@ import { safeDownload } from './download.mjs';
 
 // The text of the previous answer: from Vane's database when the patch provides lastAnswer(), else
 // from the chat history the browser sent (which can hold an older, partial version of it).
-async function previousAnswer(history, lastAnswer) {
+export async function previousAnswer(history, lastAnswer) {
   try { const text = await lastAnswer?.(); if (typeof text === 'string') return text; } catch { /* use the history */ }
   const last = history?.at(-1);
   return last?.role === 'assistant' ? String(last.content ?? '') : '';

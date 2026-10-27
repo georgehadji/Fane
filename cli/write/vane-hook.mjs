@@ -10,8 +10,11 @@
 // as soon as it exists, then the finished article.
 import { readFile } from 'node:fs/promises';
 import { createOpenRouterClient, findOpenRouterKey } from '../image/openrouter.mjs';
+import { previousAnswer } from '../image/vane-hook.mjs';
+import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue, selectChains } from './catalogue.mjs';
+import { createArticleEditor, isArticleEdit, parseArticleAnswer, targetLanguage } from './edit.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions } from './intent.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from './language.mjs';
 import { DEFAULT_MODE, MODES } from './models.mjs';
@@ -22,13 +25,20 @@ const TRIAL_FILE = new URL('./trial.json', import.meta.url);
 
 // research(query) -> [{ title, url, content }] (Vane's research on this chat's model and mode).
 // researchDone() closes Vane's research display. emit(markdown) -> blockId, update(blockId, markdown).
-// Returns false when the message is not an article request (Vane then answers as usual).
-// client, trial and pipeline are injectable for tests.
-export async function handleArticleRequest(query, { emit, update, configPath, mode, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, client, trial, pipeline } = {}) {
-  if (!isArticleRequest(query)) return false;
-  const topic = articleTopic(query);
-  const lang = detectLanguage(topic);
-  const state = { lang, phases: [], running: 'sources', draft: null };
+// lastAnswer() -> text of the previous answer, history -> the browser's chat history (see previousAnswer).
+// Returns false when the message is neither an article request nor an edit of the article the previous
+// answer was (Vane then answers as usual). client, trial, pipeline and editor are injectable for tests.
+export async function handleArticleRequest(query, { emit, update, configPath, mode, history, lastAnswer, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, client, trial, pipeline, editor } = {}) {
+  // A follow-up edit: the message reads like one ("shorter", "rewrite the intro") and the answer before it is an article of ours.
+  let earlier = null;
+  if (!isArticleRequest(query)) {
+    if (isImageRequest(query) || !isArticleEdit(query)) return false;
+    earlier = parseArticleAnswer(await previousAnswer(history, lastAnswer));
+    if (!earlier) return false;
+  }
+  const topic = earlier ? query : articleTopic(query);
+  const lang = earlier ? targetLanguage(query, earlier.lang) : detectLanguage(topic);
+  const state = { lang, phases: [], running: earlier ? 'edit' : 'sources', draft: null };
   const id = emit(tagged(renderArticleProgress(state)));
   const say = (markdown) => { try { update(id, tagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
   try {
@@ -46,6 +56,12 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
     const chosen = selectChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang });
     if (!chosen) {
       say(quiet([escapeHtml(`No text model has passed the trial for ${LANGUAGE_NAMES[lang]}: run node scripts/article-trial.mjs, or ask in English.`)]));
+      return true;
+    }
+    if (earlier) {
+      const edit = editor || createArticleEditor({ client, log });
+      const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, mode: useMode, chains: chosen.chains });
+      say(r.ok ? renderArticleResult(r) : renderArticleFailure({ ...r, edit: true }, lang));
       return true;
     }
     // Vane sometimes finds no sources for a query that worked a minute ago: one retry.

@@ -9,8 +9,8 @@ import { linkCitations, renumber, sourcesSection } from './checks.mjs';
 const NBSP = ' ';
 
 const LABELS = {
-  en: { sources: 'Researching sources', queries: 'Writing search queries', outline: 'Planning the outline', draft: 'Writing the draft', factcheck: 'Checking the facts', critique: 'Reviewing the argument', revise: 'Revising', polish: 'Polishing', style: 'Editing the style', copy: 'Copy editing', audit: 'Final check' },
-  el: { sources: 'Αναζήτηση πηγών', queries: 'Διατύπωση αναζητήσεων', outline: 'Σχεδιασμός δομής', draft: 'Γράψιμο του κειμένου', factcheck: 'Έλεγχος γεγονότων', critique: 'Κριτική ανάγνωση', revise: 'Αναθεώρηση', polish: 'Επιμέλεια', style: 'Επιμέλεια ύφους', copy: 'Γλωσσική επιμέλεια', audit: 'Τελικός έλεγχος' },
+  en: { edit: 'Editing the article', sources: 'Researching sources', queries: 'Writing search queries', outline: 'Planning the outline', draft: 'Writing the draft', factcheck: 'Checking the facts', critique: 'Reviewing the argument', revise: 'Revising', polish: 'Polishing', style: 'Editing the style', copy: 'Copy editing', audit: 'Final check' },
+  el: { edit: 'Επεξεργασία του κειμένου', sources: 'Αναζήτηση πηγών', queries: 'Διατύπωση αναζητήσεων', outline: 'Σχεδιασμός δομής', draft: 'Γράψιμο του κειμένου', factcheck: 'Έλεγχος γεγονότων', critique: 'Κριτική ανάγνωση', revise: 'Αναθεώρηση', polish: 'Επιμέλεια', style: 'Επιμέλεια ύφους', copy: 'Γλωσσική επιμέλεια', audit: 'Τελικός έλεγχος' },
 };
 const WORDS = {
   en: { words: 'words', sources: 'sources', source: 'source', draft: 'Draft. Checking and editing next…', modes: { speed: 'Speed', balanced: 'Balanced', quality: 'Quality' } },
@@ -60,6 +60,6 @@ export function renderArticleFailure(result, lang = 'en') {
   const why = result.status === 402 ? 'OpenRouter has no credits left (402). Add credits at openrouter.ai and ask again.'
     : result.status === 401 ? "OpenRouter refused the API key (401). Check the key of the OpenRouter provider in Vane's Settings."
       : result.error;
-  const head = lang === 'el' ? 'Δεν μπόρεσα να γράψω το άρθρο.' : 'The article could not be written.';
+  const head = lang === 'el' ? (result.edit ? 'Δεν μπόρεσα να αλλάξω το άρθρο.' : 'Δεν μπόρεσα να γράψω το άρθρο.') : result.edit ? 'The article could not be changed.' : 'The article could not be written.';
   return quiet([escapeHtml(head), escapeHtml(why)]);
 }

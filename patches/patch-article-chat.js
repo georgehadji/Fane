@@ -10,7 +10,7 @@
 // the two work in either order; each leaves its own marker.
 const { run } = require('./lib/apply-targets');
 const { FILES, CONFIG_JSON, FANE_WRITE_DIR } = require('./lib/vane');
-const { FINISH } = require('./patch-image-chat');
+const { FINISH, LAST_ANSWER } = require('./patch-image-chat');
 
 const CLASSIFY = 'let d=await (0,e.L)({chatHistory:b.chatHistory,enabledSources:b.config.sources,query:b.followUp,llm:b.config.llm}),l=h.u.executeAll(';
 
@@ -18,7 +18,7 @@ const CLASSIFY = 'let d=await (0,e.L)({chatHistory:b.chatHistory,enabledSources:
 // classifier, f.A = the research class, i.A / j = the database. `C` and `R` are new names.
 const RESEARCH = 'async q=>{let C=await (0,e.L)({chatHistory:[],enabledSources:b.config.sources,query:q,llm:b.config.llm});C.classification.skipSearch=!1;let R=await new f.A().research(a,{chatHistory:[],followUp:q,classification:C,config:b.config});return((R&&R.searchFindings)||[]).map(s=>({title:(s.metadata&&s.metadata.title)||"",url:(s.metadata&&s.metadata.url)||"",content:s.content||""}))}';
 
-const HOOK = `if(await(async()=>{try{let H=await import(${JSON.stringify(`file://${FANE_WRITE_DIR}/vane-hook.mjs`)});return await H.handleArticleRequest(b.followUp,{mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},research:${RESEARCH},researchDone:()=>a.emit("data",{type:"researchComplete"}),emit:x=>{let B={id:crypto.randomUUID(),type:"text",data:x};a.emitBlock(B);return B.id},update:(I,x)=>{let B=a.getBlock(I);B&&(B.data=x,a.updateBlock(I,[{op:"replace",path:"/data",value:x}]))}})}catch(E){console.log("fane: article hook unavailable:",E&&E.message);return!1}})()){${FINISH};return}/*fane:article-chat*/`;
+const HOOK = `if(await(async()=>{try{let H=await import(${JSON.stringify(`file://${FANE_WRITE_DIR}/vane-hook.mjs`)});return await H.handleArticleRequest(b.followUp,{lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},research:${RESEARCH},researchDone:()=>a.emit("data",{type:"researchComplete"}),emit:x=>{let B={id:crypto.randomUUID(),type:"text",data:x};a.emitBlock(B);return B.id},update:(I,x)=>{let B=a.getBlock(I);B&&(B.data=x,a.updateBlock(I,[{op:"replace",path:"/data",value:x}]))}})}catch(E){console.log("fane: article hook unavailable:",E&&E.message);return!1}})()){${FINISH};return}/*fane:article-chat*/`;
 
 const TARGETS = [
   {
@@ -27,6 +27,13 @@ const TARGETS = [
     from: CLASSIFY,
     to: HOOK + CLASSIFY,
     marker: '/*fane:article-chat*/',
+  },
+  {
+    // Upgrade for a hook installed before follow-up edits: hand over the previous answer and the history.
+    name: 'article hook can read the previous answer',
+    file: FILES.chatRoute,
+    from: 'handleArticleRequest(b.followUp,{mode:b.config.mode,configPath:',
+    to: `handleArticleRequest(b.followUp,{lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:`,
   },
 ];
 

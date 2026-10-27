@@ -4,7 +4,9 @@ import { createRequire } from 'node:module';
 
 import { cleanMarkdown, renderArticleFailure, renderArticleProgress, renderArticleResult } from '../write/present.mjs';
 import { handleArticleRequest } from '../write/vane-hook.mjs';
-import { ANSWER_MARKER } from '../image/present.mjs';
+import { ANSWER_MARKER, tagged } from '../image/present.mjs';
+import { sourcesSection } from '../write/checks.mjs';
+import { isArticleEdit, parseArticleAnswer, targetLanguage } from '../write/edit.mjs';
 
 const require = createRequire(import.meta.url);
 const { planPatch } = require('../../patches/lib/apply-targets.js');
@@ -194,7 +196,7 @@ const CLASSIFY = IMAGE[0].from;
 const ROUTE = `async function s(a,b){x;${CLASSIFY}{}).then(q=>q);m=null;y}`;
 
 test('the article patch imports the hook from FANE_WRITE_DIR and hands over Vane\'s research', () => {
-  assert.equal(ARTICLE.length, 1);
+  assert.equal(ARTICLE.length, 2); // the hook, and the upgrade for a hook installed before follow-up edits
   const [t] = ARTICLE;
   assert.equal(t.file, FILES.chatRoute);
   assert.ok(t.to.includes(`file://${FANE_WRITE_DIR}/vane-hook.mjs`));
@@ -204,7 +206,7 @@ test('the article patch imports the hook from FANE_WRITE_DIR and hands over Vane
 });
 
 test('the article and image patches apply in either order, and again, to the same two hooks', () => {
-  const all = [IMAGE[0], ...ARTICLE];
+  const all = [IMAGE[0], ARTICLE[0]];
   const apply = (order) => {
     let files = { [FILES.chatRoute]: ROUTE };
     for (const t of order) { const r = planPatch(files, [t]); assert.deepEqual(r.errors, [], t.name); files = r.next; }
@@ -217,4 +219,93 @@ test('the article and image patches apply in either order, and again, to the sam
     assert.equal((text.match(/handleImageRequest/g) || []).length, 1);
     assert.ok(text.indexOf('fane:article-chat') < text.indexOf(CLASSIFY) && text.indexOf('fane:image-chat') < text.indexOf(CLASSIFY));
   }
+});
+
+// ---- follow-up edits ----
+
+test('edit requests are recognised in English and Greek; questions and new topics are not', () => {
+  for (const q of ['make it shorter', 'Please shorten the introduction', 'rewrite the conclusion', 'now translate it to English', 'add a paragraph about costs', 'more formal please', 'κάνε το πιο σύντομο', 'Ξαναγράψε την εισαγωγή', 'μετάφρασέ το στα αγγλικά', 'πιο απλά, παρακαλώ']) assert.equal(isArticleEdit(q), true, q);
+  for (const q of ['what is tidal power', 'why did you cite source 2', 'explain the second section', 'ποια είναι η πηγή 3', 'tell me more']) assert.equal(isArticleEdit(q), false, q);
+});
+
+test('the language of an edit follows a translation request only when the language ends the sentence', () => {
+  assert.equal(targetLanguage('translate it to English', 'el'), 'en');
+  assert.equal(targetLanguage('μετάφρασέ το στα αγγλικά', 'el'), 'en');
+  assert.equal(targetLanguage('translate this into Greek, please', 'en'), 'el');
+  assert.equal(targetLanguage('add a line to Greek readers about costs', 'en'), 'en');
+  assert.equal(targetLanguage('make it shorter', 'el'), 'el');
+});
+
+const previous = () => tagged(renderArticleResult(RESULT({ article: draft + sourcesSection(SOURCES, 'en'), sources: SOURCES, words: 450 })));
+
+test('an earlier answer is read back as the article, with [n] citations and its sources', () => {
+  const p = parseArticleAnswer(previous());
+  assert.ok(p.body.startsWith('# Tides at work'));
+  assert.match(p.body, /work \[1\]\./);
+  assert.match(p.body, /work \[3\]\./);
+  assert.doesNotMatch(p.body, /[¹²³]|<p|Sources/);
+  assert.deepEqual(p.sources.map(s => [s.title, s.url]), SOURCES.map(s => [s.title, s.url]));
+  assert.equal(p.lang, 'en');
+  assert.equal(parseArticleAnswer('Just a short answer from Vane.'), null);
+  assert.equal(parseArticleAnswer(''), null);
+});
+
+test('adjacent citation links come back as one group', () => {
+  const a = tagged(renderArticleResult(RESULT({ article: draft.replace('work [1].', 'work [1, 3].') + sourcesSection(SOURCES, 'en'), sources: SOURCES })));
+  assert.match(parseArticleAnswer(a).body, /work \[1, 3\]\./);
+});
+
+const shorter = draft.split('. ').slice(0, 12).join('. ') + '.';
+function editClient(answer = shorter) {
+  const calls = [];
+  return { calls, models: async () => MODELS, chat: async (body) => { calls.push(body.messages[1].content); return reply(answer); } };
+}
+
+test('"make it shorter" after an article edits it in one call, without a new search', async () => {
+  const u = ui(), client = editClient();
+  let searched = 0;
+  const handled = await handleArticleRequest('make it shorter', { ...u, mode: 'speed', client, trial: TRIAL, lastAnswer: async () => previous(), research: async () => { searched++; return SOURCES; } });
+  assert.equal(handled, true);
+  assert.equal(searched, 0);
+  assert.equal(client.calls.length, 1);
+  assert.match(client.calls[0], /Request from the author \(do exactly this and nothing else\): make it shorter/);
+  assert.match(u.events[0][1], /Editing the article…/);
+  const final = u.blocks.get('b1');
+  assert.ok(final.startsWith('# Tides at work'));
+  assert.match(final, /## Sources/);
+  assert.match(final, /words · 3 sources · ≈ \$0\.00\d( · \d+s)? · Speed/); // the fake clock is instant
+  assert.ok(final.endsWith(ANSWER_MARKER));
+});
+
+test('an edit that loses the title or most of the text is refused and says so', async () => {
+  for (const bad of ['Short answer without a title.', '# Tides\n\nVery short.']) {
+    const u = ui();
+    await handleArticleRequest('make it shorter', { ...u, mode: 'speed', client: editClient(bad), trial: TRIAL, lastAnswer: async () => previous(), research: async () => SOURCES });
+    assert.match(u.blocks.get('b1'), /The article could not be changed\./);
+    assert.match(u.blocks.get('b1'), /not changed/);
+  }
+});
+
+test('an edit keeps Vane in charge when the previous answer is not an article, or the message is an image request', async () => {
+  const client = editClient();
+  const u = ui();
+  assert.equal(await handleArticleRequest('make it shorter', { ...u, client, trial: TRIAL, lastAnswer: async () => 'Tidal power is a form of hydropower.', research: async () => SOURCES }), false);
+  assert.equal(await handleArticleRequest('make an image of a tidal turbine', { ...u, client, trial: TRIAL, lastAnswer: async () => previous(), research: async () => SOURCES }), false);
+  assert.equal(await handleArticleRequest('make it shorter', { ...u, client, trial: TRIAL, research: async () => SOURCES }), false); // no previous answer at all
+  assert.deepEqual([u.events, client.calls], [[], []]);
+});
+
+test('a citation the edit invents is removed and noted', async () => {
+  const u = ui();
+  await handleArticleRequest('make it shorter', { ...u, mode: 'speed', client: editClient(shorter.replace('work [1].', 'work [9].')), trial: TRIAL, lastAnswer: async () => previous(), research: async () => SOURCES });
+  assert.match(u.blocks.get('b1'), /removed citations to sources that do not exist: \[9\]/);
+  assert.doesNotMatch(u.blocks.get('b1'), /⁹/);
+});
+
+test('the patch can upgrade a hook installed before follow-up edits', () => {
+  const old = 'async function s(a,b){return H.handleArticleRequest(b.followUp,{mode:b.config.mode,configPath:"/c"})}';
+  const r = planPatch({ [FILES.chatRoute]: old }, [ARTICLE[1]]);
+  assert.deepEqual(r.errors, []);
+  assert.match(r.next[FILES.chatRoute], /handleArticleRequest\(b\.followUp,\{lastAnswer:async\(\)=>\{.*,history:b\.chatHistory,mode:b\.config\.mode,configPath:"\/c"\}\)/);
+  assert.deepEqual(planPatch(r.next, [ARTICLE[1]]).applied, []); // and a second pass changes nothing
 });
