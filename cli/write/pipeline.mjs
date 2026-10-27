@@ -18,6 +18,9 @@ export const THIN_SOURCES = 4;
 // English queries added to a non-English topic. One: each query is a full Vane research (three searches
 // and a page of progress in the answer), and in the first live run four of them took minutes.
 export const EXTRA_QUERIES = 1;
+// A text more than a quarter over the target is cut back by one extra call (a live Quality run: draft 543 words,
+// after revise 813, after the audit's retry 899, for a target of 500).
+export const MAX_OVER = 1.25;
 
 const pct = (x) => `${Math.round(x * 100)}%`;
 const titleOf = (text) => /^\s*#\s+(.+)$/m.exec(text)?.[1].trim() || '';
@@ -42,7 +45,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
     async function step(role, ctx) {
       emit({ phase: role, status: 'running' });
       const started = now();
-      const r = await call(role, prompts[role]({ topic, lang, words, ...ctx }), { chain: chains[role], maxTokens: tokensFor(role, words, lang) });
+      const r = await call(role, prompts[role]({ topic, lang, words, ...ctx }), { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, words, lang) });
       calls += r.attempts.length;
       cost += r.cost;
       const rec = { phase: role, model: r.model || null, status: r.ok ? (r.fallback ? 'fallback' : 'ok') : 'failed', ms: now() - started, note: r.ok ? (r.fallback ? `${r.attempts.filter(a => a.problem).map(a => `${a.model}: ${a.problem}`).join('; ')}` : '') : r.errors.join('; ') };
@@ -53,8 +56,8 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
     }
 
     // Edited text replaces the text only if it is plausibly the whole article again.
-    const refuse = (prev, next) => {
-      if (wordCount(next) < wordCount(prev) * 0.6) return 'much shorter than its input';
+    const refuse = (prev, next, shrink = 0.6) => {
+      if (wordCount(next) < wordCount(prev) * shrink) return 'much shorter than its input';
       if (/^\s*#\s/m.test(prev) && !/^\s*#\s/m.test(next)) return 'lost the title';
       const before = checkCitations(prev, sources).cited;
       if (before >= 3 && checkCitations(next, sources).cited < before * 0.5) return 'dropped most citations';
@@ -70,6 +73,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
     async function edit(role, ctx) {
       const r = await step(role, { article: body, sources, ...ctx });
       if (!r.ok) { degraded.push(`${role} failed (${r.errors.at(-1) || 'no answer'}): that pass was skipped`); return false; }
+      phases.at(-1).words = wordCount(r.text); // where a text grows or shrinks shows in the report
       const why = refuse(body, r.text);
       if (why) {
         phases.at(-1).status = 'rejected';
@@ -78,7 +82,22 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
         return false;
       }
       body = fix(r.text);
+      await trim();
       return true;
+    }
+    // Cut a text that ran over the target back toward it. The result must be shorter and still an article.
+    async function trim() {
+      if (wordCount(body) <= words * MAX_OVER) return;
+      const before = wordCount(body);
+      const r = await step('rewrite', { article: body, sources, instruction: `Cut it to about ${words} words. Drop repetition and the least important detail first. Keep the thesis, the title, the headings and the claims that carry the argument, with their [n] citations.` });
+      const why = !r.ok ? (r.errors.at(-1) || 'no answer') : wordCount(r.text) >= before ? 'not shorter' : refuse(body, r.text, 0.4);
+      if (why) {
+        phases.at(-1).status = r.ok ? 'rejected' : 'failed';
+        degraded.push(`trimming from ${before} words to the target of ${words} failed (${why}): the longer text was kept`);
+        return;
+      }
+      phases.at(-1).words = wordCount(r.text);
+      body = fix(r.text);
     }
 
     let sources = [], body = '';
@@ -116,6 +135,8 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const d = await step('draft', { sources, outline });
       if (!d.ok) return { ok: false, error: `the draft failed: ${d.errors.join('; ')}`, phases, language: lang, mode, calls, cost, sources };
       body = fix(d.text);
+      phases.at(-1).words = wordCount(body);
+      await trim();
       emit({ phase: 'draft', status: 'preview', text: body, sources }); // lets a UI show the draft while the checks and edits run
 
       // 4. Fact-check: a ledger of claims against their cited sources.

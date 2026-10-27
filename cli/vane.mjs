@@ -661,7 +661,7 @@ function printArticleReport(r) {
   const say = (s) => process.stderr.write(`${s}\n`);
   const cost = r.cost ? ` · ≈ $${r.cost.toFixed(4)}` : '';
   say(`\nvane: ${r.words} words (target ${r.targetWords}), ${r.language === 'el' ? 'Greek' : 'English'}, ${r.mode} · ${r.sources.length} sources cited · ${r.calls} model calls${cost} · ${Math.round(r.ms / 1000)} s`);
-  for (const p of r.phases) say(`  ${p.status.padEnd(9)}${p.phase.padEnd(10)}${p.model || ''}${p.note && p.status !== 'ok' ? `  (${p.note})` : ''}`);
+  for (const p of r.phases) say(`  ${p.status.padEnd(9)}${p.phase.padEnd(10)}${p.model || ''}${p.words ? `  ${p.words} words` : ''}${p.note && p.status !== 'ok' ? `  (${p.note})` : ''}`);
   if (r.claimSupport !== null) say(`  claims supported by their sources: ${Math.round(r.claimSupport * 100)}% of ${r.ledger.length} checked`);
   if (r.audit) say(`  audit: ${r.audit.score} (${r.audit.passes ? 'passed' : 'failed'}${r.audit.retried ? ', after a retry' : ''})`);
   if (r.repaired) say(`  repaired ${r.repaired} Greek word${r.repaired === 1 ? '' : 's'} with Latin look-alike letters`);

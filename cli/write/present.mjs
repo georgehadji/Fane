@@ -9,8 +9,8 @@ import { linkCitations, renumber, sourcesSection } from './checks.mjs';
 const NBSP = ' ';
 
 const LABELS = {
-  en: { edit: 'Editing the article', sources: 'Researching sources', queries: 'Writing search queries', outline: 'Planning the outline', draft: 'Writing the draft', factcheck: 'Checking the facts', critique: 'Reviewing the argument', revise: 'Revising', polish: 'Polishing', style: 'Editing the style', copy: 'Copy editing', audit: 'Final check' },
-  el: { edit: 'Επεξεργασία του κειμένου', sources: 'Αναζήτηση πηγών', queries: 'Διατύπωση αναζητήσεων', outline: 'Σχεδιασμός δομής', draft: 'Γράψιμο του κειμένου', factcheck: 'Έλεγχος γεγονότων', critique: 'Κριτική ανάγνωση', revise: 'Αναθεώρηση', polish: 'Επιμέλεια', style: 'Επιμέλεια ύφους', copy: 'Γλωσσική επιμέλεια', audit: 'Τελικός έλεγχος' },
+  en: { rewrite: 'Trimming to the length', edit: 'Editing the article', sources: 'Researching sources', queries: 'Writing search queries', outline: 'Planning the outline', draft: 'Writing the draft', factcheck: 'Checking the facts', critique: 'Reviewing the argument', revise: 'Revising', polish: 'Polishing', style: 'Editing the style', copy: 'Copy editing', audit: 'Final check' },
+  el: { rewrite: 'Περικοπή στο μήκος', edit: 'Επεξεργασία του κειμένου', sources: 'Αναζήτηση πηγών', queries: 'Διατύπωση αναζητήσεων', outline: 'Σχεδιασμός δομής', draft: 'Γράψιμο του κειμένου', factcheck: 'Έλεγχος γεγονότων', critique: 'Κριτική ανάγνωση', revise: 'Αναθεώρηση', polish: 'Επιμέλεια', style: 'Επιμέλεια ύφους', copy: 'Γλωσσική επιμέλεια', audit: 'Τελικός έλεγχος' },
 };
 const WORDS = {
   en: { words: 'words', sources: 'sources', source: 'source', draft: 'Draft. Checking and editing next…', modes: { speed: 'Speed', balanced: 'Balanced', quality: 'Quality' } },

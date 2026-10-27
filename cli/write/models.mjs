@@ -1,6 +1,7 @@
 // Which phases run on each Vane mode, which models run them, and how many tokens each may use.
 // Modes are Vane's Speed / Balanced / Quality. Phase counts (model calls, sources are free):
-//   speed 2 (outline, draft), balanced 6, quality 8 (+4 for the one retry after a failed audit);
+//   speed 2 (outline, draft), balanced 6, quality 8 (+4 for the one retry after a failed audit),
+//   plus one trim call whenever a text ends up more than a quarter over its target (pipeline.mjs MAX_OVER);
 //   a Greek or other non-English topic adds one cheap call to write English search queries.
 import { DEFAULT_TEXT_MODEL } from '../image/generate.mjs';
 
@@ -36,7 +37,7 @@ export const chainsFor = (models) => {
 // output tokens on thinking, hence the headroom: reasoner's postmortem found phases silently
 // cut at a 2048 default.
 const TOKENS_PER_WORD = { en: 1.5, el: 3.6 };
-const PROSE = new Set(['draft', 'revise', 'polish', 'style', 'copy']);
+const PROSE = new Set(['draft', 'rewrite', 'revise', 'polish', 'style', 'copy']);
 const JSON_TOKENS = { queries: 800, outline: 3000, factcheck: 4000, critique: 3500, audit: 2500 };
 // Room for thinking on top of the answer, even at low effort: the first live run in Vane's web UI had an
 // outline cut off at 3880 tokens by three models in a row. A cap is not a spend: only generated tokens are paid.

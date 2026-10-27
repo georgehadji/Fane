@@ -285,7 +285,7 @@ test('role call: 401 and 402 stop the chain at once, other errors move on', asyn
 const ROLE_OF = [
   ['web search queries', 'queries'], ['planning a researched article', 'outline'], ['senior journalist', 'draft'], ['adversarial fact-checker', 'factcheck'],
   ["devil's advocate", 'critique'], ['developmental editor', 'revise'], ['style and copy editor', 'polish'], ['You are a style editor', 'style'],
-  ['You are a copy editor', 'copy'], ['final editorial auditor', 'audit'],
+  ['You are a copy editor', 'copy'], ['final editorial auditor', 'audit'], ['revising a finished article', 'rewrite'],
 ];
 const roleOf = (body) => ROLE_OF.find(([needle]) => body.messages[0].content.includes(needle))?.[1];
 
@@ -373,6 +373,38 @@ test('Quality: a failed audit gets exactly one retry (revise, style, copy, audit
   assert.equal(r2.audit.retried, true);
   assert.equal(r2.degraded.length, 0);
   assert.match(c2.calls[8].body.messages[1].content, /strengthen/); // the retry revision sees the audit issues
+});
+
+test('a draft far over the target is cut back by one extra call, and the report shows the words per phase', async () => {
+  const c = fake({ draft: article(500), rewrite: article(310) });
+  const r = await run(c, { mode: 'speed' });
+  assert.deepEqual(c.calls.map(x => x.role), ['outline', 'draft', 'rewrite']);
+  assert.match(c.calls[2].body.messages[1].content, /Cut it to about 300 words/);
+  assert.deepEqual(r.phases.filter(p => p.words).map(p => [p.phase, p.words]), [['draft', wordCount(article(500))], ['rewrite', wordCount(article(310))]]);
+  assert.ok(r.words < 350 && r.degraded.length === 0);
+});
+
+test('an edit that grows the text past the target is cut back; a draft within a quarter of the target is not touched', async () => {
+  const c = fake({ revise: article(480), rewrite: article(320) });
+  const r = await run(c, { mode: 'balanced' });
+  assert.deepEqual(c.calls.map(x => x.role), ['outline', 'draft', 'factcheck', 'critique', 'revise', 'rewrite', 'polish']);
+  assert.ok(r.words < 350);
+  const near = await run(fake({ draft: article(370) }), { mode: 'speed' }); // 370 words for 300: within 25%
+  assert.equal(near.calls, 2);
+});
+
+test('a trim that is not shorter, loses the title or fails keeps the longer text and says so', async () => {
+  for (const rewrite of [article(500), 'Short text without a title or any sources at all, nothing like an article.', new OpenRouterError('400 bad', 400)]) {
+    const r = await run(fake({ draft: article(500), rewrite }), { mode: 'speed' });
+    assert.equal(r.ok, true);
+    assert.ok(r.degraded.some(d => /trimming from \d+ words to the target of 300 failed/.test(d)), JSON.stringify(r.degraded));
+    assert.ok(r.words > 450);
+  }
+});
+
+test('every editing prompt carries the length target', () => {
+  const ctx = { lang: 'en', article: article(400), sources: SOURCES, words: 500, critique: {}, ledger: [] };
+  for (const role of ['revise', 'polish', 'style', 'copy']) assert.match(prompts[role](ctx).user, /the article is \d+ words and the target is about 500\. Do not make it longer than 550 words/, role);
 });
 
 test('the models of a chain are tried in order and a fallback is recorded', async () => {
