@@ -11,6 +11,11 @@ module.exports = {
   },
   // Title Vane's scraper returns instead of throwing when a page cannot be loaded.
   SCRAPE_FAILED_TITLE: 'Failed to scrape',
+  // Vane's settings (providers and their API keys).
+  CONFIG_JSON: '/home/vane/data/config.json',
+  // Where Fane's image modules (cli/image) live in the container: docker-compose.yml mounts
+  // them here and scripts/apply.mjs copies them here.
+  FANE_IMAGE_DIR: '/fane/image',
 };
 
 // Target shared by patch-scholarly-sources and patch-social-sources (whichever runs first

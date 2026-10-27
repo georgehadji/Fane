@@ -13,6 +13,11 @@ export class OpenRouterError extends Error {
 export const OPENROUTER_HOST = 'openrouter.ai';
 export const OPENROUTER_BASE_URL = `https://${OPENROUTER_HOST}/api/v1`;
 
+// The API key of the Vane provider that points at OpenRouter. `modelProviders` is Vane's
+// config list ({ name, type, config: { baseURL, apiKey } }) from /api/config or config.json.
+export const findOpenRouterKey = (modelProviders) =>
+  (modelProviders || []).find(p => String(p.config?.baseURL || '').includes(OPENROUTER_HOST) && p.config?.apiKey)?.config.apiKey || null;
+
 export function createOpenRouterClient({ apiKey, baseUrl = OPENROUTER_BASE_URL, fetchImpl = fetch } = {}) {
   async function call(path, { method = 'GET', body, timeoutMs = 90_000 } = {}) {
     const res = await fetchImpl(`${baseUrl}${path}`, {

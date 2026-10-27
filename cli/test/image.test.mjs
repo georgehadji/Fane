@@ -96,8 +96,10 @@ test('rules classify family and tier', () => {
 });
 
 test('image requests are recognised; questions are not', () => {
-  for (const q of ['create an image of donald duck and his nieces in the playground', 'Draw me a logo for a bakery', 'please generate 2 pictures of a fox', 'Can you make a poster for a jazz night', 'paint a portrait of a cat']) assert.ok(isImageRequest(q), q);
+  for (const q of ['create an image of donald duck and his nieces in the playground', 'Draw me a logo for a bakery', 'please generate 2 pictures of a fox', 'Can you make a poster for a jazz night', 'paint a portrait of a cat', 'draw a fox', 'Sketch the Eiffel Tower at night']) assert.ok(isImageRequest(q), q);
+  for (const q of ['draw a conclusion from this data', 'Draw some parallels between Rome and the US']) assert.ok(!isImageRequest(q), q);
   assert.equal(imageSubject('create an image of donald duck and his nieces in the playground'), 'donald duck and his nieces in the playground');
+  assert.equal(imageSubject('draw me a fox'), 'a fox');
   assert.equal(imageSubject('a red fox'), 'a red fox');
   for (const q of ['What is the best image format for the web?', 'how do I create an image in Docker', 'Compare Rust and Go', 'images of the 2024 eclipse: where were they taken?', 'Make sure my photo backups are safe']) assert.ok(!isImageRequest(q), q);
 });
@@ -348,6 +350,37 @@ test('pipeline: remote image URLs go through the downloader (both endpoints)', a
   assert.ok((await gen({ prompt: 'x', count: 1, enhance: false })).ok);
   assert.ok((await gen({ prompt: 'x', count: 1, enhance: false, family: 'text_in_image' })).ok);
   assert.deepEqual(seen, ['https://cdn.test/a', 'https://cdn.test/b']);
+});
+
+// ---- Vane web UI hook ---------------------------------------------------
+
+const { handleImageRequest, replyMarkdown } = await import('../image/vane-hook.mjs');
+
+test('hook ignores questions and answers image requests with markdown images', async () => {
+  const blocks = new Map();
+  let n = 0;
+  const io = { emit: (md) => { const id = `b${++n}`; blocks.set(id, md); return id; }, update: (id, md) => blocks.set(id, md) };
+  assert.equal(await handleImageRequest('What is the best image format?', io), false);
+  assert.equal(blocks.size, 0);
+  const seen = [];
+  const generator = async (args) => { seen.push(args); return { images: [{ dataUrl: PNG_URL, model: 'black-forest-labs/flux', pricePerImage: 0.002, text: null }], requested: 2, complete: false, errors: [], rewrittenPrompt: null }; };
+  assert.equal(await handleImageRequest('create an image of donald duck in a playground', { ...io, generator }), true);
+  assert.deepEqual(seen[0], { prompt: 'create an image of donald duck in a playground', format: 'jpeg' });
+  const md = blocks.get('b1');
+  assert.match(md, /^!\[donald duck in a playground\]\(data:image\/png;base64,/);
+  assert.match(md, /\*black-forest-labs\/flux · ~\$0\.002\*/);
+  assert.match(md, /> Made 1 of 2 images\./);
+});
+
+test('hook reads the OpenRouter key from Vane config and explains when it is missing', async () => {
+  const blocks = new Map();
+  const io = { emit: (md) => { blocks.set('x', md); return 'x'; }, update: (id, md) => blocks.set(id, md) };
+  await handleImageRequest('draw a fox', { ...io, readConfig: async () => JSON.stringify({ modelProviders: [{ name: 'Anthropic', config: { apiKey: 'k' } }] }) });
+  assert.match(blocks.get('x'), /needs an OpenRouter provider/);
+});
+
+test('reply markdown lists errors when nothing was made', () => {
+  assert.match(replyMarkdown({ images: [], errors: ['a: 402 Insufficient credits'], requested: 2 }, 'draw a fox'), /couldn't generate.*\n\n- a: 402 Insufficient credits/s);
 });
 
 // ---- CLI ----------------------------------------------------------------

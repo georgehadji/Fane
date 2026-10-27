@@ -21,6 +21,8 @@ const ASPECT_WORDS = { '1:1': 'square', '16:9': 'wide landscape', '9:16': 'tall 
 export const ASPECT_RATIOS = Object.keys(ASPECT_WORDS);
 export const IMAGE_SIZES = ['1K', '2K', '4K'];
 export const MAX_IMAGES = 8; // every image is a paid call, fanned out in parallel
+// Cheap text model for prompt enhancement and intent classification (CLI and Vane hook).
+export const DEFAULT_TEXT_MODEL = 'google/gemini-3.5-flash-lite';
 
 const ENHANCE_SYSTEM = 'You are an image-prompt engineer. Expand the description into one detailed prompt for an image model: subject, setting, composition, lighting, colour palette, medium or style, and mood. Keep every element the user asked for; add no text, logos or artist names they did not ask for. Reply with the prompt only, under 120 words.';
 const unquote = (s) => String(s || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
@@ -32,7 +34,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
   // Pure generators use OpenRouter's Image API; chat models that also write text (Gemini,
   // GPT) draw through chat completions (viaOf decides, from catalogue data), with a switch
   // to the Image API if chat completions says the model needs it. -> { dataUrl, text }
-  async function viaImagesApi(model, prompt, { aspect, size, references }, retried = false) {
+  async function viaImagesApi(model, prompt, { aspect, size, references, format }, retried = false) {
     let res;
     try {
       res = await client.images({
@@ -41,7 +43,8 @@ export function createImageGenerator({ client, download, textModel = null, log =
         n: 1,
         aspect_ratio: aspect,
         ...(size ? { resolution: size } : {}),
-        ...(emitsSvg(model) ? { output_format: 'svg' } : {}),
+        // jpeg keeps embedded images small (the Vane hook puts them inside the answer)
+        ...(emitsSvg(model) ? { output_format: 'svg' } : format === 'jpeg' ? { output_format: 'jpeg', output_compression: 85 } : {}),
         ...(references.length ? { input_references: references.map(url => ({ type: 'image_url', image_url: { url } })) } : {}),
       });
     } catch (err) {
@@ -50,7 +53,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
       const near = accepted && nearestRatio(aspect, accepted.split(',').map(s => s.trim()));
       if (near && near !== aspect) {
         log(`${model.id} does not support ${aspect}; using ${near}`);
-        return viaImagesApi(model, prompt, { aspect: near, size, references }, true);
+        return viaImagesApi(model, prompt, { aspect: near, size, references, format }, true);
       }
       throw err;
     }
@@ -137,7 +140,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
 
   // models: exact catalogue ids to use (no substitution); via: 'chat' | 'images' limits the
   // automatic choice to one kind of model. count defaults to one image per listed model.
-  return async function generate({ prompt, count, tier, family, aspect = '1:1', size, references = [], enhance = true, models, via }) {
+  return async function generate({ prompt, count, tier, family, aspect = '1:1', size, references = [], enhance = true, models, via, format }) {
     count = Math.min(Math.max(1, Math.trunc(count ?? (models?.length || 2))), MAX_IMAGES);
     const result = { ok: false, complete: false, requested: count, intent: null, models: [], enhancedPrompt: null, rewrittenPrompt: null, images: [], errors: [] };
 
@@ -170,7 +173,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
       } catch (err) { log(`prompt enhancement failed, using the original: ${err.message}`); }
     }
 
-    const opts = { aspect, size, references };
+    const opts = { aspect, size, references, format };
     let run = await attempt(finalPrompt, primaries, fallbacks, want, opts);
     let { images } = run;
     result.errors.push(...run.errors);

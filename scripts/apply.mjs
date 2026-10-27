@@ -9,7 +9,11 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { DEFAULTS } from '../cli/vane.mjs';
+
+const { FANE_IMAGE_DIR } = createRequire(import.meta.url)('../patches/lib/vane.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTAINER = DEFAULTS.container;
@@ -54,6 +58,24 @@ for (const file of readdirSync(join(ROOT, 'patches')).filter(f => /^patch-.*\.js
   } catch (err) {
     failed = true;
     console.error(`${file}: FAILED. ${(err.stderr || err.message).toString().trim().split('\n')[0]}`);
+  }
+}
+
+// 1b. Fane's image modules, used by patch-image-chat from inside Vane. Node caches imported
+// modules, so a changed copy needs the restart below.
+{
+  const local = Object.fromEntries(readdirSync(join(ROOT, 'cli', 'image')).filter(f => f.endsWith('.mjs')).sort()
+    .map(f => [f, createHash('sha256').update(readFileSync(join(ROOT, 'cli', 'image', f))).digest('hex')]));
+  let remote = {};
+  try {
+    remote = JSON.parse(docker(['exec', CONTAINER, 'node', '-e', `const fs=require('fs'),c=require('crypto'),d=${JSON.stringify(FANE_IMAGE_DIR)};const o={};try{for(const f of fs.readdirSync(d).filter(f=>f.endsWith('.mjs')).sort())o[f]=c.createHash('sha256').update(fs.readFileSync(d+'/'+f)).digest('hex')}catch{}console.log(JSON.stringify(o))`]));
+  } catch { /* treat as missing */ }
+  if (JSON.stringify(local) === JSON.stringify(remote)) console.log(`cli/image: already in ${FANE_IMAGE_DIR}`);
+  else {
+    docker(['exec', '-u', '0', CONTAINER, 'sh', '-c', `rm -rf ${FANE_IMAGE_DIR} && mkdir -p ${dirname(FANE_IMAGE_DIR)}`]);
+    docker(['cp', join(ROOT, 'cli', 'image'), `${CONTAINER}:${FANE_IMAGE_DIR}`]);
+    console.log(`cli/image: copied to ${FANE_IMAGE_DIR}`);
+    changed = true;
   }
 }
 

@@ -14,9 +14,11 @@ const PREMIUM = /\b(high[- ]quality|premium|best quality|highly detailed|4k|8k|p
 // "create an image of ...", "draw me a logo for ...": a request for a picture, not a question.
 // Vane's answer pipeline can only write text, so the CLI sends these to the image pipeline.
 const IMAGE_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:create|generate|make|draw|paint|render|design|produce|illustrate)\s+(?:me\s+|us\s+)?(?:an?\s+|some\s+|\d+\s+)?(?:new\s+)?(?:image|picture|pic|photo(?:graph)?|illustration|drawing|painting|sketch|logo|icon|poster|wallpaper|artwork|render(?:ing)?|portrait|cartoon)s?\b/i;
-export const isImageRequest = (text) => IMAGE_REQUEST.test(String(text || ''));
+// Drawing verbs need no noun ("draw a fox"), except figures of speech ("draw a conclusion").
+const DRAW_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:draw|paint|sketch|illustrate)\s+(?:me\s+|us\s+)?(?:an?|the|some|\d+|my|our)\s+(?!(?:conclusions?|comparisons?|distinctions?|parallels?|lines? between|picture of (?:the|how|why|what))\b)/i;
+export const isImageRequest = (text) => IMAGE_REQUEST.test(String(text || '')) || DRAW_REQUEST.test(String(text || ''));
 // The subject without the request words, for file names: "create an image of a fox" -> "a fox".
-export const imageSubject = (text) => String(text || '').replace(IMAGE_REQUEST, '').replace(/^\s*(?:of|showing|with|for|that shows)\s+/i, '').trim() || String(text || '');
+export const imageSubject = (text) => String(text || '').replace(IMAGE_REQUEST, '').replace(/^\s*(?:please\s+|can you\s+|could you\s+)*(?:draw|paint|sketch|illustrate)\s+(?:me\s+|us\s+)?/i, '').replace(/^\s*(?:of|showing|with|for|that shows)\s+/i, '').trim() || String(text || '');
 
 export function classifyByRules(prompt, { hasReference = false } = {}) {
   const family = hasReference ? 'reference_edit' : (RULES.find(([, re]) => re.test(prompt))?.[0] || 'general');

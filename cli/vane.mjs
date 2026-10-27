@@ -9,8 +9,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FAMILIES, TIERS, VIAS } from './image/catalogue.mjs';
 import { imageSubject, isImageRequest } from './image/intent.mjs';
-import { ASPECT_RATIOS, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
-import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient } from './image/openrouter.mjs';
+import { ASPECT_RATIOS, DEFAULT_TEXT_MODEL, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
+import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient, findOpenRouterKey } from './image/openrouter.mjs';
 
 // The defaults for every Fane tool (scripts/ import this object).
 export const DEFAULTS = {
@@ -30,7 +30,7 @@ const STARTUP_WAIT_MS = 90_000;
 const SEARCH_RETRIES = 1; // retried only on HTTP 5xx / connection reset, never on timeout (that would double the wait)
 const SLUG_RE = /^[\w.~-]+\/[\w.:~-]+$/; // vendor/model[:variant], the OpenRouter id shape
 // Cheap text model for image-prompt enhancement and intent classification.
-const IMAGE_TEXT_MODEL = process.env.VANE_IMAGE_TEXT_MODEL || 'google/gemini-3.5-flash-lite';
+const IMAGE_TEXT_MODEL = process.env.VANE_IMAGE_TEXT_MODEL || DEFAULT_TEXT_MODEL;
 
 const USAGE = `Usage: vane "<question>" [options]
        vane --list-models [--json]
@@ -573,6 +573,12 @@ async function doctor(opts) {
         else report('ok', `${p.name} applied (${rows.length - skipped.length}/${rows.length} targets${skipped.length ? `; optional skipped: ${skipped.map(r => r.name).join(', ')}` : ''})`);
       }
     } catch (err) { report('FAIL', `could not inspect patches: ${err.message.split('\n')[0]}`); }
+    // patch-image-chat imports Fane's image modules from inside the container.
+    const { FANE_IMAGE_DIR } = createRequire(import.meta.url)(join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches', 'lib', 'vane.js'));
+    try {
+      dockerOut(['exec', container, 'test', '-f', `${FANE_IMAGE_DIR}/vane-hook.mjs`]);
+      report('ok', `image modules present in ${FANE_IMAGE_DIR} (web UI image requests work)`);
+    } catch { report('warn', `image modules missing in ${FANE_IMAGE_DIR}; web UI image requests fall back to text (run node scripts/apply.mjs)`); }
   }
 
   try {
@@ -593,10 +599,9 @@ async function resolveOpenRouterKey(opts) {
   if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY;
   if (!opts['key-from-vane']) throw new UsageError('Image generation needs an OpenRouter key: set OPENROUTER_API_KEY, or pass --key-from-vane to use the one configured in Vane.');
   const res = await fetch(`${opts.url}/api/config`, { signal: AbortSignal.timeout(10_000) });
-  const providers = (await res.json()).values?.modelProviders || [];
-  const p = providers.find(x => String(x.config?.baseURL || '').includes(OPENROUTER_HOST) && x.config?.apiKey);
-  if (!p) throw new UsageError(`No Vane provider with Base URL ${OPENROUTER_BASE_URL} and an API key at ${opts.url}.`);
-  return p.config.apiKey;
+  const key = findOpenRouterKey((await res.json()).values?.modelProviders);
+  if (!key) throw new UsageError(`No Vane provider with Base URL ${OPENROUTER_BASE_URL} and an API key at ${opts.url}.`);
+  return key;
 }
 
 async function readReference(file) {

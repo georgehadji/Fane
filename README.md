@@ -122,7 +122,9 @@ This needs a Vane provider whose name contains "openrouter" (override with `--pr
 
 ### Image generation (`--image`)
 
-`vane --image "<prompt>"` generates images through OpenRouter directly, without Vane or a search. A plain `vane "create an image of …"` (also "draw/generate/make a picture/logo/poster …") does the same, since Vane's answer pipeline can only write text. Use `--no-auto-image` to search instead. Vane's own web UI still can't make images. The method is ported from [reasoner](https://github.com/georgehadji/reasoner):
+`vane --image "<prompt>"` generates images through OpenRouter directly, without Vane or a search. A plain `vane "create an image of …"` (also "draw/generate/make a picture/logo/poster …") does the same, since Vane's answer pipeline can only write text. Use `--no-auto-image` to search instead.
+
+**In Vane's web UI** (`patches/patch-image-chat.js`), an image request typed into the chat box ("create an image of Donald Duck and his nieces in the playground") is answered with the generated images. It uses the same pipeline and the OpenRouter key from Vane's own provider settings. Any other question gets the usual answer. The images are embedded in the answer as data URLs, so they stay in the chat history (1–4 MB each). Fane's image modules must be in the container: Compose mounts `cli/image`, and `scripts/apply.mjs` copies it. The method is ported from [reasoner](https://github.com/georgehadji/reasoner):
 
 1. **Intent:** the prompt is classified into a family (`vector`, `photoreal`, `text_in_image`, `design`, `general`, `reference_edit`) and a tier (`budget` or `premium`). A cheap text model does this (`VANE_IMAGE_TEXT_MODEL`), with keyword rules as the fallback. `--family` and `--tier` override it.
 2. **Model choice:** from OpenRouter's live catalogue of image-output models (61 priced, 12 labs on 2026-10-27), with price normalised to USD per image. `budget` takes the cheapest models and `premium` the most capable, ranked by the size word and version in the model id. Primaries come from different labs, with 4 or more fallbacks. SVG models serve only `vector`.
