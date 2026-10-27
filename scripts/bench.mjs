@@ -60,7 +60,7 @@ export function measure(out) {
 const METRICS = ['secs', 'words', 'sources', 'hosts', 'citesUsed', 'supportRate', 'weak', 'numbersMissing', 'invalidCitations', 'uncited', 'nonLatin'];
 
 // Runs -> one summary row per question and mode (medians; failed runs counted, not averaged).
-export function aggregate(runs) {
+export function aggregate(runs, metrics = METRICS) {
   const groups = new Map();
   for (const r of runs) {
     const k = `${r.id}|${r.mode}`;
@@ -70,7 +70,7 @@ export function aggregate(runs) {
   return [...groups.values()].map(rs => {
     const ok = rs.filter(r => !r.error);
     const row = { id: rs[0].id, mode: rs[0].mode, runs: rs.length, failed: rs.length - ok.length };
-    for (const m of METRICS) row[m] = median(ok.map(r => r[m]));
+    for (const m of metrics) row[m] = median(ok.map(r => r[m]));
     return row;
   });
 }
@@ -94,10 +94,10 @@ export function compare(base, cur, tol = TOLERANCE) {
   return { rows, regressions };
 }
 
-function runCli(args, timeoutMs) {
+export function runCli(args, timeoutMs, env = process.env) {
   return new Promise((resolve) => {
     const t0 = Date.now();
-    const child = spawn(process.execPath, [join(ROOT, 'cli', 'vane.mjs'), ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [join(ROOT, 'cli', 'vane.mjs'), ...args], { stdio: ['ignore', 'pipe', 'pipe'], env });
     let out = '', err = '';
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => { err += d; });

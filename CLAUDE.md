@@ -27,6 +27,7 @@ Pieces that run in different places:
   - `scripts/apply.mjs`: the same for an existing `docker run` container (idempotent, restarts only on change, then runs `--doctor`).
 - `docs/` is the project page (GitHub Pages from `/docs`): static `index.html`, `style.css`, `page.js` and 12 real pictures from `vane --image` (one prompt through the three tiers; `docs/img/*.jpg` resized from the originals, which stay local in the gitignored `.taste-skill/`). Built with the taste skill (direction "type and nothing else"); `inspect.mjs` from that skill is the check (0 FAIL; the no-video WARN is defended: no honest clip exists). The page's numbers (model names, prices, 1.8/6.5/38 cents) are from those runs and are hardcoded in `page.js`; redo the runs to change them. The name is real text sized to the width (Bricolage Grotesque 600 at -0.04em is 1.899em wide).
 - `scripts/engine-check.mjs` queries each SearXNG engine once from inside the container.
+- `scripts/article-bench.mjs` is how to tell whether an article change helps. It runs `bench/articles.json` through the CLI (`--article --json`, the key passed to the child in `OPENROUTER_API_KEY`). A fixed judge model then grades each final article with `prompts.factcheck` and `prompts.audit` (`judgeArticle`). Compare the judge's numbers, not the pipeline's own (`selfSupport`/`selfAudit`): those come from the prompts being tuned and from a fact-check of the draft. The default judge is `openai/gpt-6.1-terra-pro`, because `claude-sonnet-5.5` leads the Quality audit chain. Pick a judge outside the chains of the mode you benchmark; rows written partly by the judge are marked `selfJudged`. It reuses `aggregate`, `median` and `runCli` from `scripts/bench.mjs`.
 - CI (`.github/workflows/ci.yml`) runs the unit tests, applies each patch twice inside the pinned image, and runs `node --check` on every bundle that has a `.bak`, server and browser (so every patch must write one). Changing the digest in `docker-compose.yml` must go with patch updates that keep this job green.
 
 ## Commands
@@ -40,6 +41,7 @@ node scripts/apply.mjs               # (re)apply patches + SearXNG settings to a
 docker compose up -d                 # alternative: patched Vane from the pinned digest
 node scripts/engine-check.mjs [--engines a,b]
 node scripts/bench.mjs -m claude-haiku-5-5 --modes speed,balanced --baseline bench/baseline.json   # real queries; measure a change before/after
+node scripts/article-bench.mjs --key-from-vane [--only id,id] [--baseline file]   # paid: bench/articles.json through vane --article, graded by a fixed --judge; measure article changes with it
 vane "q" --verify                    # lexical citation check (verifyCitations in cli/vane.mjs, threshold 0.3)
 ```
 

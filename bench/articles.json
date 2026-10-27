@@ -1,0 +1,8 @@
+[
+  { "id": "symplectic", "q": "Write an article on recent innovations in symplectic integrators", "words": 600 },
+  { "id": "heat-pumps", "q": "Write an article on whether heat pumps work in cold climates", "words": 600 },
+  { "id": "glp1", "q": "Write an article on what GLP-1 drugs do beyond weight loss", "words": 600 },
+  { "id": "ocean-el", "q": "Γράψε ένα άρθρο για την ωκεάνια ενέργεια στην Ευρώπη", "words": 600 },
+  { "id": "water-el", "q": "Γράψε ένα άρθρο για τη λειψυδρία στην Αττική", "words": 600 },
+  { "id": "antikythera-el", "q": "Γράψε ένα άρθρο για τον μηχανισμό των Αντικυθήρων", "words": 600 }
+]

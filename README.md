@@ -210,6 +210,31 @@ node scripts/bench.mjs -m claude-haiku-5-5 --modes speed,balanced --baseline ben
 
 Each run is a real query. `bench/baseline.json` holds one run per question in speed and balanced mode with Claude Haiku (2026-10-27). Single runs vary: one `coffee/speed` run scored 0.038 support, while 3 reruns gave a median of 0.864. Use `--runs 3` before trusting a regression. A regression means more failed runs, 25% fewer sources, citation support down 0.1, time up 50% and more than 10s, or non-Latin titles up 10 points.
 
+### Article benchmark
+
+`scripts/article-bench.mjs` writes the articles in `bench/articles.json` (three English and three Greek topics, 600 words each) with `vane --article --json`. A fixed judge model (`--judge`, default `openai/gpt-6.1-terra-pro`, which no Quality chain uses) then fact-checks and audits each final article with the pipeline's own prompts. The pipeline's own scores change when its prompts change, and its fact-check sees the draft, not the final text. The judge's scores don't have those problems, so they are the ones to compare.
+
+Per article it records:
+
+- time and cost;
+- words against the target;
+- sources cited and their sites;
+- stock phrases per 1,000 words;
+- failed checks and skipped steps;
+- the pipeline's own claim support and audit score, and the judge's.
+
+The summary has medians per topic and an `ALL` row per mode. Results go to `bench/results/articles-<time>.json` and the articles to the folder of the same name, so you can read them.
+
+```bash
+node scripts/article-bench.mjs --key-from-vane                                   # Quality, 1 run, all topics
+node scripts/article-bench.mjs --key-from-vane --only symplectic,ocean-el
+node scripts/article-bench.mjs --key-from-vane --baseline bench/articles-baseline.json --fail-on-regression
+```
+
+Every article is paid. One 500-word Greek Quality article cost about $0.37, and the judge adds a few cents. `--budget` (default $5) stops before the next article once the spend has passed it. A failed article reports no cost, so its spend is not counted.
+
+A regression means any of these: more failed runs, judged claim support or audit down 0.1, stock phrases up 2 per 1,000 words, the length miss up 15 points, cost up 50%, or time up 50% and by more than a minute. Balanced chains use the default judge, so benchmark Balanced with another `--judge`.
+
 ## Development
 
 ```bash
