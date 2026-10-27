@@ -30,7 +30,7 @@ const ENHANCE_SYSTEM = 'You are an image-prompt engineer. Expand the description
 const unquote = (s) => String(s || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
 const FATAL = new Set([401, 402]); // bad key or no credits: every model fails the same way
 
-export function createImageGenerator({ client, download, textModel = null, log = () => {} }) {
+export function createImageGenerator({ client, download, textModel = null, log = () => {}, now = Date.now }) {
   const complete = textModel ? (system, user) => client.complete(textModel, system, user) : null;
 
   // Pure generators use OpenRouter's Image API; chat models that also write text (Gemini,
@@ -144,6 +144,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
   // automatic choice to one kind of model. count defaults to one image per listed model.
   return async function generate({ prompt, count, tier, family, aspect = '1:1', size, references = [], enhance = true, models, via, format }) {
     count = Math.min(Math.max(1, Math.trunc(count ?? (models?.length || DEFAULT_IMAGES))), MAX_IMAGES);
+    const started = now();
     const result = { ok: false, complete: false, requested: count, intent: null, models: [], enhancedPrompt: null, rewrittenPrompt: null, images: [], errors: [] };
 
     let catalogue;
@@ -201,9 +202,10 @@ export function createImageGenerator({ client, download, textModel = null, log =
     }
 
     const images = slots.filter(Boolean);
-    result.images = images.map(i => ({ dataUrl: i.dataUrl, model: i.model.id, via: viaOf(i.model), endpoint: i.endpoint, aspect: i.aspect, pricePerImage: i.model.price, text: i.text }));
+    result.images = images.map(i => ({ dataUrl: i.dataUrl, model: i.model.id, name: i.model.name, via: viaOf(i.model), endpoint: i.endpoint, aspect: i.aspect, pricePerImage: i.model.price, text: i.text }));
     result.ok = images.length > 0;
     result.complete = images.length >= want;
+    result.elapsedMs = now() - started;
     return result;
   };
 }

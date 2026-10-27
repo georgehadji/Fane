@@ -390,7 +390,7 @@ test('pipeline: remote image URLs go through the downloader (both endpoints)', a
 
 // ---- Vane web UI hook ---------------------------------------------------
 
-const { handleImageRequest, replyMarkdown } = await import('../image/vane-hook.mjs');
+const { handleImageRequest } = await import('../image/vane-hook.mjs');
 
 test('hook ignores questions and answers image requests with markdown images', async () => {
   const blocks = new Map();
@@ -399,12 +399,12 @@ test('hook ignores questions and answers image requests with markdown images', a
   assert.equal(await handleImageRequest('What is the best image format?', io), false);
   assert.equal(blocks.size, 0);
   const seen = [];
-  const generator = async (args) => { seen.push(args); return { images: [{ dataUrl: PNG_URL, model: 'black-forest-labs/flux', pricePerImage: 0.002, text: null }], requested: 2, complete: false, errors: [], rewrittenPrompt: null }; };
+  const generator = async (args) => { seen.push(args); return { images: [{ dataUrl: PNG_URL, model: 'black-forest-labs/flux', name: 'Black Forest Labs: FLUX.2 Pro', pricePerImage: 0.002, text: null }], requested: 2, complete: false, errors: [], rewrittenPrompt: null }; };
   assert.equal(await handleImageRequest('create an image of donald duck in a playground', { ...io, generator }), true);
   assert.deepEqual(seen[0], { prompt: 'create an image of donald duck in a playground', format: 'jpeg' });
   const md = blocks.get('b1');
-  assert.match(md, /^!\[donald duck in a playground\]\(data:image\/png;base64,/);
-  assert.match(md, /\*black-forest-labs\/flux · ~\$0\.002\*/);
+  assert.match(md, /<img src="data:image\/png;base64,[^"]+" alt="Image 1 of 1: donald duck in a playground \(FLUX\.2 Pro\)"/);
+  assert.match(md, /<em>FLUX\.2 Pro · ~\$0\.002<\/em>/);
   assert.match(md, /> Made 1 of 2 images\./);
 });
 
@@ -415,8 +415,12 @@ test('hook reads the OpenRouter key from Vane config and explains when it is mis
   assert.match(blocks.get('x'), /needs an OpenRouter provider/);
 });
 
-test('reply markdown lists errors when nothing was made', () => {
-  assert.match(replyMarkdown({ images: [], errors: ['a: 402 Insufficient credits'], requested: 2 }, 'draw a fox'), /couldn't generate.*\n\n- a: 402 Insufficient credits/s);
+test('generate reports model names and elapsed time', async () => {
+  let t = 1000;
+  const gen = createImageGenerator({ client: fakeClient(), download: async () => PNG_URL, now: () => (t += 500) });
+  const r = await gen({ prompt: 'x', count: 1, enhance: false });
+  assert.equal(r.elapsedMs, 500);
+  assert.ok(r.images[0].name);
 });
 
 // ---- CLI ----------------------------------------------------------------

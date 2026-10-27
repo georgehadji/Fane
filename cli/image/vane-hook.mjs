@@ -3,27 +3,11 @@
 // is answered with generated images instead of a text answer, using the same pipeline as
 // `vane --image` and the OpenRouter key from Vane's own provider settings.
 import { readFile } from 'node:fs/promises';
-import { imageSubject, isImageRequest } from './intent.mjs';
+import { isImageRequest } from './intent.mjs';
+import { renderResult } from './present.mjs';
 import { DEFAULT_TEXT_MODEL, createImageGenerator } from './generate.mjs';
 import { createOpenRouterClient, findOpenRouterKey } from './openrouter.mjs';
 import { safeDownload } from './download.mjs';
-
-// Markdown for Vane's answer view, which renders data:image URLs as images.
-export function replyMarkdown(result, prompt) {
-  const subject = imageSubject(prompt).replace(/[[\]]/g, '');
-  if (!result.images.length) {
-    return `I couldn't generate an image for this request.\n\n${result.errors.slice(0, 4).map(e => `- ${e}`).join('\n') || '- no image model answered'}`;
-  }
-  const blocks = result.images.map(i => [
-    `![${subject}](${i.dataUrl})`,
-    `*${i.model}${i.pricePerImage ? ` · ~$${i.pricePerImage.toFixed(3)}` : ''}*${i.text ? ` — ${i.text}` : ''}`,
-  ].join('\n\n'));
-  const notes = [
-    result.rewrittenPrompt ? `Rewritten after a refusal: ${result.rewrittenPrompt}` : null,
-    !result.complete ? `Made ${result.images.length} of ${result.requested} images.` : null,
-  ].filter(Boolean).map(n => `> ${n}`);
-  return [...blocks, ...notes].join('\n\n');
-}
 
 // emit(markdown) -> blockId, update(blockId, markdown). Returns false when the query is not an
 // image request (Vane then answers as usual). Dependencies are injectable for tests.
@@ -46,6 +30,6 @@ export async function handleImageRequest(query, { emit, update, configPath, log 
     log,
   });
   const result = await generate({ prompt: query, format: 'jpeg' });
-  update(id, replyMarkdown(result, query));
+  update(id, renderResult(result, query));
   return true;
 }
