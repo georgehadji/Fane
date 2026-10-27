@@ -28,6 +28,8 @@ module.exports = {
   // Where Fane's image modules (cli/image) live in the container: docker-compose.yml mounts
   // them here and scripts/apply.mjs copies them here.
   FANE_IMAGE_DIR: '/fane/image',
+  // The Fane project page (docs/ served by GitHub Pages), linked from Vane's menu by patch-fane-link.
+  FANE_PAGE_URL: 'https://georgehadji.github.io/Fane/',
 };
 
 // Target shared by patch-scholarly-sources and patch-social-sources (whichever runs first

@@ -111,3 +111,14 @@ test('the new-chat patch resets only when the address is "/" with messages on sc
   const out = planPatch({ [effect.file]: `var x=()=>{let t={};${effect.from}0};` }, TARGETS);
   assert.deepEqual([out.errors, planPatch(out.next, TARGETS).applied], [[], []]);
 });
+
+test('the Fane link patch adds one nav item that opens the page in a new tab, in both bars', () => {
+  const { FANE_PAGE_URL } = require('../../patches/lib/vane.js');
+  const { TARGETS } = require('../../patches/patch-ui-fane-link.js');
+  const item = TARGETS.find(t => t.name === 'fane link nav item');
+  assert.ok(item.to.includes(`href:${JSON.stringify(FANE_PAGE_URL)}`) && item.to.includes('label:"Fane"'));
+  assert.ok(FANE_PAGE_URL.startsWith('https://')); // an external page: the item must not be a same-tab route
+  const tabs = TARGETS.filter(t => t.name.startsWith('fane link opens in a new tab'));
+  assert.equal(tabs.length, 2); // desktop sidebar and phone bottom bar
+  for (const t of tabs) assert.ok(t.to.includes('target:e.external?"_blank"') && t.to.includes('rel:e.external?"noopener"'));
+});
