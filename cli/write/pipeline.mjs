@@ -1,0 +1,191 @@
+// Article pipeline, after reasoner's article method (ARTICLE_METHOD_SPECIFICATION.md):
+//   sources -> outline -> draft -> fact-check -> critique -> revise -> style/copy -> audit.
+// Which phases run depends on the Vane mode (models.mjs PHASES). Sources come from Vane's own
+// research (`retrieve`, injected). Everything that talks to a model goes through llm.mjs, which
+// rejects cut-off, empty and "thinking" answers and walks the role's fallback chain.
+// Dependencies are injected, so the pipeline is tested with fakes. Failures are returned as
+// values ({ ok: false, error }); a phase that fails after the draft is skipped and listed in
+// `degraded`, so a weakened run is never presented as a clean one.
+import { checkCitations, renumber, runChecks, sourcesSection } from './checks.mjs';
+import { AUDIT_DIMENSIONS, MIN_CLAIM_SUPPORT, auditResult, claimLedger, claimSupportRatio } from './gate.mjs';
+import { countTells, detectLanguage, repairHomoglyphs, wordCount } from './language.mjs';
+import { createRoleCaller } from './llm.mjs';
+import { DEFAULT_MODE, MODES, PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
+import { prompts } from './prompts.mjs';
+
+export const MAX_SOURCES = 16;
+export const THIN_SOURCES = 4;
+
+const pct = (x) => `${Math.round(x * 100)}%`;
+const titleOf = (text) => /^\s*#\s+(.+)$/m.exec(text)?.[1].trim() || '';
+
+class Stop extends Error {}
+
+export function createArticlePipeline({ client, retrieve, log = () => {}, now = Date.now }) {
+  const call = createRoleCaller({ client, log });
+
+  return async function writeArticle({ topic, mode = DEFAULT_MODE, lang, words, models, chains, onProgress = () => {} }) {
+    if (!MODES.includes(mode)) throw new Error(`unknown mode "${mode}"`);
+    const t0 = now();
+    lang ||= detectLanguage(topic);
+    words = clampWords(words);
+    chains ||= chainsFor(models);
+    const plan = PHASES[mode];
+    const phases = [], degraded = [];
+    let cost = 0, calls = 0, repaired = 0;
+    const emit = (e) => { try { onProgress(e); } catch { /* a throwing listener must not stop the article */ } };
+
+    // One model call for a role. A fatal error (bad key, no credits) stops the whole run.
+    async function step(role, ctx) {
+      emit({ phase: role, status: 'running' });
+      const started = now();
+      const r = await call(role, prompts[role]({ topic, lang, words, ...ctx }), { chain: chains[role], maxTokens: tokensFor(role, words, lang) });
+      calls += r.attempts.length;
+      cost += r.cost;
+      const rec = { phase: role, model: r.model || null, status: r.ok ? (r.fallback ? 'fallback' : 'ok') : 'failed', ms: now() - started, note: r.ok ? (r.fallback ? `${r.attempts.filter(a => a.problem).map(a => `${a.model}: ${a.problem}`).join('; ')}` : '') : r.errors.join('; ') };
+      phases.push(rec);
+      emit({ ...rec, status: rec.status });
+      if (r.fatal) throw Object.assign(new Stop(r.errors[0] || 'the provider refused the request'), { status: r.status });
+      return r;
+    }
+
+    // Edited text replaces the text only if it is plausibly the whole article again.
+    const refuse = (prev, next) => {
+      if (wordCount(next) < wordCount(prev) * 0.6) return 'much shorter than its input';
+      if (/^\s*#\s/m.test(prev) && !/^\s*#\s/m.test(next)) return 'lost the title';
+      const before = checkCitations(prev, sources).cited;
+      if (before >= 3 && checkCitations(next, sources).cited < before * 0.5) return 'dropped most citations';
+      return null;
+    };
+    const fix = (text) => {
+      if (lang !== 'el') return text;
+      const r = repairHomoglyphs(text);
+      repaired += r.fixed.length;
+      return r.text;
+    };
+    // Run an editing role and keep its text when it passes `refuse`.
+    async function edit(role, ctx) {
+      const r = await step(role, { article: body, sources, ...ctx });
+      if (!r.ok) { degraded.push(`${role} failed (${r.errors.at(-1) || 'no answer'}): that pass was skipped`); return false; }
+      const why = refuse(body, r.text);
+      if (why) {
+        phases.at(-1).status = 'rejected';
+        phases.at(-1).note = why;
+        degraded.push(`${role} was rejected (${why}): the previous text was kept`);
+        return false;
+      }
+      body = fix(r.text);
+      return true;
+    }
+
+    let sources = [], body = '';
+    try {
+      // 1. Sources: the topic, plus English queries when the topic is not English (most sources are).
+      emit({ phase: 'sources', status: 'running' });
+      let queries = [topic];
+      if (lang !== 'en' && plan.includes('queries')) {
+        const q = await step('queries', {});
+        if (q.ok) queries = [topic, ...(Array.isArray(q.data.queries) ? q.data.queries.filter(s => typeof s === 'string' && s.trim()).slice(0, 3) : [])];
+        else degraded.push('English search queries failed: searched with the topic only');
+      }
+      const found = await Promise.allSettled(queries.map(q => retrieve(q)));
+      const seen = new Set();
+      for (const f of found) for (const s of f.status === 'fulfilled' ? f.value : []) if (s?.url && !seen.has(s.url)) { seen.add(s.url); sources.push({ title: s.title || s.url, url: s.url, content: s.content || '' }); }
+      sources = sources.slice(0, MAX_SOURCES);
+      phases.push({ phase: 'sources', model: null, status: sources.length ? 'ok' : 'failed', ms: 0, note: `${sources.length} sources` });
+      emit({ phase: 'sources', status: 'done', note: `${sources.length} sources` });
+      if (!sources.length) {
+        const why = found.find(f => f.status === 'rejected')?.reason?.message;
+        return { ok: false, error: `no sources found for this topic${why ? ` (${why})` : ''}; an article without sources would be unchecked`, phases, language: lang, mode, calls, cost };
+      }
+      if (sources.length < THIN_SOURCES) degraded.push(`only ${sources.length} source${sources.length === 1 ? '' : 's'} found: thinly sourced`);
+
+      // 2. Outline (optional: without it the draft is written from the sources alone).
+      let outline = null;
+      if (plan.includes('outline')) {
+        const o = await step('outline', { sources });
+        if (o.ok && Array.isArray(o.data.sections)) outline = o.data;
+        else degraded.push('the outline failed: the draft was written without a plan');
+      }
+
+      // 3. Draft (required).
+      const d = await step('draft', { sources, outline });
+      if (!d.ok) return { ok: false, error: `the draft failed: ${d.errors.join('; ')}`, phases, language: lang, mode, calls, cost, sources };
+      body = fix(d.text);
+
+      // 4. Fact-check: a ledger of claims against their cited sources.
+      let ledger = [], claimSupport = null;
+      if (plan.includes('factcheck')) {
+        const f = await step('factcheck', { article: body, sources });
+        if (f.ok) {
+          ledger = claimLedger(f.data);
+          claimSupport = claimSupportRatio(ledger);
+          if (claimSupport !== null && claimSupport < MIN_CLAIM_SUPPORT) degraded.push(`thinly sourced: only ${pct(claimSupport)} of the ${ledger.length} checked claims are supported by their sources`);
+        } else degraded.push('the fact-check failed: claims were not verified by a model');
+      }
+
+      // 5. Critique, then the developmental edit that acts on it and on the failed claims.
+      let critique = null;
+      if (plan.includes('critique')) {
+        const c = await step('critique', { article: body });
+        if (c.ok) critique = c.data;
+        else degraded.push('the critique failed: no structural review');
+      }
+      const failedClaims = ledger.some(c => c.verdict !== 'supported');
+      if (plan.includes('revise') && (critique || failedClaims)) await edit('revise', { critique, ledger, outline });
+
+      // 6. Style and copy edit (one merged call on Balanced).
+      const tellsReport = () => countTells(body, lang).hits.map(h => `${h.label} ×${h.count}`).join(', ');
+      for (const role of ['polish', 'style', 'copy']) if (plan.includes(role)) await edit(role, { tellsReport: tellsReport() });
+
+      // 7. Final audit, with one retry (revise, style, copy, audit) when it fails.
+      let audit = null;
+      const runAudit = async () => {
+        const a = await step('audit', { article: body, ledger });
+        if (!a.ok) { degraded.push('the final audit failed: no quality score'); return null; }
+        return { ...auditResult(a.data.scores), scores: Object.fromEntries(AUDIT_DIMENSIONS.map(k => [k, a.data.scores?.[k] ?? null])), issues: Array.isArray(a.data.issues) ? a.data.issues.slice(0, 8) : [] };
+      };
+      if (plan.includes('audit')) {
+        audit = await runAudit();
+        if (audit && !audit.passes) {
+          audit.retried = true;
+          for (const role of ['revise', 'style', 'copy']) await edit(role, { critique: { audit_issues: audit.issues }, ledger, tellsReport: tellsReport() });
+          const second = await runAudit();
+          if (second) audit = { ...second, retried: true };
+          if (audit && !audit.passes) degraded.push(`the final audit failed twice (${audit.failures.join('; ') || `score ${audit.score}`}): published as is`);
+        }
+      }
+
+      // 8. Finish: cited sources numbered 1..n in order of appearance, a sources list written by code, checks.
+      const raw = checkCitations(body, sources);
+      if (raw.invalid.length) degraded.push(`removed citations to sources that do not exist: ${raw.invalid.map(n => `[${n}]`).join(' ')}`);
+      const { text, used } = renumber(body, sources);
+      const checks = runChecks(text, { lang, sources: used, targetWords: words });
+      for (const i of checks.items) if (i.level === 'fail') degraded.push(`check "${i.name}" failed: ${i.detail}`);
+      emit({ phase: 'done', status: 'done' });
+      return {
+        ok: true,
+        article: text.trimEnd() + sourcesSection(used, lang),
+        title: titleOf(text),
+        language: lang,
+        mode,
+        words: checks.words,
+        targetWords: words,
+        sources: used,
+        phases,
+        degraded,
+        checks,
+        ledger,
+        claimSupport,
+        audit,
+        repaired,
+        calls,
+        cost,
+        ms: now() - t0,
+      };
+    } catch (err) {
+      if (err instanceof Stop) return { ok: false, fatal: true, status: err.status, error: err.message, phases, language: lang, mode, calls, cost };
+      throw err;
+    }
+  };
+}

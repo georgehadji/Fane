@@ -157,6 +157,27 @@ vane --image "a lighthouse at sunset" --image-model google/gemini-3-pro-image,op
 
 Image links that a provider returns are downloaded only over HTTPS, never from private or loopback addresses, with every redirect re-checked and a 20 MB cap. Unlike reasoner, Fane does not strip AI-provenance metadata (C2PA) from generated images.
 
+### Articles (`--article`)
+
+`vane --article "<topic>"` writes a cited article, in English or Greek. A request that starts like `write an article about …` or `γράψε ένα άρθρο για …` does this automatically (`--no-auto-article` searches instead). The method is ported from the article pipeline in [reasoner](https://github.com/georgehadji/reasoner): sources, outline, draft, fact-check, critique, developmental edit, style and copy edit, final audit. The sources come from Vane's own research; the writing runs on OpenRouter (needs `OPENROUTER_API_KEY` or `--key-from-vane`). The phases follow Vane's mode (`-o`, or `--tier budget|value|premium`):
+
+| Mode | Phases (model calls) |
+|---|---|
+| `speed` | outline, draft (2) |
+| `balanced` | + fact-check, critique, revision, one polish pass (6) |
+| `quality` | + separate style and copy edit, final audit with one retry (8, +4 on a retry) |
+
+A non-English topic adds one cheap call that writes English search queries, because most sources are English. Every phase has a chain of models (`--article-model a/x,b/y`: the first is primary, the rest are fallbacks). A cut-off, empty or "thinking" answer moves on to the next model, and a phase that fails after the draft is skipped and listed under `degraded`, never reported as a clean run.
+
+Checks that need no model run on every mode: citations to sources that do not exist (removed and reported), numbers that are in no cited source, text length, leaked reasoning, and a count of stock phrases ("a testament to", «καθοριστικό ρόλο», «αναδεικνύοντας…»). For Greek they also catch Latin look-alike letters inside Greek words (repaired), straight quotes, `?` instead of `;` and polytonic accents. The sources list at the end is written by code from the real sources, so a model cannot invent a URL. The Greek stock-phrase list and the Greek writing rules are written in Greek, not translated.
+
+```bash
+vane --article "tidal power in Greece" --words 900 --out tidal.md
+vane "γράψε ένα άρθρο για την παλιρροϊκή ενέργεια" -o quality --article-model vendor/model-a,vendor/model-b   # slugs from vane --list-openrouter
+```
+
+The default model is one cheap model for every role (no fallback) until per-tier model chains exist; pass `--article-model` for real use. The chat hook in Vane's web UI does not write articles yet.
+
 ### Citation check (`--verify`)
 
 `--verify` checks the answer against the text of the sources Vane returned, with no extra model calls. A cited sentence counts as supported when at least 30% of its content words appear in one of the sources it cites, and every multi-digit number in it appears in a cited source. The report lists weakly supported sentences, numbers not found in their sources, citation numbers that have no source, and how many sentences have no citation. With `-j` it is in the `verification` field.

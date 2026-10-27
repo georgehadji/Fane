@@ -7,10 +7,13 @@ import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FAMILIES, TIERS, VIAS } from './image/catalogue.mjs';
+import { FAMILIES, TIERS, TIER_FOR_MODE, VIAS } from './image/catalogue.mjs';
 import { imageSubject, isImageRequest } from './image/intent.mjs';
 import { ASPECT_RATIOS, DEFAULT_IMAGES, DEFAULT_TEXT_MODEL, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
 import { parseImageOptions } from './image/intent.mjs';
+import { articleTopic, isArticleRequest, parseArticleOptions } from './write/intent.mjs';
+import { LANGUAGES } from './write/language.mjs';
+import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
 import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient, findOpenRouterKey } from './image/openrouter.mjs';
 
 // The defaults for every Fane tool (scripts/ import this object).
@@ -39,6 +42,7 @@ const USAGE = `Usage: vane "<question>" [options]
        vane --add-model <openrouter-slug> [--provider <name>]
        vane --remove-model <slug> [--provider <name>]
        vane --doctor
+       vane --article "<topic>" [-o speed|balanced|quality] [--lang el|en] [--words ${DEFAULT_WORDS}] [--out article.md]
        vane --image "<prompt>" [-n ${DEFAULT_IMAGES}] [--tier ${TIERS.join('|')}] [--family <f>] [--aspect 1:1] [--out-dir dir]
 
 Options:
@@ -86,6 +90,18 @@ Image generation (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane):
       --no-enhance       Send the prompt as written (skip the prompt-enhancement call)
       --key-from-vane    Use the API key of Vane's OpenRouter provider (read from ${DEFAULTS.url}/api/config)
 
+Articles (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; sources come from Vane's own research):
+      --article          Write a cited article on the topic instead of answering. Requests that start like
+                         "write an article about ..." or "γράψε ένα άρθρο για ..." do this automatically
+      --no-auto-article  Search even when the question asks for an article
+  -o, --mode <m>         speed (outline, draft) | balanced (+ fact-check, critique, revision, polish) |
+                         quality (+ separate style and copy edit, final audit with one retry)
+      --tier <t>         budget | value | premium, the same as --mode speed | balanced | quality
+      --lang <l>         ${LANGUAGES.join(' | ')}; default from the topic's script (Greek letters mean el)
+      --words <n>        Target length (${MIN_WORDS}-${MAX_WORDS}, default ${DEFAULT_WORDS}), or write "800 words" / "800 λέξεις" in the topic
+      --article-model <id>  Models for every phase, first one primary and the rest its fallbacks (comma list)
+      --out <file>       Write the article (Markdown) to a file instead of printing it
+
 Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURCES, VANE_MODE,
      OPENROUTER_API_KEY, VANE_IMAGE_TEXT_MODEL (prompt enhancement/intent, default ${IMAGE_TEXT_MODEL})
 Exit codes: 0 ok, 1 runtime error (or no sources with --require-sources, or support below --min-support), 2 usage error`;
@@ -130,6 +146,12 @@ export function parseCli(argv) {
       'no-enhance': { type: 'boolean', default: false },
       'key-from-vane': { type: 'boolean', default: false },
       'no-auto-image': { type: 'boolean', default: false },
+      article: { type: 'boolean', default: false },
+      'no-auto-article': { type: 'boolean', default: false },
+      lang: { type: 'string' },
+      words: { type: 'string' },
+      'article-model': { type: 'string', multiple: true, default: [] },
+      out: { type: 'string' },
       url: { type: 'string', default: DEFAULTS.url },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -157,6 +179,17 @@ export function parseCli(argv) {
     if (values.size && !IMAGE_SIZES.includes(values.size.toUpperCase())) throw new UsageError(`Invalid --size "${values.size}". Use: ${IMAGE_SIZES.join(', ')}`);
     if (values.size) values.size = values.size.toUpperCase();
     if (values.stream) throw new UsageError('--stream does not apply to --image');
+  }
+  if (values.article) {
+    values['article-model'] = values['article-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
+    if (values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
+    if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
+    if (values.words !== undefined) {
+      const n = Number(values.words);
+      if (!Number.isInteger(n) || n < MIN_WORDS || n > MAX_WORDS) throw new UsageError(`Invalid --words "${values.words}" (${MIN_WORDS}-${MAX_WORDS})`);
+      values.words = n;
+    }
+    if (values.stream) throw new UsageError('--stream does not apply to --article');
   }
   if (values['min-support'] !== undefined) {
     const r = Number(values['min-support']);
@@ -601,11 +634,63 @@ async function doctor(opts) {
 // The key is passed to the OpenRouter client and nowhere else (never printed or saved).
 async function resolveOpenRouterKey(opts) {
   if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY;
-  if (!opts['key-from-vane']) throw new UsageError('Image generation needs an OpenRouter key: set OPENROUTER_API_KEY, or pass --key-from-vane to use the one configured in Vane.');
+  if (!opts['key-from-vane']) throw new UsageError('This needs an OpenRouter key: set OPENROUTER_API_KEY, or pass --key-from-vane to use the one configured in Vane.');
   const res = await fetch(`${opts.url}/api/config`, { signal: AbortSignal.timeout(10_000) });
   const key = findOpenRouterKey((await res.json()).values?.modelProviders);
   if (!key) throw new UsageError(`No Vane provider with Base URL ${OPENROUTER_BASE_URL} and an API key at ${opts.url}.`);
   return key;
+}
+
+// ---- articles ------------------------------------------------------------
+
+const MODE_FOR_TIER = Object.fromEntries(Object.entries(TIER_FOR_MODE).map(([mode, tier]) => [tier, mode]));
+
+function printArticleReport(r) {
+  const say = (s) => process.stderr.write(`${s}\n`);
+  const cost = r.cost ? ` · ≈ $${r.cost.toFixed(4)}` : '';
+  say(`\nvane: ${r.words} words (target ${r.targetWords}), ${r.language === 'el' ? 'Greek' : 'English'}, ${r.mode} · ${r.sources.length} sources cited · ${r.calls} model calls${cost} · ${Math.round(r.ms / 1000)} s`);
+  for (const p of r.phases) say(`  ${p.status.padEnd(9)}${p.phase.padEnd(10)}${p.model || ''}${p.note && p.status !== 'ok' ? `  (${p.note})` : ''}`);
+  if (r.claimSupport !== null) say(`  claims supported by their sources: ${Math.round(r.claimSupport * 100)}% of ${r.ledger.length} checked`);
+  if (r.audit) say(`  audit: ${r.audit.score} (${r.audit.passes ? 'passed' : 'failed'}${r.audit.retried ? ', after a retry' : ''})`);
+  if (r.repaired) say(`  repaired ${r.repaired} Greek word${r.repaired === 1 ? '' : 's'} with Latin look-alike letters`);
+  for (const i of r.checks.items) if (i.level !== 'ok') say(`  ${i.level === 'fail' ? 'FAIL' : 'warn'}  ${i.name}: ${i.detail}`);
+  for (const d of r.degraded) say(`  degraded: ${d}`);
+}
+
+async function runArticle(opts) {
+  if (!opts.query) throw new UsageError('Missing topic. Example: vane --article "tidal power in Greece"');
+  const apiKey = await resolveOpenRouterKey(opts);
+  const [{ createOpenRouterClient }, { createArticlePipeline }] = await Promise.all([import('./image/openrouter.mjs'), import('./write/pipeline.mjs')]);
+  const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);
+  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  // Sources are Vane's own research; its answer text is not used. Vane sometimes returns none for a query that worked a minute ago.
+  const retrieve = async (query) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { sources } = await search({ ...opts, query, stream: false, mode }, providers);
+      if (sources.length) return sources;
+    }
+    return [];
+  };
+  const write = createArticlePipeline({ client: createOpenRouterClient({ apiKey }), retrieve, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
+  const r = await write({
+    topic: articleTopic(opts.query),
+    mode,
+    lang: opts.lang,
+    words: opts.words ?? parseArticleOptions(opts.query).words,
+    models: opts['article-model'],
+    onProgress: (e) => { if (!opts.json && e.status !== 'running') process.stderr.write(`vane: ${e.phase} ${e.status}${e.model ? ` (${e.model}, ${(e.ms / 1000).toFixed(0)} s)` : ''}${e.phase === 'sources' && e.note ? `: ${e.note}` : ''}\n`); },
+  });
+  if (!r.ok) throw new Error(r.error);
+  if (opts.out) {
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(opts.out, r.article);
+    if (!opts.json) process.stderr.write(`vane: saved ${opts.out}\n`);
+  }
+  if (opts.json) console.log(JSON.stringify(r, null, 2));
+  else {
+    if (!opts.out) console.log(r.article);
+    printArticleReport(r);
+  }
 }
 
 async function readReference(file) {
@@ -670,6 +755,7 @@ async function main() {
   if (opts.help) return console.log(USAGE);
   if (opts.doctor) { if (await doctor(opts)) process.exitCode = 1; return; }
   if (opts.image) return runImage(opts);
+  if (opts.article) return runArticle(opts);
   if (opts['list-image-models']) return listImageModels(opts.query, opts.json);
   if (opts['list-openrouter']) return listOpenRouter(opts.query, opts.json);
   if (opts['add-model'] !== undefined) {
@@ -688,6 +774,10 @@ async function main() {
   if (!opts['list-models'] && !opts['no-auto-image'] && isImageRequest(opts.query)) {
     process.stderr.write('vane: this asks for an image, so it goes to image generation (same as --image; --no-auto-image to search instead).\n');
     return runImage({ ...opts, image: true });
+  }
+  if (!opts['list-models'] && !opts['no-auto-article'] && isArticleRequest(opts.query)) {
+    process.stderr.write('vane: this asks for an article, so it goes to article writing (same as --article; --no-auto-article to search instead).\n');
+    return runArticle({ ...opts, article: true });
   }
   const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);
   if (opts['list-models']) return printModels(providers, opts.json);
