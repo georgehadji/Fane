@@ -17,6 +17,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { DEFAULTS } from '../cli/vane.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -170,10 +171,10 @@ async function main() {
   const summary = aggregate(results);
   printSummary(summary);
   let image = null;
-  try { image = (await runDocker(['inspect', '-f', '{{.Image}}', process.env.VANE_CONTAINER || 'vane'])).trim() || null; } catch { /* not essential */ }
+  try { image = (await runDocker(['inspect', '-f', '{{.Image}}', DEFAULTS.container])).trim() || null; } catch { /* not essential */ }
   const file = values.out || join(ROOT, 'bench', 'results', `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({ meta: { date: new Date().toISOString(), model: values.model || process.env.VANE_CHAT_MODEL || null, modes, runs, image }, runs: results, summary }, null, 2));
+  writeFileSync(file, JSON.stringify({ meta: { date: new Date().toISOString(), model: values.model || DEFAULTS.model, modes, runs, image }, runs: results, summary }, null, 2));
   console.log(`\nSaved ${file}`);
 
   if (values.baseline) {

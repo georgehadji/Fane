@@ -9,10 +9,8 @@
 //  5. Every search result was embedded in its own call (up to ~25 per query).
 //     -> one batched embedText call per query.
 // (Fixes 1 and 3, language and engine cleanup, are in searxng/settings.yml.)
-const fs = require('fs');
-const vm = require('vm');
-
-const FILE = '/home/vane/.next/server/chunks/641.js';
+const { run } = require('./lib/apply-targets');
+const { FILES, SCRAPE_FAILED_TITLE, RANK_ON_ORIGINAL_TEXT } = require('./lib/vane');
 
 const PROMPT = 'Extract the facts from this scraped web page that help answer the queries. Use short bullet points, keep numbers, prices, dates and table values exactly as written, and ignore navigation, ads, cookie banners and other boilerplate. Reply as JSON {"extracted_facts": "- fact\\n- fact"}. If nothing on the page is relevant, return an empty string.';
 
@@ -22,11 +20,13 @@ const RANK = String.raw`(C,V,n)=>{let cos=(u,v)=>{let d=0,p=0,q=0;for(let k=0;k<
 // Text to embed: drop the "[authors | year ...]" / "[platform | date]" prefix other patches add.
 const STRIP = String.raw`x=>String(x.content||"").replace(/^\[[^\]]*\] /,"")`;
 
-const BATCHED = String.raw`try{let T=i.results.map(c=>c.content||c.title),[b,...F]=await a.embedding.embedText([h,...i.results.map((c,k)=>c.fane_text||T[k])]);j=i.results.map((c,k)=>({content:T[k],metadata:{title:c.title,url:c.url,similarity:(0,e.A)(b,F[k]),embedding:F[k]}})).filter(a=>a.metadata.similarity>.5)/*fane:rank-original*/}`;
+const BATCHED = String.raw`try{let T=i.results.map(c=>c.content||c.title),[b,...F]=await a.embedding.embedText([h,...i.results.map((c,k)=>c.fane_text||T[k])]);j=i.results.map((c,k)=>({content:T[k],metadata:{title:c.title,url:c.url,similarity:(0,e.A)(b,F[k]),embedding:F[k]}})).filter(a=>a.metadata.similarity>.5)${RANK_ON_ORIGINAL_TEXT.marker}}`;
 
-const BALANCED_READ = String.raw`let R=Array.from(i.keys()).map(a=>{let b=g[a];return delete b.metadata.embedding,delete b.metadata.similarity,b}).slice(0,20);if("balanced"===a.mode)await Promise.all(R.slice(0,3).map(async(x,k)=>{try{let P=await FANE_SCRAPE.A.scrape(x.metadata.url);if(!P||"Failed to scrape"===P.title)return;let O=await Promise.all((0,FANE_SPLIT.A)(P.content,4e3,500).slice(0,2).map(t=>a.llm.generateObject({schema:FANE_SCHEMA,messages:[{role:"system",content:FANE_PROMPT},{role:"user",content:"<queries>"+a.queries.join(", ")+"</queries>\n<scraped_data>"+t+"</scraped_data>"}]}).then(r=>r.extracted_facts,()=>"")));let D=O.filter(Boolean).join("\n");D&&(R[k]={...x,content:x.content+"\n"+D})}catch(err){console.log("fane: balanced page read failed",x.metadata.url,err)}}));return R}`;
+const BALANCED_READ = String.raw`let R=Array.from(i.keys()).map(a=>{let b=g[a];return delete b.metadata.embedding,delete b.metadata.similarity,b}).slice(0,20);if("balanced"===a.mode)await Promise.all(R.slice(0,3).map(async(x,k)=>{try{let P=await FANE_SCRAPE.A.scrape(x.metadata.url);if(!P||${JSON.stringify(SCRAPE_FAILED_TITLE)}===P.title)return;let O=await Promise.all((0,FANE_SPLIT.A)(P.content,4e3,500).slice(0,2).map(t=>a.llm.generateObject({schema:FANE_SCHEMA,messages:[{role:"system",content:FANE_PROMPT},{role:"user",content:"<queries>"+a.queries.join(", ")+"</queries>\n<scraped_data>"+t+"</scraped_data>"}]}).then(r=>r.extracted_facts,()=>"")));let D=O.filter(Boolean).join("\n");D&&(R[k]={...x,content:x.content+"\n"+D})}catch(err){console.log("fane: balanced page read failed",x.metadata.url,err)}}));return R}`;
 
-const ORIGINAL_EMBED_TAIL = 'return{content:d,metadata:{title:c.title,url:c.url,similarity:(0,e.A)(b,f),embedding:f}}}))).filter(a=>a.metadata.similarity>.5)}';
+// Vane's per-result embedding code around the line RANK_ON_ORIGINAL_TEXT edits.
+const EMBED_HEAD = 'try{let b=(await a.embedding.embedText([h]))[0];j=(await Promise.all(i.results.map(async c=>{';
+const EMBED_TAIL = 'return{content:d,metadata:{title:c.title,url:c.url,similarity:(0,e.A)(b,f),embedding:f}}}))).filter(a=>a.metadata.similarity>.5)}';
 
 const TARGETS = [
   {
@@ -38,10 +38,8 @@ const TARGETS = [
   },
   {
     name: 'batched embeddings',
-    alts: [
-      { from: 'try{let b=(await a.embedding.embedText([h]))[0];j=(await Promise.all(i.results.map(async c=>{let d=c.content||c.title,f=(await a.embedding.embedText([c.fane_text||d]))[0];' + ORIGINAL_EMBED_TAIL, to: BATCHED },
-      { from: 'try{let b=(await a.embedding.embedText([h]))[0];j=(await Promise.all(i.results.map(async c=>{let d=c.content||c.title,f=(await a.embedding.embedText([d]))[0];' + ORIGINAL_EMBED_TAIL, to: BATCHED },
-    ],
+    // With or without RANK_ON_ORIGINAL_TEXT applied (scholarly/social patches).
+    alts: [RANK_ON_ORIGINAL_TEXT.to, RANK_ON_ORIGINAL_TEXT.from].map(embedLine => ({ from: EMBED_HEAD + embedLine + EMBED_TAIL, to: BATCHED })),
   },
   {
     name: 'balanced reads top pages',
@@ -54,39 +52,7 @@ const TARGETS = [
     from: '...i.filter(x=>!p.some(y=>y&&y.metadata.url===x.metadata.url)).sort((x,y)=>x.metadata.rank-y.metadata.rank).slice(0,8)]}',
     to: `...await(async()=>{let C=i.filter(x=>!p.some(y=>y&&y.metadata.url===x.metadata.url));try{let V=await a.embedding.embedText([...a.queries,...C.map(${STRIP})]);return(${RANK})(C,V,a.queries.length)}catch(err){return C.sort((x,y)=>x.metadata.rank-y.metadata.rank).slice(0,8)}})()]}`,
   },
-];
+].map(t => ({ file: FILES.research, ...t }));
 
-const original = fs.readFileSync(FILE, 'utf8');
-let s = original;
-let applied = 0;
-// Check every target first so a mismatch leaves the file untouched.
-for (const t of TARGETS) {
-  const alts = t.alts || [{ from: t.from, to: t.to }];
-  if (alts.some(x => s.includes(x.to)) || (t.marker && s.includes(t.marker))) continue;
-  const hit = alts.find(x => s.split(x.from).length - 1 === 1);
-  if (!hit && t.optional && alts.every(x => !s.includes(x.from))) {
-    console.log(`${t.name}: skipped (${t.optional})`);
-    continue;
-  }
-  if (!hit) {
-    const counts = alts.map(x => s.split(x.from).length - 1).join('/');
-    console.error(`${t.name}: expected 1 match, found ${counts}; not patching anything`);
-    process.exit(1);
-  }
-  s = s.replace(hit.from, () => hit.to);
-  applied++;
-}
-if (!applied) {
-  console.log('already patched');
-  process.exit(0);
-}
-// Never write a bundle that does not parse.
-try {
-  new vm.Script(s, { filename: FILE });
-} catch (err) {
-  console.error(`patched bundle does not parse (${err.message}); not patching anything`);
-  process.exit(1);
-}
-if (!fs.existsSync(`${FILE}.bak`)) fs.writeFileSync(`${FILE}.bak`, original);
-fs.writeFileSync(FILE, s);
-console.log(`patched ${applied} of ${TARGETS.length} targets (backup: ${FILE}.bak)`);
+module.exports = { TARGETS, RANK, STRIP };
+if (require.main === module) run('patch-web-search', TARGETS);

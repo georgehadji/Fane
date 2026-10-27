@@ -10,7 +10,10 @@ export class OpenRouterError extends Error {
   }
 }
 
-export function createOpenRouterClient({ apiKey, baseUrl = 'https://openrouter.ai/api/v1', fetchImpl = fetch } = {}) {
+export const OPENROUTER_HOST = 'openrouter.ai';
+export const OPENROUTER_BASE_URL = `https://${OPENROUTER_HOST}/api/v1`;
+
+export function createOpenRouterClient({ apiKey, baseUrl = OPENROUTER_BASE_URL, fetchImpl = fetch } = {}) {
   async function call(path, { method = 'GET', body, timeoutMs = 90_000 } = {}) {
     const res = await fetchImpl(`${baseUrl}${path}`, {
       method,
@@ -34,7 +37,9 @@ export function createOpenRouterClient({ apiKey, baseUrl = 'https://openrouter.a
   }
 
   return {
-    // The plain /models list omits pure image generators (Flux, Recraft, Seedream, ...).
+    // Public catalogue (no key needed). The plain list omits pure image generators.
+    models: async () => (await call('/models', { timeoutMs: 15_000 })).data || [],
+    // Image-output models, including Flux, Recraft, Seedream and the chat models that draw.
     imageModels: async () => (await call('/models?output_modalities=image', { timeoutMs: 15_000 })).data || [],
     chat: (body, timeoutMs = 120_000) => call('/chat/completions', { method: 'POST', body, timeoutMs }),
     // Image API for pure generators: { model, prompt, n, aspect_ratio, resolution, input_references }

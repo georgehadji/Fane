@@ -14,10 +14,9 @@
 //     re-sends full tool results every iteration.
 //     -> 10 iterations; the researcher sees results trimmed to 1500 chars each
 //        (the writer still gets the full findings).
-const fs = require('fs');
-const vm = require('vm');
+const { run } = require('./lib/apply-targets');
+const { FILES } = require('./lib/vane');
 
-const FILE = '/home/vane/.next/server/chunks/641.js';
 const TARGETS = [
   {
     name: 'rank snippets',
@@ -58,34 +57,7 @@ const TARGETS = [
     from: 'r.forEach((a,b)=>{k.push({role:"tool",id:q[b].id,name:q[b].name,content:JSON.stringify(a)})})',
     to: 'r.forEach((a,B)=>{k.push({role:"tool",id:q[B].id,name:q[B].name,content:JSON.stringify("quality"===b.config.mode&&a&&"search_results"===a.type?{...a,results:a.results.map(x=>({title:x.metadata?.title,url:x.metadata?.url,content:String(x.content||"").slice(0,1500)}))}:a)})})',
   },
-];
+].map(t => ({ file: FILES.research, ...t }));
 
-const original = fs.readFileSync(FILE, 'utf8');
-let s = original;
-let applied = 0;
-// Check every target first so a mismatch leaves the file untouched.
-// `marker` (when set) detects "already applied" for targets a later patch edits further.
-for (const t of TARGETS) {
-  if (s.includes(t.to) || (t.marker && s.includes(t.marker))) continue;
-  const count = s.split(t.from).length - 1;
-  if (count !== 1) {
-    console.error(`${t.name}: expected 1 match, found ${count}; not patching anything`);
-    process.exit(1);
-  }
-  s = s.replace(t.from, () => t.to);
-  applied++;
-}
-if (!applied) {
-  console.log('already patched');
-  process.exit(0);
-}
-// Never write a bundle that does not parse.
-try {
-  new vm.Script(s, { filename: FILE });
-} catch (err) {
-  console.error(`patched bundle does not parse (${err.message}); not patching anything`);
-  process.exit(1);
-}
-if (!fs.existsSync(`${FILE}.bak`)) fs.writeFileSync(`${FILE}.bak`, original);
-fs.writeFileSync(FILE, s);
-console.log(`patched ${applied} of ${TARGETS.length} targets (backup: ${FILE}.bak)`);
+module.exports = { TARGETS };
+if (require.main === module) run('patch-quality-mode', TARGETS);

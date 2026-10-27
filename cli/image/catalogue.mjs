@@ -44,6 +44,11 @@ export function familiesFor(id, acceptsImageInput) {
 
 export const emitsSvg = (m) => m.id.endsWith('-vector');
 
+// How a model is called: chat models that also write text (Gemini, GPT) draw through
+// chat completions; pure generators through the Image API.
+export const VIAS = ['chat', 'images'];
+export const viaOf = (m) => (m.modalities.includes('text') ? 'chat' : 'images');
+
 // One catalogue entry -> model info, or null when it cannot generate images or is unpriced.
 export function toModelInfo(entry) {
   const arch = entry?.architecture || {};
@@ -87,10 +92,10 @@ const byCapabilityDesc = (a, b) => {
 // Family members, cheapest first (budget) or most capable first (premium). SVG models are
 // the only members of "vector" and never appear in any other family: an SVG answer to a
 // photo prompt is broken, not cheaper.
-export function candidates(catalogue, family, tier, needsReference) {
+export function candidates(catalogue, family, tier, needsReference, via) {
   const wantSvg = family === 'vector';
   const pool = catalogue
-    .filter(m => m.families.has(family) && emitsSvg(m) === wantSvg && (needsReference ? m.acceptsImageInput : !m.requiresReference))
+    .filter(m => m.families.has(family) && emitsSvg(m) === wantSvg && (needsReference ? m.acceptsImageInput : !m.requiresReference) && (!via || viaOf(m) === via))
     .sort((a, b) => a.id.localeCompare(b.id)); // deterministic ties
   return tier === 'premium' ? pool.sort(byCapabilityDesc) : pool.sort((a, b) => a.price - b.price);
 }
@@ -107,12 +112,13 @@ function take(pool, count, picked, labs, allowRepeatLab = false) {
 // `count` primaries from distinct labs where possible, plus >= 4 fallbacks. A lab-thin
 // family widens to "general" instead of doubling up. Exception: "vector" never widens
 // (only SVG models qualify), so it may return fewer than `count`.
-export function selectModels(catalogue, { family = 'general', tier = 'budget', count = 2, needsReference = false } = {}) {
+// `via` ('chat' | 'images') limits the choice to one kind of model.
+export function selectModels(catalogue, { family = 'general', tier = 'budget', count = 2, needsReference = false, via } = {}) {
   if (!FAMILIES.includes(family)) family = 'general';
   if (!TIERS.includes(tier)) tier = 'budget';
-  const pool = candidates(catalogue, family, tier, needsReference);
+  const pool = candidates(catalogue, family, tier, needsReference, via);
   if (family === 'vector') return { primaries: pool.slice(0, count), fallbacks: pool.slice(count) };
-  const wider = family === 'general' ? pool : candidates(catalogue, 'general', tier, needsReference);
+  const wider = family === 'general' ? pool : candidates(catalogue, 'general', tier, needsReference, via);
   const primaries = [];
   const labs = new Set();
   take(pool, count, primaries, labs);

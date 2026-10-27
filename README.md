@@ -49,12 +49,10 @@ The patch scripts match exact fragments of Vane 1.12.2's compiled build. On any 
 <summary>Manual steps</summary>
 
 ```bash
-docker cp patches/patch-toolcall-empty-args.js vane:/tmp/p1.js
-docker cp patches/patch-always-search.js vane:/tmp/p2.js
-docker exec -u 0 vane node /tmp/p1.js
-docker exec -u 0 vane node /tmp/p2.js
+docker cp patches vane:/tmp/fane-patches      # the whole folder: patches share patches/lib/
+for p in patches/patch-*.js; do docker exec -u 0 vane node "/tmp/fane-patches/${p#patches/}"; done
 KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
-sed "s/REPLACE_ME_RUN_THE_COMMAND_IN_README/$KEY/" searxng/settings.yml > /tmp/settings.yml
+sed "s/^\([[:space:]]*secret_key:\).*/\1 '$KEY'/" searxng/settings.yml > /tmp/settings.yml
 docker cp /tmp/settings.yml vane:/etc/searxng/settings.yml
 docker exec -u 0 vane chown searxng:searxng /etc/searxng/settings.yml
 docker restart vane
@@ -124,12 +122,12 @@ This needs a Vane provider whose name contains "openrouter" (override with `--pr
 
 ### Image generation (`--image`)
 
-`vane --image "<prompt>"` generates images through OpenRouter directly, without Vane or a search. The method is ported from [reasoner](https://github.com/georgehadji/reasoner):
+`vane --image "<prompt>"` generates images through OpenRouter directly, without Vane or a search. A plain `vane "create an image of …"` (also "draw/generate/make a picture/logo/poster …") does the same, since Vane's answer pipeline can only write text. Use `--no-auto-image` to search instead. Vane's own web UI still can't make images. The method is ported from [reasoner](https://github.com/georgehadji/reasoner):
 
 1. **Intent:** the prompt is classified into a family (`vector`, `photoreal`, `text_in_image`, `design`, `general`, `reference_edit`) and a tier (`budget` or `premium`). A cheap text model does this (`VANE_IMAGE_TEXT_MODEL`), with keyword rules as the fallback. `--family` and `--tier` override it.
 2. **Model choice:** from OpenRouter's live catalogue of image-output models (61 priced, 12 labs on 2026-10-27), with price normalised to USD per image. `budget` takes the cheapest models and `premium` the most capable, ranked by the size word and version in the model id. Primaries come from different labs, with 4 or more fallbacks. SVG models serve only `vector`.
 3. **Prompt enhancement** by the cheap text model (`--no-enhance` skips it).
-4. **Generation:** one call per image, in parallel. Pure generators (Flux, Recraft, Seedream, …) go to OpenRouter's Image API; models that also write text (Gemini, GPT) go to chat completions with `modalities` and `image_config`.
+4. **Generation:** one call per image, in parallel. Pure generators (Flux, Recraft, Seedream, …) go to OpenRouter's Image API. Chat models that draw (Gemini, GPT) go to chat completions with `modalities: ["image","text"]` and `image_config`, and their text reply is kept. For a non-square `--aspect`, chat models are sent to the Image API first, because chat completions silently drops the ratio for GPT (a 16:9 request came back 1024×1024). If a provider lists the ratios it accepts ("Accepted: 1:1, 3:2, 2:3"), the nearest one is used: GPT gets 3:2 for 16:9.
 5. **Fallbacks** until the requested count is reached. A refusal triggers a policy-safe rewrite (by the model, then local rules for protected characters and studios) and a retry. A `401` or `402` stops immediately, since it affects every model alike.
 6. Images are saved to `--out-dir` (default `./vane-images`) and never overwrite existing files.
 
@@ -139,6 +137,9 @@ vane --image "a red fox in fresh snow, morning light"
 vane --image "minimal SVG logo for a coffee shop" -n 2
 vane --image "cinematic photo of Athens at dusk" --tier premium --aspect 16:9 --size 2K
 vane --image "make it a watercolour" --ref photo.jpg -j
+vane --list-image-models chat                   # the chat models that draw: price per image, families
+vane --image "a lighthouse at sunset" --via chat -n 2          # only chat models (picked GPT + Gemini)
+vane --image "a lighthouse at sunset" --image-model google/gemini-3-pro-image,openai/gpt-5-image
 ```
 
 Image links that a provider returns are downloaded only over HTTPS, never from private or loopback addresses, with every redirect re-checked and a 20 MB cap. Unlike reasoner, Fane does not strip AI-provenance metadata (C2PA) from generated images.

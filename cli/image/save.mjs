@@ -23,16 +23,16 @@ function freePath(dir, name) {
   return path;
 }
 
-// images: [{ dataUrl, model }] -> [{ path, model, mime, bytes }]
+// images: [{ dataUrl, model, ...meta }] -> [{ ...meta, model, path, mime, bytes }]
 export async function saveImages(images, dir, prompt) {
   await mkdir(dir, { recursive: true });
   const saved = [];
-  for (const [i, img] of images.entries()) {
-    const decoded = decodeDataUrl(img.dataUrl);
+  for (const [i, { dataUrl, ...meta }] of images.entries()) {
+    const decoded = decodeDataUrl(dataUrl);
     if (!decoded) continue;
-    const path = freePath(dir, fileNameFor(prompt, i, img.model, decoded.mime));
+    const path = freePath(dir, fileNameFor(prompt, i, meta.model, decoded.mime));
     await writeFile(path, decoded.bytes);
-    saved.push({ path, model: img.model, mime: decoded.mime, bytes: decoded.bytes.length });
+    saved.push({ ...meta, path, mime: decoded.mime, bytes: decoded.bytes.length });
   }
   return saved;
 }

@@ -1,12 +1,11 @@
 // Tests the paper-enrichment function that patches/patch-scholarly-sources.js injects
-// into Vane's SearXNG client. It is extracted from the patch source, so the test runs
-// exactly the code that ends up in the bundle.
+// into Vane's SearXNG client. Imported from the patch module, so the test runs exactly
+// the code that ends up in the bundle.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 
-const src = readFileSync(new URL('../../patches/patch-scholarly-sources.js', import.meta.url), 'utf8');
-const enrich = eval(src.match(/String\.raw`([\s\S]*?)`;/)[1]);
+const enrich = eval(createRequire(import.meta.url)('../../patches/patch-scholarly-sources.js').ENRICH);
 
 test('web results are untouched', () => {
   const r = { title: 'Page', url: 'https://example.com', content: 'text' };

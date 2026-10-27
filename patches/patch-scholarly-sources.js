@@ -19,10 +19,8 @@
 //  Also (optional, needs patch-quality-mode): a failed scrape returns
 //  {title:"Failed to scrape"} rather than nothing, so quality mode now treats it as a
 //  failure and keeps the search snippet instead of extracting from an error page.
-const fs = require('fs');
-const vm = require('vm');
-
-const FILE = '/home/vane/.next/server/chunks/641.js';
+const { run } = require('./lib/apply-targets');
+const { FILES, SCRAPE_FAILED_TITLE, RANK_ON_ORIGINAL_TEXT } = require('./lib/vane');
 
 // Paper enrichment, inserted into the SearXNG client. No backticks or ${ } allowed here.
 const ENRICH = String.raw`r=>{let A=Array.isArray(r.authors)?r.authors.map(x=>String(x).trim()).filter(Boolean):[];if(!A.length&&!r.doi&&!r.journal)return r;let U=String(r.url||""),X=(String(r.pdf_url||"")+" "+String(r.html_url||"")).match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})/),M=[A.slice(0,3).join(", ")+(A.length>3?" et al.":""),r.publishedDate?String(r.publishedDate).slice(0,4):"",r.journal||r.publisher||"",r.doi?"doi:"+r.doi:"",/arxiv\.org/.test(U)||X&&!r.journal?"preprint (arXiv)":""].filter(Boolean).join(" | ");/sciencedirect\.com|link\.springer\.com|onlinelibrary\.wiley\.com|ieeexplore\.ieee\.org|tandfonline\.com|pubs\.acs\.org/.test(U)&&X&&(U="https://arxiv.org/abs/"+X[1]);return{...r,url:U,fane_text:r.content||r.title,content:"["+M+"] "+(r.content||r.title)}}`;
@@ -50,13 +48,7 @@ const TARGETS = [
     // patch-social-sources inserts another .map() here
     marker: 'fane_text:r.content||r.title,content:"["+M+"] "',
   },
-  {
-    name: 'rank on original text',
-    from: 'let d=c.content||c.title,f=(await a.embedding.embedText([d]))[0];',
-    to: 'let d=c.content||c.title,f=(await a.embedding.embedText([c.fane_text||d]))[0];',
-    // patch-web-search rewrites this into one batched call and leaves this comment
-    marker: '/*fane:rank-original*/',
-  },
+  RANK_ON_ORIGINAL_TEXT,
   {
     name: 'writer cites papers by author and year',
     from: 'where appropriate.\n\n    ### Citation Requirements',
@@ -68,40 +60,9 @@ const TARGETS = [
     name: 'quality: failed scrape keeps the snippet',
     optional: 'needs patch-quality-mode',
     from: 'if(!c){p[P]=b;return}',
-    to: 'if(!c||"Failed to scrape"===c.title){p[P]=b;return}',
+    to: `if(!c||${JSON.stringify(SCRAPE_FAILED_TITLE)}===c.title){p[P]=b;return}`,
   },
-];
+].map(t => ({ file: FILES.research, ...t }));
 
-const original = fs.readFileSync(FILE, 'utf8');
-let s = original;
-let applied = 0;
-// Check every target first so a mismatch leaves the file untouched.
-// `marker` (when set) detects "already applied" for targets a later patch edits further.
-for (const t of TARGETS) {
-  if (s.includes(t.to) || (t.marker && s.includes(t.marker))) continue;
-  const count = s.split(t.from).length - 1;
-  if (count === 0 && t.optional) {
-    console.log(`${t.name}: skipped (${t.optional})`);
-    continue;
-  }
-  if (count !== 1) {
-    console.error(`${t.name}: expected 1 match, found ${count}; not patching anything`);
-    process.exit(1);
-  }
-  s = s.replace(t.from, () => t.to);
-  applied++;
-}
-if (!applied) {
-  console.log('already patched');
-  process.exit(0);
-}
-// Never write a bundle that does not parse.
-try {
-  new vm.Script(s, { filename: FILE });
-} catch (err) {
-  console.error(`patched bundle does not parse (${err.message}); not patching anything`);
-  process.exit(1);
-}
-if (!fs.existsSync(`${FILE}.bak`)) fs.writeFileSync(`${FILE}.bak`, original);
-fs.writeFileSync(FILE, s);
-console.log(`patched ${applied} of ${TARGETS.length} targets (backup: ${FILE}.bak)`);
+module.exports = { TARGETS, ENRICH };
+if (require.main === module) run('patch-scholarly-sources', TARGETS);

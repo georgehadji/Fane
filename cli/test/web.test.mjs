@@ -1,13 +1,12 @@
 // Tests the snippet-ranking code patches/patch-web-search.js injects into Vane's quality
-// mode. Extracted from the patch source, so the test runs exactly what ends up in the bundle.
+// mode. Imported from the patch module, so the test runs exactly what ends up in the bundle.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 
-const src = readFileSync(new URL('../../patches/patch-web-search.js', import.meta.url), 'utf8');
-const grab = (name) => eval(src.match(new RegExp(`const ${name} = String\\.raw\`([\\s\\S]*?)\`;`))[1]);
-const rank = grab('RANK');
-const strip = grab('STRIP');
+const { RANK, STRIP } = createRequire(import.meta.url)('../../patches/patch-web-search.js');
+const rank = eval(RANK);
+const strip = eval(STRIP);
 
 const snip = (url) => ({ content: url, metadata: { url } });
 

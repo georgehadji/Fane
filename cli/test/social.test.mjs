@@ -1,13 +1,13 @@
 // Tests the code patches/patch-social-sources.js injects into Vane: the platform/date
-// prefix and the reddit.com filter for site-search results. Both are extracted from the
-// patch source, so the test runs exactly what ends up in the bundle.
+// prefix and the reddit.com filter for site-search results. Both are imported from the
+// patch module, so the test runs exactly what ends up in the bundle.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 
-const src = readFileSync(new URL('../../patches/patch-social-sources.js', import.meta.url), 'utf8');
-const social = eval(src.match(/const SOCIAL = String\.raw`([\s\S]*?)`;/)[1]);
-const redditRe = eval(src.match(/R\.filter\(x=>(\/\^https\?.*?\/)\.test/)[1]);
+const { SOCIAL, REDDIT_URL } = createRequire(import.meta.url)('../../patches/patch-social-sources.js');
+const social = eval(SOCIAL);
+const redditRe = eval(REDDIT_URL);
 
 test('non-forum results are untouched', () => {
   const r = { title: 'Page', url: 'https://example.com/reddit.com', engine: 'bing', content: 'text' };

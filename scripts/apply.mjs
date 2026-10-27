@@ -9,15 +9,18 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULTS } from '../cli/vane.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const CONTAINER = process.env.VANE_CONTAINER || 'vane';
-const URL_ = process.env.VANE_URL || 'http://localhost:3000';
-const PLACEHOLDER = 'REPLACE_ME_RUN_THE_COMMAND_IN_README';
+const CONTAINER = DEFAULTS.container;
 const SETTINGS_PATH = '/etc/searxng/settings.yml';
+const PATCH_DIR = '/tmp/fane-patches'; // the whole folder: patches share patches/lib/
+// The key line itself, not its placeholder value, so the repo file is the only place that
+// says what the placeholder is.
+const SECRET_KEY_LINE = /^(\s*secret_key:).*$/m;
 
 if (process.argv.includes('-h') || process.argv.includes('--help')) {
-  console.log('Usage: node scripts/apply.mjs [--no-searxng]\nEnv: VANE_CONTAINER (default vane), VANE_URL (default http://localhost:3000)');
+  console.log(`Usage: node scripts/apply.mjs [--no-searxng]\nEnv: VANE_CONTAINER (default ${DEFAULTS.container}), VANE_URL (default ${DEFAULTS.url})`);
   process.exit(0);
 }
 const withSearxng = !process.argv.includes('--no-searxng');
@@ -41,12 +44,12 @@ let changed = false;
 let failed = false;
 
 // 1. Patches: each script exits non-zero without touching files when its target does not match.
-for (const file of readdirSync(join(ROOT, 'patches')).filter(f => f.endsWith('.js')).sort()) {
-  const dest = `/tmp/${file}`;
-  docker(['cp', join(ROOT, 'patches', file), `${CONTAINER}:${dest}`]);
+docker(['exec', '-u', '0', CONTAINER, 'rm', '-rf', PATCH_DIR]);
+docker(['cp', join(ROOT, 'patches'), `${CONTAINER}:${PATCH_DIR}`]);
+for (const file of readdirSync(join(ROOT, 'patches')).filter(f => /^patch-.*\.js$/.test(f)).sort()) {
   try {
-    const out = docker(['exec', '-u', '0', CONTAINER, 'node', dest]);
-    console.log(`${file}: ${out.split('\n').join(' | ')}`);
+    const out = docker(['exec', '-u', '0', CONTAINER, 'node', `${PATCH_DIR}/${file}`]);
+    console.log(out.split('\n').join(' | ')); // each line already starts with the patch name
     if (out.split('\n').some(l => /patched/.test(l) && !/already patched/.test(l))) changed = true;
   } catch (err) {
     failed = true;
@@ -57,7 +60,7 @@ for (const file of readdirSync(join(ROOT, 'patches')).filter(f => f.endsWith('.j
 // 2. SearXNG settings. The secret_key is generated per install and never written to the repo.
 if (withSearxng) {
   const repoText = readFileSync(join(ROOT, 'searxng', 'settings.yml'), 'utf8');
-  const norm = (s) => s.replace(/\r\n/g, '\n').replace(/^(\s*secret_key:).*$/m, '$1 X').trim();
+  const norm = (s) => s.replace(/\r\n/g, '\n').replace(SECRET_KEY_LINE, '$1 X').trim();
   let current = '';
   try { current = docker(['exec', CONTAINER, 'cat', SETTINGS_PATH]); } catch { /* treat as different */ }
   if (norm(current) === norm(repoText)) {
@@ -66,7 +69,7 @@ if (withSearxng) {
     const dir = mkdtempSync(join(tmpdir(), 'fane-'));
     try {
       const tmp = join(dir, 'settings.yml');
-      writeFileSync(tmp, repoText.replace(PLACEHOLDER, randomBytes(32).toString('hex')));
+      writeFileSync(tmp, repoText.replace(SECRET_KEY_LINE, `$1 '${randomBytes(32).toString('hex')}'`));
       docker(['cp', tmp, `${CONTAINER}:${SETTINGS_PATH}`]);
       docker(['exec', '-u', '0', CONTAINER, 'chown', 'searxng:searxng', SETTINGS_PATH]);
       console.log('searxng/settings.yml: applied with a new random secret_key');
@@ -86,7 +89,7 @@ if (changed) {
   while (Date.now() < deadline && !ready) {
     await new Promise(r => setTimeout(r, 2000));
     process.stdout.write('.');
-    ready = await fetch(`${URL_}/api/providers`, { signal: AbortSignal.timeout(5000) }).then(r => r.ok, () => false);
+    ready = await fetch(`${DEFAULTS.url}/api/providers`, { signal: AbortSignal.timeout(5000) }).then(r => r.ok, () => false);
   }
   console.log(ready ? ' ready' : ' not ready after 90s');
 } else {

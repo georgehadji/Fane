@@ -3,12 +3,17 @@
 // Sends a question to Vane's /api/search and prints the cited answer + sources.
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FAMILIES, TIERS } from './image/catalogue.mjs';
+import { FAMILIES, TIERS, VIAS } from './image/catalogue.mjs';
+import { imageSubject, isImageRequest } from './image/intent.mjs';
 import { ASPECT_RATIOS, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
+import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient } from './image/openrouter.mjs';
 
-const DEFAULTS = {
+// The defaults for every Fane tool (scripts/ import this object).
+export const DEFAULTS = {
   url: process.env.VANE_URL || 'http://localhost:3000',
   model: process.env.VANE_CHAT_MODEL || 'google/gemini-3.8-flash',
   embedding: process.env.VANE_EMBEDDING_MODEL || 'Xenova/all-MiniLM-L6-v2',
@@ -23,7 +28,6 @@ const VALID_SOURCES = ['web', 'academic', 'discussions'];
 const VALID_MODES = ['speed', 'balanced', 'quality'];
 const STARTUP_WAIT_MS = 90_000;
 const SEARCH_RETRIES = 1; // retried only on HTTP 5xx / connection reset, never on timeout (that would double the wait)
-const OPENROUTER_CATALOG = 'https://openrouter.ai/api/v1/models';
 const SLUG_RE = /^[\w.~-]+\/[\w.:~-]+$/; // vendor/model[:variant], the OpenRouter id shape
 // Cheap text model for image-prompt enhancement and intent classification.
 const IMAGE_TEXT_MODEL = process.env.VANE_IMAGE_TEXT_MODEL || 'google/gemini-3.5-flash-lite';
@@ -61,8 +65,14 @@ Options:
   -h, --help             Show this help
 
 Image generation (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane):
-      --image            Generate images from the prompt instead of searching
+      --image            Generate images from the prompt instead of searching. Questions that
+                         start like "create/draw/generate an image of ..." do this automatically
+      --no-auto-image    Search even when the question asks for an image
   -n, --count <n>        Images to make, one model per lab where possible (default 2, max ${MAX_IMAGES})
+      --via <v>          chat (models that draw inside a chat reply: Gemini, GPT) | images (pure image
+                         generators: Flux, Recraft, Seedream, ...); default: whichever fits best
+      --image-model <id> Use exactly these models (repeatable or comma list); see --list-image-models
+      --list-image-models [filter]  List image models with price, kind (chat/images) and families
       --tier <t>         budget (cheapest models) | premium (most capable); default from the prompt
       --family <f>       ${FAMILIES.join(' | ')}; default from the prompt
       --aspect <r>       ${ASPECT_RATIOS.join(' | ')} (default 1:1)
@@ -103,7 +113,10 @@ export function parseCli(argv) {
       provider: { type: 'string' },
       doctor: { type: 'boolean', default: false },
       image: { type: 'boolean', default: false },
-      count: { type: 'string', short: 'n', default: '2' },
+      count: { type: 'string', short: 'n' }, // default: 2, or one per --image-model
+      via: { type: 'string' },
+      'image-model': { type: 'string', multiple: true, default: [] },
+      'list-image-models': { type: 'boolean', default: false },
       tier: { type: 'string' },
       family: { type: 'string' },
       aspect: { type: 'string', default: '1:1' },
@@ -112,6 +125,7 @@ export function parseCli(argv) {
       'out-dir': { type: 'string', default: 'vane-images' },
       'no-enhance': { type: 'boolean', default: false },
       'key-from-vane': { type: 'boolean', default: false },
+      'no-auto-image': { type: 'boolean', default: false },
       url: { type: 'string', default: DEFAULTS.url },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -125,9 +139,14 @@ export function parseCli(argv) {
   if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) throw new UsageError(`Invalid timeout "${values.timeout}"`);
   if (values.stream && values.json) throw new UsageError('--stream cannot be combined with --json');
   if (values.image) {
-    const n = Number(values.count);
-    if (!Number.isInteger(n) || n < 1 || n > MAX_IMAGES) throw new UsageError(`Invalid --count "${values.count}" (1-${MAX_IMAGES})`);
-    values.count = n;
+    if (values.count !== undefined) {
+      const n = Number(values.count);
+      if (!Number.isInteger(n) || n < 1 || n > MAX_IMAGES) throw new UsageError(`Invalid --count "${values.count}" (1-${MAX_IMAGES})`);
+      values.count = n;
+    }
+    values['image-model'] = values['image-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
+    if (values.via && !VIAS.includes(values.via)) throw new UsageError(`Invalid --via "${values.via}". Use: ${VIAS.join(', ')}`);
+    if (values.via && values['image-model'].length) throw new UsageError('--via and --image-model cannot be combined');
     if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
     if (values.family && !FAMILIES.includes(values.family)) throw new UsageError(`Invalid --family "${values.family}". Use: ${FAMILIES.join(', ')}`);
     if (!ASPECT_RATIOS.includes(values.aspect)) throw new UsageError(`Invalid --aspect "${values.aspect}". Use: ${ASPECT_RATIOS.join(', ')}`);
@@ -195,11 +214,7 @@ export function resolveModel(providers, kind, wanted) {
 
 // ---- OpenRouter ----------------------------------------------------------
 
-async function fetchOpenRouterCatalog() {
-  const res = await fetch(OPENROUTER_CATALOG, { signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) throw new Error(`OpenRouter catalog: HTTP ${res.status}`);
-  return (await res.json()).data || [];
-}
+const fetchOpenRouterCatalog = () => createOpenRouterClient().models();
 
 // Vane has no "provider type" in /api/providers, so find the OpenRouter one by name.
 export function findOpenRouterProvider(providers, wanted) {
@@ -221,8 +236,8 @@ async function openRouterBaseUrlWarning(url, provider) {
     const res = await fetch(`${url}/api/config`, { signal: AbortSignal.timeout(10_000) });
     const cfg = (await res.json()).values?.modelProviders?.find(p => p.id === provider.id);
     const base = cfg?.config?.baseURL;
-    if (!cfg || (base && base.includes('openrouter.ai'))) return null;
-    return `provider "${provider.name}" (${cfg.type}) uses Base URL ${base || '(default)'}, not OpenRouter. Models will fail until you set Base URL https://openrouter.ai/api/v1 and an OpenRouter API key in Vane Settings -> Models.`;
+    if (!cfg || (base && base.includes(OPENROUTER_HOST))) return null;
+    return `provider "${provider.name}" (${cfg.type}) uses Base URL ${base || '(default)'}, not OpenRouter. Models will fail until you set Base URL ${OPENROUTER_BASE_URL} and an OpenRouter API key in Vane Settings -> Models.`;
   } catch { return null; }
 }
 
@@ -483,19 +498,21 @@ function printModels(providers, asJson) {
 
 // ---- doctor --------------------------------------------------------------
 
-// Fragments the patches in ../patches write (their `to` strings). Keep in sync.
-const PATCH_MARKERS = [
-  { name: 'patch-toolcall-empty-args', file: '/home/vane/.next/server/chunks/136.js', marker: 'arguments:(0,n.parse)(b.arguments.trim()||"{}")' },
-  { name: 'patch-always-search (search)', file: '/home/vane/.next/server/app/api/search/route.js', marker: '(c.classification.skipSearch=!1)||(j=new g.A().research(' },
-  { name: 'patch-always-search (chat)', file: '/home/vane/.next/server/app/api/chat/route.js', marker: '(d.classification.skipSearch=!1)||(m=new f.A().research(' },
-  { name: 'patch-quality-mode', file: '/home/vane/.next/server/chunks/641.js', marker: 'p[P]={...b,content:d||b.content}' },
-  { name: 'patch-scholarly-sources', file: '/home/vane/.next/server/chunks/641.js', marker: '/*fane:academic-toggle*/' },
-  { name: 'patch-social-sources', file: '/home/vane/.next/server/chunks/641.js', marker: '/*fane:social-toggle*/' },
-  { name: 'patch-web-search', file: '/home/vane/.next/server/chunks/641.js', marker: '/*fane:rank-original*/' },
-];
+// Patch definitions are read from ../patches (their single source); available when the CLI
+// runs from the repo, which `npm install -g ./cli` links to. null when not found.
+export function loadPatchDefinitions() {
+  const dir = join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches');
+  if (!existsSync(join(dir, 'lib', 'apply-targets.js'))) return null;
+  const require = createRequire(import.meta.url);
+  const { appliedNeedles } = require(join(dir, 'lib', 'apply-targets.js'));
+  return readdirSync(dir).filter(f => /^patch-.*\.js$/.test(f)).sort().map(f => ({
+    name: f.replace(/\.js$/, ''),
+    targets: require(join(dir, f)).TARGETS.map(t => ({ name: t.name, file: t.file, optional: !!t.optional, needles: appliedNeedles(t) })),
+  }));
+}
 
-function dockerOut(args, timeout = 30_000) {
-  return execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout }).trim();
+function dockerOut(args, timeout = 30_000, input) {
+  return execFileSync('docker', args, { encoding: 'utf8', stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], timeout, input }).trim();
 }
 
 // Prints one line per check. Returns the number of failed checks (warnings do not count).
@@ -538,14 +555,25 @@ async function doctor(opts) {
 
   if (!running) return failures;
 
-  try {
-    const script = `const fs=require('fs');console.log(JSON.stringify(${JSON.stringify(PATCH_MARKERS)}.map(x=>{try{return fs.readFileSync(x.file,'utf8').includes(x.marker)}catch{return null}})))`;
-    const states = JSON.parse(dockerOut(['exec', container, 'node', '-e', script]));
-    PATCH_MARKERS.forEach((p, i) => {
-      if (states[i]) report('ok', `${p.name} applied`);
-      else report('FAIL', `${p.name} ${states[i] === null ? 'target file missing (different Vane build?)' : 'not applied (run node scripts/apply.mjs)'}`);
-    });
-  } catch (err) { report('FAIL', `could not inspect patches: ${err.message.split('\n')[0]}`); }
+  const patches = loadPatchDefinitions();
+  if (!patches) report('warn', 'patch definitions not found next to this CLI (install it with npm install -g ./cli from the repo); skipping patch checks');
+  else {
+    try {
+      // Every target of every patch, checked in the container. The needles are large, so they go in on stdin.
+      const targets = patches.flatMap(p => p.targets);
+      const script = "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const fs=require('fs'),c={};console.log(JSON.stringify(JSON.parse(s).map(t=>{try{c[t.file]??=fs.readFileSync(t.file,'utf8')}catch{return null}return t.needles.some(n=>c[t.file].includes(n))})))})";
+      const states = JSON.parse(dockerOut(['exec', '-i', container, 'node', '-e', script], 30_000, JSON.stringify(targets.map(t => ({ file: t.file, needles: t.needles })))));
+      let i = 0;
+      for (const p of patches) {
+        const rows = p.targets.map(t => ({ ...t, state: states[i++] }));
+        const missing = rows.filter(r => r.state === false && !r.optional);
+        const skipped = rows.filter(r => r.state === false && r.optional);
+        if (rows.some(r => r.state === null)) report('FAIL', `${p.name}: target file missing (different Vane build?)`);
+        else if (missing.length) report('FAIL', `${p.name}: ${missing.length} of ${rows.length} targets not applied (${missing.map(r => r.name).join(', ')}); run node scripts/apply.mjs`);
+        else report('ok', `${p.name} applied (${rows.length - skipped.length}/${rows.length} targets${skipped.length ? `; optional skipped: ${skipped.map(r => r.name).join(', ')}` : ''})`);
+      }
+    } catch (err) { report('FAIL', `could not inspect patches: ${err.message.split('\n')[0]}`); }
+  }
 
   try {
     const script = `fetch('http://localhost:8080/search?q=test&format=json').then(r=>r.json()).then(j=>console.log(JSON.stringify({n:j.results.length,down:j.unresponsive_engines})))`;
@@ -566,8 +594,8 @@ async function resolveOpenRouterKey(opts) {
   if (!opts['key-from-vane']) throw new UsageError('Image generation needs an OpenRouter key: set OPENROUTER_API_KEY, or pass --key-from-vane to use the one configured in Vane.');
   const res = await fetch(`${opts.url}/api/config`, { signal: AbortSignal.timeout(10_000) });
   const providers = (await res.json()).values?.modelProviders || [];
-  const p = providers.find(x => String(x.config?.baseURL || '').includes('openrouter.ai') && x.config?.apiKey);
-  if (!p) throw new UsageError(`No Vane provider with Base URL openrouter.ai and an API key at ${opts.url}.`);
+  const p = providers.find(x => String(x.config?.baseURL || '').includes(OPENROUTER_HOST) && x.config?.apiKey);
+  if (!p) throw new UsageError(`No Vane provider with Base URL ${OPENROUTER_BASE_URL} and an API key at ${opts.url}.`);
   return p.config.apiKey;
 }
 
@@ -593,19 +621,34 @@ async function runImage(opts) {
     textModel: IMAGE_TEXT_MODEL,
     log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); },
   });
-  const r = await generate({ prompt: opts.query, count: opts.count, tier: opts.tier, family: opts.family, aspect: opts.aspect, size: opts.size, references, enhance: !opts['no-enhance'] });
-  const saved = r.images.length ? await saveImages(r.images, opts['out-dir'], opts.query) : [];
-  const price = (id) => r.images.find(i => i.model === id)?.pricePerImage;
+  const r = await generate({ prompt: opts.query, count: opts.count, tier: opts.tier, family: opts.family, aspect: opts.aspect, size: opts.size, references, enhance: !opts['no-enhance'], models: opts['image-model'], via: opts.via });
+  const saved = r.images.length ? await saveImages(r.images, opts['out-dir'], imageSubject(opts.query)) : [];
   if (opts.json) {
-    console.log(JSON.stringify({ prompt: opts.query, intent: r.intent, models: r.models, enhancedPrompt: r.enhancedPrompt, rewrittenPrompt: r.rewrittenPrompt, requested: r.requested, images: saved.map(s => ({ ...s, estUsd: price(s.model) })), errors: r.errors }, null, 2));
+    console.log(JSON.stringify({ prompt: opts.query, intent: r.intent, models: r.models, enhancedPrompt: r.enhancedPrompt, rewrittenPrompt: r.rewrittenPrompt, requested: r.requested, images: saved, errors: r.errors }, null, 2));
   } else {
     if (r.intent) console.log(`Intent: ${r.intent.family} / ${r.intent.tier} (${r.intent.source}); models: ${r.models.join(', ') || 'none'}`);
     if (r.enhancedPrompt) console.log(`Enhanced prompt: ${r.enhancedPrompt}`);
     if (r.rewrittenPrompt) console.log(`Rewritten prompt: ${r.rewrittenPrompt}`);
-    for (const s of saved) console.log(`Saved ${s.path} (${s.model}, ${Math.round(s.bytes / 1024)} KB, ~$${(price(s.model) ?? 0).toFixed(3)})`);
+    for (const s of saved) {
+      const how = `${s.via} model${s.endpoint !== s.via ? `, via the ${s.endpoint === 'images' ? 'Image API' : 'chat endpoint'}` : ''}${s.aspect !== opts.aspect ? `, ${s.aspect} (nearest supported)` : ''}`;
+      console.log(`Saved ${s.path} (${s.model}, ${how}, ${Math.round(s.bytes / 1024)} KB, ~$${(s.pricePerImage ?? 0).toFixed(3)})`);
+      if (s.text) console.log(`  ${s.model.split('/')[0]} said: ${s.text.length > 300 ? `${s.text.slice(0, 297)}...` : s.text}`);
+    }
     if (!r.complete) console.error(`vane: made ${saved.length} of ${r.requested} images.${r.errors.length ? `\n  ${r.errors.slice(0, 6).join('\n  ')}` : ''}`);
   }
   if (!saved.length) process.exitCode = 1;
+}
+
+async function listImageModels(filter, asJson) {
+  const [{ createOpenRouterClient }, { buildCatalogue, viaOf }] = await Promise.all([import('./image/openrouter.mjs'), import('./image/catalogue.mjs')]);
+  const f = String(filter || '').toLowerCase();
+  const rows = buildCatalogue(await createOpenRouterClient().imageModels())
+    .filter(m => !f || m.id.toLowerCase().includes(f) || viaOf(m) === f)
+    .sort((a, b) => a.price - b.price)
+    .map(m => ({ id: m.id, via: viaOf(m), usdPerImage: Math.round(m.price * 10000) / 10000, families: [...m.families], acceptsImageInput: m.acceptsImageInput, requiresReference: m.requiresReference }));
+  if (asJson) return console.log(JSON.stringify(rows, null, 2));
+  for (const r of rows) console.log(`${r.id.padEnd(44)} ${r.via.padEnd(7)} $${r.usdPerImage.toFixed(4)}  ${r.families.filter(x => x !== 'general').join(',')}${r.requiresReference ? '  (needs --ref)' : ''}`);
+  if (!rows.length) console.log('No matching image models.');
 }
 
 // ---- main ----------------------------------------------------------------
@@ -615,6 +658,7 @@ async function main() {
   if (opts.help) return console.log(USAGE);
   if (opts.doctor) { if (await doctor(opts)) process.exitCode = 1; return; }
   if (opts.image) return runImage(opts);
+  if (opts['list-image-models']) return listImageModels(opts.query, opts.json);
   if (opts['list-openrouter']) return listOpenRouter(opts.query, opts.json);
   if (opts['add-model'] !== undefined) {
     const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);
@@ -629,6 +673,10 @@ async function main() {
     return console.log(`Removed "${opts['remove-model']}" from Vane provider "${provider.name}".`);
   }
   if (!opts['list-models'] && !opts.query) throw new UsageError('Missing question.\n\n' + USAGE);
+  if (!opts['list-models'] && !opts['no-auto-image'] && isImageRequest(opts.query)) {
+    process.stderr.write('vane: this asks for an image, so it goes to image generation (same as --image; --no-auto-image to search instead).\n');
+    return runImage({ ...opts, image: true });
+  }
   const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);
   if (opts['list-models']) return printModels(providers, opts.json);
   printResult(await search(opts, providers), opts);

@@ -9,13 +9,14 @@
 //   node scripts/engine-check.mjs --query "rust"    different test query (default: node js lts)
 import { execFileSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
+import { DEFAULTS } from '../cli/vane.mjs';
 
 const { values } = parseArgs({ options: { engines: { type: 'string' }, query: { type: 'string', default: 'node js lts' }, help: { type: 'boolean', short: 'h', default: false } } });
 if (values.help) {
   console.log('Usage: node scripts/engine-check.mjs [--engines a,b,c] [--query <text>]\nEnv: VANE_CONTAINER (default vane)');
   process.exit(0);
 }
-const container = process.env.VANE_CONTAINER || 'vane';
+const container = DEFAULTS.container;
 
 // Runs inside the container, where SearXNG listens on localhost:8080.
 const script = `

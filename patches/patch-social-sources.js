@@ -14,15 +14,17 @@
 //  5. Platform and date were dropped. -> prefix "[Hacker News | 2025-03-14]"; ranking
 //     keeps using the original text.
 //  6. Writer: community posts are opinions; report consensus, disagreement and dates.
-const fs = require('fs');
-const vm = require('vm');
+const { run } = require('./lib/apply-targets');
+const { FILES, RANK_ON_ORIGINAL_TEXT } = require('./lib/vane');
 
-const FILE = '/home/vane/.next/server/chunks/641.js';
+// Injected code below must contain no backticks; ${...} is only used to splice these constants.
+// A reddit.com URL (any subdomain), as a JS regex literal.
+const REDDIT_URL = String.raw`/^https?:\/\/(?:[\w-]+\.)*reddit\.com(?:[\/?#]|$)/`;
 
-// Platform/date prefix for forum and Reddit results. No backticks or ${ } allowed here.
-const SOCIAL = String.raw`r=>{let N={hackernews:"Hacker News","lemmy posts":"Lemmy","lemmy comments":"Lemmy comment",stackoverflow:"Stack Overflow",superuser:"Super User",askubuntu:"Ask Ubuntu"}[String(r.engine||"")]||(/^https?:\/\/(?:[\w-]+\.)*reddit\.com(?:[\/?#]|$)/.test(String(r.url||""))?"Reddit":"");if(!N)return r;let D=r.publishedDate?String(r.publishedDate).slice(0,10):"";return{...r,fane_text:r.fane_text||r.content||r.title,content:"["+[N,D].filter(Boolean).join(" | ")+"] "+(r.content||r.title)}}`;
+// Platform/date prefix for forum and Reddit results.
+const SOCIAL = String.raw`r=>{let N={hackernews:"Hacker News","lemmy posts":"Lemmy","lemmy comments":"Lemmy comment",stackoverflow:"Stack Overflow",superuser:"Super User",askubuntu:"Ask Ubuntu"}[String(r.engine||"")]||(${REDDIT_URL}.test(String(r.url||""))?"Reddit":"");if(!N)return r;let D=r.publishedDate?String(r.publishedDate).slice(0,10):"";return{...r,fane_text:r.fane_text||r.content||r.title,content:"["+[N,D].filter(Boolean).join(" | ")+"] "+(r.content||r.title)}}`;
 
-const SEARCH = String.raw`return{type:"search_results",results:await(async()=>{let o={llm:b.llm,embedding:b.embedding,mode:b.mode,researchBlock:c,session:b.session},[F,R]=await Promise.all([(0,e.k)({...o,queries:a.queries,searchConfig:{engines:["hackernews","lemmy posts","lemmy comments","stackoverflow","superuser","askubuntu"]}}),(0,e.k)({...o,queries:a.queries.map(x=>"site:reddit.com "+x),searchConfig:{engines:["yandex","google","duckduckgo","brave","startpage"]}})]);return[...F,...R.filter(x=>/^https?:\/\/(?:[\w-]+\.)*reddit\.com(?:[\/?#]|$)/.test(String(x.metadata&&x.metadata.url)))]})()}`;
+const SEARCH = String.raw`return{type:"search_results",results:await(async()=>{let o={llm:b.llm,embedding:b.embedding,mode:b.mode,researchBlock:c,session:b.session},[F,R]=await Promise.all([(0,e.k)({...o,queries:a.queries,searchConfig:{engines:["hackernews","lemmy posts","lemmy comments","stackoverflow","superuser","askubuntu"]}}),(0,e.k)({...o,queries:a.queries.map(x=>"site:reddit.com "+x),searchConfig:{engines:["yandex","google","duckduckgo","brave","startpage"]}})]);return[...F,...R.filter(x=>${REDDIT_URL}.test(String(x.metadata&&x.metadata.url)))]})()}`;
 
 // A target may list alternative from/to pairs (with and without the scholarly patch).
 const TARGETS = [
@@ -48,48 +50,13 @@ const TARGETS = [
       { from: 'let b=await a.json(),c=b.results,d=b.suggestions;', to: `let b=await a.json(),c=(b.results||[]).map(${SOCIAL}),d=b.suggestions;` },
     ],
   },
-  {
-    // Same edit as patch-scholarly-sources; already present when that patch ran.
-    name: 'rank on original text',
-    from: 'let d=c.content||c.title,f=(await a.embedding.embedText([d]))[0];',
-    to: 'let d=c.content||c.title,f=(await a.embedding.embedText([c.fane_text||d]))[0];',
-    // patch-web-search rewrites this into one batched call and leaves this comment
-    marker: '/*fane:rank-original*/',
-  },
+  RANK_ON_ORIGINAL_TEXT, // shared with patch-scholarly-sources; a no-op when that ran first
   {
     name: 'writer treats posts as opinions',
     from: '\n\n    ### Citation Requirements',
     to: '\n\n    ### Community sources\n    - Some sources start with a bracket such as [Reddit], [Hacker News | 2025-03-14] or [Stack Overflow]. These are posts by individuals: opinions, anecdotes and advice, not established facts.\n    - Report what most posters agree on and where they disagree, attribute claims ("several Hacker News commenters report ..."), and give dates when opinions may be outdated.\n    - Never present a single post as fact, and say so when the discussion sources are few or one-sided.\n\n    ### Citation Requirements',
   },
-];
+].map(t => ({ file: FILES.research, ...t }));
 
-const original = fs.readFileSync(FILE, 'utf8');
-let s = original;
-let applied = 0;
-// Check every target first so a mismatch leaves the file untouched.
-for (const t of TARGETS) {
-  const alts = t.alts || [{ from: t.from, to: t.to }];
-  if (alts.some(x => s.includes(x.to)) || (t.marker && s.includes(t.marker))) continue;
-  const hit = alts.find(x => s.split(x.from).length - 1 === 1);
-  if (!hit) {
-    const counts = alts.map(x => s.split(x.from).length - 1).join('/');
-    console.error(`${t.name}: expected 1 match, found ${counts}; not patching anything`);
-    process.exit(1);
-  }
-  s = s.replace(hit.from, () => hit.to);
-  applied++;
-}
-if (!applied) {
-  console.log('already patched');
-  process.exit(0);
-}
-// Never write a bundle that does not parse.
-try {
-  new vm.Script(s, { filename: FILE });
-} catch (err) {
-  console.error(`patched bundle does not parse (${err.message}); not patching anything`);
-  process.exit(1);
-}
-if (!fs.existsSync(`${FILE}.bak`)) fs.writeFileSync(`${FILE}.bak`, original);
-fs.writeFileSync(FILE, s);
-console.log(`patched ${applied} of ${TARGETS.length} targets (backup: ${FILE}.bak)`);
+module.exports = { TARGETS, SOCIAL, REDDIT_URL };
+if (require.main === module) run('patch-social-sources', TARGETS);

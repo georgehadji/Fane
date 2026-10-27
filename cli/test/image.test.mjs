@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { pricePerImage, toModelInfo, buildCatalogue, capability, selectModels, emitsSvg } from '../image/catalogue.mjs';
-import { classifyByRules, classifyIntent, parseClassification } from '../image/intent.mjs';
+import { classifyByRules, classifyIntent, parseClassification, isImageRequest, imageSubject } from '../image/intent.mjs';
 import { heuristicRewrite, shouldRetry, isPolicyError } from '../image/policy.mjs';
 import { sniffMime, toDataUrl, collectImageCandidates, decodeDataUrl } from '../image/extract.mjs';
 import { isPrivateAddress, safeDownload } from '../image/download.mjs';
 import { slugify, fileNameFor, saveImages } from '../image/save.mjs';
-import { createImageGenerator } from '../image/generate.mjs';
+import { createImageGenerator, nearestRatio } from '../image/generate.mjs';
 
 for (const k of ['VANE_URL', 'VANE_CHAT_MODEL', 'VANE_EMBEDDING_MODEL', 'VANE_CONTAINER', 'VANE_SOURCES', 'VANE_MODE']) delete process.env[k];
 const { parseCli } = await import('../vane.mjs');
@@ -93,6 +93,13 @@ test('rules classify family and tier', () => {
   assert.equal(classifyByRules('poster that says "Open Late"').family, 'text_in_image');
   assert.equal(classifyByRules('cinematic photo of a fox, highly detailed').tier, 'premium');
   assert.equal(classifyByRules('a cat', { hasReference: true }).family, 'reference_edit');
+});
+
+test('image requests are recognised; questions are not', () => {
+  for (const q of ['create an image of donald duck and his nieces in the playground', 'Draw me a logo for a bakery', 'please generate 2 pictures of a fox', 'Can you make a poster for a jazz night', 'paint a portrait of a cat']) assert.ok(isImageRequest(q), q);
+  assert.equal(imageSubject('create an image of donald duck and his nieces in the playground'), 'donald duck and his nieces in the playground');
+  assert.equal(imageSubject('a red fox'), 'a red fox');
+  for (const q of ['What is the best image format for the web?', 'how do I create an image in Docker', 'Compare Rust and Go', 'images of the 2024 eclipse: where were they taken?', 'Make sure my photo backups are safe']) assert.ok(!isImageRequest(q), q);
 });
 
 test('model classification is parsed and validated; failures fall back to rules', async () => {
@@ -236,6 +243,73 @@ test('pipeline: chat completions "use the Image API" error switches endpoint', a
   assert.deepEqual(client.calls.map(c => c.endpoint), ['chat', 'images']);
 });
 
+test('selection: via limits the choice to chat models or to Image API models', () => {
+  const chat = selectModels(CAT, { family: 'general', count: 4, via: 'chat' });
+  assert.ok(chat.primaries.length >= 2 && [...chat.primaries, ...chat.fallbacks].every(m => m.modalities.includes('text')));
+  const img = selectModels(CAT, { family: 'photoreal', count: 4, via: 'images' });
+  assert.ok([...img.primaries, ...img.fallbacks].every(m => !m.modalities.includes('text')));
+});
+
+test('pipeline: --via chat draws with chat models and keeps their text reply', async () => {
+  const client = fakeClient();
+  client.chat = async (body) => {
+    client.calls.push({ endpoint: 'chat', body });
+    return { choices: [{ message: { content: 'Here is a fox in the snow.', images: [{ type: 'image_url', image_url: { url: PNG_URL } }] } }] };
+  };
+  const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'a fox', count: 2, enhance: false, via: 'chat' });
+  assert.ok(r.complete);
+  assert.ok(client.calls.every(c => c.endpoint === 'chat'));
+  assert.deepEqual(r.images.map(i => [i.via, i.text]), [['chat', 'Here is a fox in the snow.'], ['chat', 'Here is a fox in the snow.']]);
+});
+
+test('nearestRatio picks the closest accepted ratio, ignoring auto', () => {
+  assert.equal(nearestRatio('16:9', ['1:1', '3:2', '2:3', 'auto']), '3:2');
+  assert.equal(nearestRatio('9:16', ['1:1', '3:2', '2:3']), '2:3');
+  assert.equal(nearestRatio('1:1', ['auto']), null);
+});
+
+test('pipeline: chat models take the Image API first for non-square ratios', async () => {
+  const client = fakeClient();
+  const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'x', enhance: false, models: ['google/gemini-3.1-flash-image'], aspect: '16:9' });
+  assert.ok(r.ok);
+  assert.deepEqual(client.calls.map(c => c.endpoint), ['images']);
+  assert.equal(r.images[0].endpoint, 'images');
+  assert.equal(r.images[0].via, 'chat');
+});
+
+test('pipeline: "Accepted: ..." aspect errors retry once with the nearest ratio', async () => {
+  const client = fakeClient();
+  const images = client.images;
+  client.images = async (body) => {
+    if (body.aspect_ratio === '16:9') throw Object.assign(new Error('400 No provider supports aspect_ratio "16:9". Provider rejections: OpenAI: aspect_ratio: not supported. Accepted: 1:1, 3:2, 2:3, auto'), { status: 400 });
+    return images(body);
+  };
+  const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'x', enhance: false, models: ['openai/gpt-5-image-mini'], aspect: '16:9' });
+  assert.ok(r.ok);
+  assert.equal(r.images[0].aspect, '3:2');
+  assert.equal(client.calls.at(-1).body.aspect_ratio, '3:2');
+});
+
+test('pipeline: a chat model that answers only in words is a failure that names the reply', async () => {
+  const client = fakeClient();
+  client.chat = async () => ({ choices: [{ message: { content: 'I cannot draw that.' } }] });
+  client.images = async () => { throw Object.assign(new Error('400 model not available on the Image API'), { status: 400 }); };
+  const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'x', count: 1, enhance: false, models: ['google/gemini-3.1-flash-image'] });
+  assert.equal(r.ok, false);
+  assert.match(r.errors[0], /no image in response \(model replied: I cannot draw that\.\)/);
+});
+
+test('pipeline: explicit models are used as given, cycled for -n, no substitution', async () => {
+  const client = fakeClient();
+  const gen = createImageGenerator({ client, download: async () => null });
+  const r = await gen({ prompt: 'x', enhance: false, models: ['google/gemini-3-pro-image', 'openai/gpt-5-image-mini'] });
+  assert.deepEqual(r.models, ['google/gemini-3-pro-image', 'openai/gpt-5-image-mini']); // count defaults to the list length
+  assert.equal(r.intent.source, 'explicit');
+  assert.deepEqual((await gen({ prompt: 'x', enhance: false, count: 3, models: ['google/gemini-3-pro-image'] })).models.length, 3);
+  const bad = await gen({ prompt: 'x', enhance: false, models: ['some/text-model'] });
+  assert.match(bad.errors[0], /not an image model/);
+});
+
 test('pipeline: vector requests ask the Image API for SVG', async () => {
   const client = fakeClient();
   await createImageGenerator({ client, download: async () => null })({ prompt: 'svg logo', count: 1, enhance: false, family: 'vector' });
@@ -286,4 +360,8 @@ test('--image options are validated', () => {
   assert.throws(() => parseCli(['x', '--image', '-n', '9']), /Invalid --count/);
   assert.throws(() => parseCli(['x', '--image', '--aspect', '5:4']), /Invalid --aspect/);
   assert.throws(() => parseCli(['x', '--image', '--family', 'anime']), /Invalid --family/);
+  assert.equal(parseCli(['x', '--image']).count, undefined); // generate() decides: 2, or one per --image-model
+  assert.deepEqual(parseCli(['x', '--image', '--image-model', 'a/b,c/d', '--image-model', 'e/f'])['image-model'], ['a/b', 'c/d', 'e/f']);
+  assert.throws(() => parseCli(['x', '--image', '--via', 'fax']), /Invalid --via/);
+  assert.throws(() => parseCli(['x', '--image', '--via', 'chat', '--image-model', 'a/b']), /cannot be combined/);
 });
