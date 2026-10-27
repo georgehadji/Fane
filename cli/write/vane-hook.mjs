@@ -15,11 +15,11 @@ import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue, selectChains } from './catalogue.mjs';
 import { createArticleEditor, isArticleEdit, parseArticleAnswer, targetLanguage } from './edit.mjs';
-import { articleTopic, isArticleRequest, parseArticleOptions } from './intent.mjs';
+import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from './intent.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from './language.mjs';
 import { DEFAULT_MODE, MODES } from './models.mjs';
 import { createArticlePipeline } from './pipeline.mjs';
-import { renderArticleFailure, renderArticleProgress, renderArticleResult } from './present.mjs';
+import { renderArticleFailure, renderArticleProgress, renderArticleResult, renderPostResult } from './present.mjs';
 
 const TRIAL_FILE = new URL('./trial.json', import.meta.url);
 
@@ -29,15 +29,17 @@ const TRIAL_FILE = new URL('./trial.json', import.meta.url);
 // Returns false when the message is neither an article request nor an edit of the article the previous
 // answer was (Vane then answers as usual). client, trial, pipeline and editor are injectable for tests.
 export async function handleArticleRequest(query, { emit, update, configPath, mode, history, lastAnswer, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, client, trial, pipeline, editor } = {}) {
+  // A social post ("write a LinkedIn post about ...") before an article: «ανάρτηση» matches both.
+  const platform = postPlatform(query);
   // A follow-up edit: the message reads like one ("shorter", "rewrite the intro") and the answer before it is an article of ours.
   let earlier = null;
-  if (!isArticleRequest(query)) {
+  if (!platform && !isArticleRequest(query)) {
     if (isImageRequest(query) || !isArticleEdit(query)) return false;
     earlier = parseArticleAnswer(await previousAnswer(history, lastAnswer));
     // Vane's own answers have a "# " title too; ours end with a sources list (the CLI's --edit-article asks the same)
     if (!earlier?.sources.length) return false;
   }
-  const topic = earlier ? query : articleTopic(query);
+  const topic = earlier ? query : platform ? postTopic(query) : articleTopic(query);
   // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
   const lang = earlier ? targetLanguage(query, earlier.lang) : detectLanguage(query);
   const state = { lang, phases: [], running: earlier ? 'edit' : 'sources', draft: null };
@@ -90,12 +92,12 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
       if (e.phase !== 'done') queue = queue.then(() => say(renderArticleProgress(state)));
     };
     const write = pipeline || createArticlePipeline({ client, retrieve, log });
-    const r = await write({ topic, mode: useMode, lang, words: parseArticleOptions(query).words, chains: chosen.chains, prices: chosen.prices, onProgress });
+    const r = await write({ topic, mode: useMode, lang, words: parseArticleOptions(query, { post: !!platform }).words, format: platform || 'article', chains: chosen.chains, prices: chosen.prices, onProgress });
     await queue;
-    say(r.ok ? renderArticleResult(r) : renderArticleFailure(r, lang));
+    say(!r.ok ? renderArticleFailure({ ...r, post: !!platform }, lang) : platform ? renderPostResult(r) : renderArticleResult(r));
   } catch (err) {
-    log(`article failed: ${err.message}`);
-    say(renderArticleFailure({ error: err.message }, lang));
+    log(`${platform ? 'post' : 'article'} failed: ${err.message}`);
+    say(renderArticleFailure({ error: err.message, post: !!platform }, lang));
   }
   return true;
 }

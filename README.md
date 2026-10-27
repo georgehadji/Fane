@@ -199,6 +199,52 @@ OpenRouter's catalogue says nothing about writing quality or Greek, so a model i
 
 **In Vane's web UI** (`patches/patch-article-chat.js`): the same request typed into the chat is answered with the article. Vane's mode picks the phases and the price band (Speed, Balanced, Quality). The sources come from Vane's own research on your chat model, so its usual "Research Progress" panels appear; the answer then shows status lines in the language of the article, the draft as soon as it exists, and the finished article with a one-line summary (words, sources, cost, time, mode) and any weak spot (a skipped phase, a failed check). Citations are superscript links to the real sources (`¹ ²`), not `[1]`: Vane turns every `[n]` into a chip for its own research sources, which are numbered differently. The modules are mounted from `cli/write` at `/fane/write` (Compose) or copied there by `node scripts/apply.mjs`; `vane --doctor` checks they are present. Measured in the web UI: an English Speed article of 638 words took 28 s and cost $0.003; a Greek one took 1 m 48 s (four research calls, now one, plus an outline that was cut off, see CLAUDE.md). **Follow-up edits:** right after an article, a message that reads like an edit ("make it shorter, about 300 words", "rewrite the introduction", "translate it to English", "κάνε το πιο σύντομο"; not a question, thanks or praise, which Vane answers as usual) changes that article with one model call (same sources, no new facts) and answers with the new version, a new summary line and the same checks. A request that adds something ("add a paragraph about costs", "expand the history section", «πρόσθεσε…») first runs one Vane research and gives the model the pages it found, which it may cite; the article's old sources stay numbered as before. A question, or an edit after an answer that is not one of Fane's articles, goes to Vane as usual. A requested length is followed only roughly: "about 300 words" gave 461 words in the live check. The sources list of a web answer is written as HTML links: Vane rewrites every `[…]` of an answer that has sources and splits it at its commas, so a title such as "The interaction between the Earth, moon and sun" showed as "[The interaction between the Earth]" and a link.
 
+### LinkedIn and Facebook posts (`--post`)
+
+`vane --post linkedin|facebook "<topic>"` writes a social post with the same research and fact-check as an article. These requests do it automatically, in the CLI and in Vane's chat:
+
+- "write a LinkedIn post about …";
+- "draft a post for Facebook on …";
+- «γράψε μια ανάρτηση για …».
+
+A post request that names no platform gets the LinkedIn rules. «Ανάρτηση για το blog μου» is still an article.
+
+**Phases:**
+
+| Mode | Phases |
+|---|---|
+| Speed | draft only |
+| Balanced, Quality | draft, fact-check and polish; a revision only when a claim failed |
+
+There is no outline, structural critique or audit, because a post has no sections. The mode still picks the price band of the models.
+
+**What the post follows** (from 2026 figures, mostly tool vendors'):
+
+| | LinkedIn | Facebook |
+|---|---|---|
+| Hard limit | 3,000 characters | none in practice |
+| Shown before "see more" | about 210 characters | about 125 characters on mobile |
+| Target length | about 220 words | about 120 words |
+
+- The point goes in the first line, inside the fold.
+- Plain text in short paragraphs: no headings, Markdown or Unicode "bold" letters (screen readers spell those out).
+- No engagement bait ("Agree?", «Συμφωνείτε;»).
+- No invented personal stories.
+- LinkedIn gets at most 3 hashtags; Facebook none.
+- No links in the post. A link in a LinkedIn post body cut median reach by 18.8% in a study of about 1.3 million posts, and Meta has been testing a cap on organic link posts. So the `[n]` markers the fact-check needs are removed, and the sources are printed as a **first comment** to paste under the post.
+
+**Checks:**
+- Fail: over the character limit, or fake bold.
+- Warn: a first line past the fold, Markdown, a link, too many hashtags.
+- Post bait counts as a stock phrase.
+
+`--words` takes 60–450 for LinkedIn and 30–350 for Facebook. A live LinkedIn post on heat pumps (Balanced) came out at 222 words and 1,396 characters, with 9 of 9 claims supported, for $0.028.
+
+```bash
+vane "write a LinkedIn post about heat pumps in cold climates" -o balanced
+vane --post facebook "tidal power in Orkney" --words 90 --out post.txt
+```
+
 ### Citation check (`--verify`)
 
 `--verify` checks the answer against the text of the sources Vane returned, with no extra model calls. A cited sentence counts as supported when at least 30% of its content words appear in one of the sources it cites, and every multi-digit number in it appears in a cited source. The report lists weakly supported sentences, numbers not found in their sources, citation numbers that have no source, and how many sentences have no citation. With `-j` it is in the `verification` field.

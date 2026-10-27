@@ -11,7 +11,8 @@ import { FAMILIES, TIERS, TIER_FOR_MODE, VIAS } from './image/catalogue.mjs';
 import { imageSubject, isImageRequest } from './image/intent.mjs';
 import { ASPECT_RATIOS, DEFAULT_IMAGES, DEFAULT_TEXT_MODEL, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
 import { parseImageOptions } from './image/intent.mjs';
-import { articleTopic, isArticleRequest, parseArticleOptions } from './write/intent.mjs';
+import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from './write/intent.mjs';
+import { POSTS, POST_PLATFORMS } from './write/formats.mjs';
 import { buildTextCatalogue, selectChains } from './write/catalogue.mjs';
 import { LANGUAGES, detectLanguage } from './write/language.mjs';
 import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
@@ -47,6 +48,7 @@ const USAGE = `Usage: vane "<question>" [options]
        vane --doctor
        vane --article "<topic>" [-o speed|balanced|quality] [--lang el|en] [--words ${DEFAULT_WORDS}] [--out article.md]
        vane --edit-article article.md "<change>" [-o speed|balanced|quality] [--out new.md]
+       vane --post ${POST_PLATFORMS.join('|')} "<topic>" [-o speed|balanced|quality] [--lang el|en] [--words n] [--out post.txt]
        vane --image "<prompt>" [-n ${DEFAULT_IMAGES}] [--tier ${TIERS.join('|')}] [--family <f>] [--aspect 1:1] [--out-dir dir]
 
 Options:
@@ -110,6 +112,11 @@ Articles (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; sources come 
       --out <file>       Write the article (Markdown) to a file instead of printing it
       --edit-article <f> Change an article written by --article: "make it shorter", "translate it to Greek",
                          "add a paragraph about costs" (requests that add something search with Vane first)
+      --post <p>         ${POST_PLATFORMS.join(' | ')}: a social post instead of an article (same research and
+                         fact-check, no outline or audit). Plain text with the point in the first line; the [n]
+                         markers are removed and the sources printed as the first comment. Requests like
+                         "write a LinkedIn post about ..." or «γράψε μια ανάρτηση για ...» do this automatically.
+                         --words: ${POST_PLATFORMS.map(p => `${POSTS[p].name} ${POSTS[p].minWords}-${POSTS[p].maxWords}, default ${POSTS[p].words}`).join('; ')}
 
 Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURCES, VANE_MODE,
      OPENROUTER_API_KEY, VANE_IMAGE_TEXT_MODEL (prompt enhancement/intent, default ${IMAGE_TEXT_MODEL})
@@ -163,6 +170,7 @@ export function parseCli(argv) {
       'article-model': { type: 'string', multiple: true, default: [] },
       out: { type: 'string' },
       'edit-article': { type: 'string' },
+      post: { type: 'string' },
       url: { type: 'string', default: DEFAULTS.url },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -191,13 +199,19 @@ export function parseCli(argv) {
     if (values.size) values.size = values.size.toUpperCase();
     if (values.stream) throw new UsageError('--stream does not apply to --image');
   }
+  if (values.post !== undefined) {
+    values.post = values.post.toLowerCase();
+    if (!POST_PLATFORMS.includes(values.post)) throw new UsageError(`Invalid --post "${values.post}". Use: ${POST_PLATFORMS.join(', ')}`);
+    values.article = true; // a post is the article pipeline with another format
+  }
   if (values.article || values['list-article-models'] || values['edit-article'] !== undefined) {
     values['article-model'] = values['article-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
     if (values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
     if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
     if (values.words !== undefined) {
       const n = Number(values.words);
-      if (!Number.isInteger(n) || n < MIN_WORDS || n > MAX_WORDS) throw new UsageError(`Invalid --words "${values.words}" (${MIN_WORDS}-${MAX_WORDS})`);
+      const [min, max] = values.post ? [POSTS[values.post].minWords, POSTS[values.post].maxWords] : [MIN_WORDS, MAX_WORDS];
+      if (!Number.isInteger(n) || n < min || n > max) throw new UsageError(`Invalid --words "${values.words}" (${min}-${max})`);
       values.words = n;
     }
     if (values.stream) throw new UsageError('--stream does not apply to --article');
@@ -218,6 +232,9 @@ export function parseCli(argv) {
 export function autoRoute(opts, argv) {
   if (opts['list-models']) return null;
   if (!opts['no-auto-image'] && isImageRequest(opts.query)) return parseCli(['--image', ...argv]);
+  // a post before an article: «ανάρτηση» matches both
+  const platform = opts['no-auto-article'] ? null : postPlatform(opts.query);
+  if (platform) return parseCli(['--post', platform, ...argv]);
   if (!opts['no-auto-article'] && isArticleRequest(opts.query)) return parseCli(['--article', ...argv]);
   return null;
 }
@@ -685,7 +702,8 @@ const MODE_FOR_TIER = Object.fromEntries(Object.entries(TIER_FOR_MODE).map(([mod
 function printArticleReport(r) {
   const say = (s) => process.stderr.write(`${s}\n`);
   const cost = r.cost ? ` · ≈ $${r.cost.toFixed(4)}` : '';
-  say(`\nvane: ${r.words} words${r.targetWords ? ` (target ${r.targetWords})` : ''}, ${r.language === 'el' ? 'Greek' : 'English'}, ${r.mode} · ${r.sources.length} sources cited · ${r.calls} model calls${cost} · ${Math.round(r.ms / 1000)} s`);
+  const post = POSTS[r.format] ? `${POSTS[r.format].name} post, ${[...r.post].length} characters, ` : '';
+  say(`\nvane: ${post}${r.words} words${r.targetWords ? ` (target ${r.targetWords})` : ''}, ${r.language === 'el' ? 'Greek' : 'English'}, ${r.mode} · ${r.sources.length} sources cited · ${r.calls} model calls${cost} · ${Math.round(r.ms / 1000)} s`);
   for (const p of r.phases || []) say(`  ${p.status.padEnd(9)}${p.phase.padEnd(10)}${p.model || ''}${p.words ? `  ${p.words} words` : ''}${p.note && p.status !== 'ok' ? `  (${p.note})` : ''}`);
   if (r.claimSupport != null) say(`  claims supported by their sources: ${Math.round(r.claimSupport * 100)}% of ${r.ledger.length} checked`);
   if (r.audit) say(`  audit: ${r.audit.score} (${r.audit.passes ? 'passed' : 'failed'}${r.audit.retried ? ', after a retry' : ''})`);
@@ -736,7 +754,8 @@ async function runArticle(opts) {
   };
   const client = createOpenRouterClient({ apiKey });
   const write = createArticlePipeline({ client, retrieve, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
-  const topic = articleTopic(opts.query);
+  const post = opts.post; // a platform of formats.mjs, or undefined for an article
+  const topic = post ? postTopic(opts.query) : articleTopic(opts.query);
   // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
   const lang = opts.lang ?? detectLanguage(opts.query);
   const explicit = opts['article-model'].length > 0;
@@ -745,7 +764,8 @@ async function runArticle(opts) {
     topic,
     mode,
     lang,
-    words: opts.words ?? parseArticleOptions(opts.query).words,
+    format: post || 'article',
+    words: opts.words ?? parseArticleOptions(opts.query, { post: !!post }).words,
     models: opts['article-model'],
     chains: chosen?.chains,
     prices: chosen?.prices,
@@ -885,7 +905,9 @@ async function main() {
     return runImage(routed);
   }
   if (routed) {
-    process.stderr.write('vane: this asks for an article, so it goes to article writing (same as --article; --no-auto-article to search instead).\n');
+    process.stderr.write(routed.post
+      ? `vane: this asks for a ${POSTS[routed.post].name} post, so it goes to post writing (same as --post ${routed.post}; --no-auto-article to search instead).\n`
+      : 'vane: this asks for an article, so it goes to article writing (same as --article; --no-auto-article to search instead).\n');
     return runArticle(routed);
   }
   const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);

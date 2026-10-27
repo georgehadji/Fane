@@ -5,6 +5,7 @@
 // Vane renders raw HTML in answers.
 import { escapeHtml, formatDuration, quiet } from '../image/present.mjs';
 import { linkCitations, renumber, sourcesSection } from './checks.mjs';
+import { POSTS } from './formats.mjs';
 
 const NBSP = ' ';
 
@@ -59,11 +60,43 @@ export function renderArticleResult(r) {
   return `${linkCitations(body, r.sources).trimEnd()}${sourcesSection(r.sources, lang, { html: true }).trimEnd()}\n\n${quiet([escapeHtml(summary), ...notes.map(n => escapeHtml(n))])}`;
 }
 
+const POST_WORDS = {
+  en: { comment: 'First comment', chars: 'characters', fold: 'shown before “see more”', copy: 'Post it as it is; put the sources in the first comment.' },
+  el: { comment: 'Πρώτο σχόλιο', chars: 'χαρακτήρες', fold: 'φαίνονται πριν από το «see more»', copy: 'Δημοσιεύστε το όπως είναι· οι πηγές μπαίνουν στο πρώτο σχόλιο.' },
+};
+
+// A finished social post: the post as it will be published (no citation markers, no Markdown of ours), then the
+// first comment with the sources written out, then the status paragraph with the length against the platform's fold.
+export function renderPostResult(r) {
+  const lang = r.language || 'en';
+  const W = words(lang), P = POST_WORDS[lang] || POST_WORDS.en, p = POSTS[r.format];
+  const chars = [...r.post].length;
+  const hook = [...(r.post.split(/\n/).find(l => l.trim()) || '')].length;
+  const summary = [
+    `${p.name}`,
+    `${chars}${NBSP}${P.chars}`,
+    `${Math.min(hook, p.foldChars)}${NBSP}${P.fold}`,
+    `${r.sources.length}${NBSP}${r.sources.length === 1 ? W.source : W.sources}`,
+    r.cost ? `≈${NBSP}$${r.cost.toFixed(3)}` : null,
+    r.ms ? formatDuration(r.ms).replace(' ', NBSP) : null,
+    W.modes[r.mode] || r.mode,
+  ].filter(Boolean).join(' · ');
+  const notes = [...new Set([...r.degraded, ...r.checks.items.filter(i => i.level !== 'ok').map(i => `${i.name}: ${i.detail}`)])].slice(0, 6);
+  // Markdown would turn a model's "**" or "1." into formatting the platform will not show, so the post is escaped
+  // as text, one paragraph per blank-line block, line breaks kept
+  const paragraphs = cleanMarkdown(r.post).split(/\n{2,}/).map(par => escapeHtml(par.trim()).replace(/\n/g, '<br>')).filter(Boolean);
+  const post = paragraphs.map(par => `<p>${par}</p>`).join('\n');
+  // the comment as it is pasted, with the URLs written out: copying linked titles from the page loses the links
+  const comment = r.comment ? `\n\n**${P.comment}**\n\n<p>${escapeHtml(r.comment).replace(/\n/g, '<br>')}</p>` : '';
+  return `${post}${comment.trimEnd()}\n\n${quiet([escapeHtml(summary), escapeHtml(P.copy), ...notes.map(n => escapeHtml(n))])}`;
+}
+
 // A run that produced no article.
 export function renderArticleFailure(result, lang = 'en') {
   const why = result.status === 402 ? 'OpenRouter has no credits left (402). Add credits at openrouter.ai and ask again.'
     : result.status === 401 ? "OpenRouter refused the API key (401). Check the key of the OpenRouter provider in Vane's Settings."
       : result.error;
-  const head = lang === 'el' ? (result.edit ? 'Δεν μπόρεσα να αλλάξω το άρθρο.' : 'Δεν μπόρεσα να γράψω το άρθρο.') : result.edit ? 'The article could not be changed.' : 'The article could not be written.';
+  const head = result.post ? (lang === 'el' ? 'Δεν μπόρεσα να γράψω την ανάρτηση.' : 'The post could not be written.')
+    : lang === 'el' ? (result.edit ? 'Δεν μπόρεσα να αλλάξω το άρθρο.' : 'Δεν μπόρεσα να γράψω το άρθρο.') : result.edit ? 'The article could not be changed.' : 'The article could not be written.';
   return quiet([escapeHtml(head), escapeHtml(why)]);
 }

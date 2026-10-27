@@ -38,6 +38,8 @@ const TELLS = {
     ['generic-conclusion', word('(?:the future (?:looks|is) bright|paves the way|exciting times? (?:lie|are) ahead|journey of discovery|only time will tell)')],
     ['chatbot', word('(?:i hope this helps|let me know if|certainly!|great question|as an ai)')],
     // the article talks about its evidence instead of its subject (a Quality run: "None of these sources show ...")
+    // social-post habits (formats.mjs): engagement bait and announcement clichés
+    ['post-bait', word('(?:agree\\?|thoughts\\?|what do you think\\?|let that sink in|here(?:\'|’)s the thing|comment below|drop a comment|like and share|humbled to|thrilled to (?:announce|share)|excited to (?:announce|share)|game[- ]changer|unpopular opinion|read that again)')],
     ['source-talk', word('(?:the (?:cited )?sources? (?:does not|doesn(?:\'|’)t|do not|don(?:\'|’)t|did not|says? nothing|gives? no|offers? no|provides? no)|none of (?:these|the|its|their) sources|no source (?:says|states|shows|gives)|according to the (?:available|cited) (?:data|sources|information|evidence))')],
   ],
   el: [
@@ -50,6 +52,8 @@ const TELLS = {
     ['negative-parallelism', stem('(?:δεν ειναι απλωσ|δεν ειναι απλα|δεν αποτελει απλωσ|δεν αφορα μονο|οχι απλωσ)')],
     ['generic-conclusion', stem('(?:το μελλον (?:ειναι ευοιωνο|προμηνυεται)|ανοιγει νεουσ (?:οριζοντεσ|δρομουσ)|ανοιγουν νεουσ (?:οριζοντεσ|δρομουσ)|ταξιδι ανακαλυψησ|(?:παρα)?μενει να δουμε|μονο ο χρονοσ θα δειξει)')],
     ['chatbot', stem('(?:ελπιζω αυτο να βοηθα|φυσικα!|ασφαλωσ!|ωσ μοντελο|ωσ τεχνητη νοημοσυνη|θα ηθελεσ να)')],
+    // social-post habits; after fold() the Greek question mark is ";"
+    ['post-bait', stem('(?:συμφωνειτε;|τι λετε;|εσεισ τι πιστευετε;|πειτε μου (?:στα σχολια|τη γνωμη σασ)|αφηστε (?:ενα )?σχολιο|γραψτε στα σχολια|κανετε (?:like|share)|game changer|ειμαι (?:ενθουσιασμεν|υπερηφαν|περηφαν)\\p{L}* (?:να|που) (?:ανακοινωσω|μοιραστω))')],
     // «Η πηγή δεν δίνει σαφές έτος», «Ούτε προκύπτει από τις πηγές» (a Quality run)
     ['source-talk', stem('(?:(?:η|οι) πηγ(?:η|εσ) (?:\\p{L}+ )?δεν|καμια (?:απο τισ )?πηγ\\p{L}* δεν|προκυπτει απο τισ πηγεσ|απο τισ πηγεσ (?:δεν )?προκυπτει|επικαλειται η πηγη|συμφωνα με τα διαθεσιμα στοιχεια)')],
   ],

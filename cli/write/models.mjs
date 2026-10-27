@@ -15,6 +15,14 @@ export const PHASES = {
   quality: ['queries', 'outline', 'draft', 'factcheck', 'critique', 'revise', 'style', 'copy', 'audit'],
 };
 
+// Posts (formats.mjs) have no sections: no outline, no structural critique, and no audit, whose dimensions
+// (thesis, transitions) are an article's. The revision runs only when claims failed the fact-check.
+export const POST_PHASES = {
+  speed: ['queries', 'draft'],
+  balanced: ['queries', 'draft', 'factcheck', 'revise', 'polish'],
+  quality: ['queries', 'draft', 'factcheck', 'revise', 'polish'],
+};
+
 // Sent with every call. The first model trial found thinking models (Mistral Large, Qwen Max, Cohere ...)
 // spending the whole token budget on reasoning and returning no text (finish_reason "length", 0 words);
 // models without reasoning ignore the parameter. The trial (scripts/article-trial.mjs) uses the same value.

@@ -5,6 +5,7 @@
 //  - Web pages are untrusted data: every source block says so, and no prompt acts on text inside it.
 //  - The draft is told the human-voice rules at write time (cheaper than undoing tells afterwards),
 //    with a rule set per language: the Greek one is native Greek, not a translation.
+import { POSTS, isPost } from './formats.mjs';
 import { LANGUAGE_NAMES, wordCount } from './language.mjs';
 
 const JSON_ONLY = 'Reply with one JSON object and nothing else: no prose before or after, no code fence, no reasoning.';
@@ -54,6 +55,20 @@ const lengthRule = (article, words) => `Length: the article is ${wordCount(artic
 // claim support fell from 0.854 to 0.77: only a year the source gives is written.
 const dateRule = (today) => (today ? `Today is ${today}. When a source gives the year of a figure or finding, keep it with the figure, so the reader can see its age; never add a year the source does not state. For anything "recent" or "current", prefer the newest sources.` : '');
 
+// A social post (formats.mjs): the shape every pass must keep. Appended to the editing passes by the pipeline.
+const postShape = (format) => {
+  const p = POSTS[format];
+  return [
+    `This is a ${p.name} post, not an article: plain text only. No title, no headings, no Markdown, no bold or italic, no Unicode "bold" letters, no bullet symbols. Paragraphs of one to three short sentences, separated by a blank line.`,
+    `The first line carries the point (a specific fact, finding or number) in under ${p.foldChars} characters, because only that shows before "see more". No question as the first line, no teaser that hides the point.`,
+    `No links and no sources list in the post: the sources go in the first comment, written afterwards.`,
+    `End on the last real point or one concrete takeaway. No engagement bait ("Agree?", "Thoughts?", "Comment below", "Let that sink in").`,
+    p.hashtags ? `At most ${p.hashtags} specific hashtags, on the last line, or none.` : 'No hashtags.',
+    'Do not invent personal experiences, anecdotes or opinions of the author; the post shares what the sources show.',
+  ].join('\n- ');
+};
+export const postEditRule = (format) => (isPost(format) ? `\n\nShape to keep:\n- ${postShape(format)}` : '');
+
 const clip = (s, n) => (String(s || '').length > n ? `${String(s).slice(0, n).trimEnd()}…` : String(s || ''));
 
 export function sourceBlock(sources, { excerpt = 700 } = {}) {
@@ -74,7 +89,10 @@ export const prompts = {
     user: `Topic: ${topic}\nTarget length: about ${words} words.\n${dateRule(today)}\n\n${sourceBlock(sources, { excerpt: 350 })}\n\nPlan the article. Shape:\n{"title": "...", "central_question": "what the article answers (answerable from the sources)", "thesis": "the one claim it argues", "sections": [{"heading": "...", "points": ["..."], "sources": [1, 3], "words": 200}], "counterarguments": ["the strongest objection and how the article answers it"], "ending": "the last real point (not a summary)"}\nRules: 3 to 5 sections; section word counts add up to about ${words}; every point rests on a numbered source; include at least one counterargument; the thesis is more than a restatement of the topic.`,
   }),
 
-  draft: ({ topic, lang, words, sources, outline, today }) => ({
+  draft: ({ topic, lang, words, sources, outline, today, format }) => (isPost(format) ? {
+    system: `You write ${POSTS[format].name} posts that share researched facts. Every factual claim comes from the sources. ${header(lang)}\n\n${HUMAN_RULES[lang] || HUMAN_RULES.en}`,
+    user: `Topic: ${topic}\nLength: about ${words} words, never more than ${POSTS[format].maxChars} characters.\n${dateRule(today)}\n\n${sourceBlock(sources)}\n\nWrite the post.\n- ${postShape(format)}\n- After each claim taken from a source put its number in brackets: [2] or [1, 4]; they are removed before posting. Name the source of a key figure in words ("the IEA's 2025 report") when the source says who it is.\n- Copy numbers, names and dates exactly as the source has them. A claim no source supports is left out. No invented quotes.\nOutput the post only.`,
+  } : {
     system: `You are a senior journalist writing a researched article. Every factual claim comes from the sources. ${header(lang)}\n\n${HUMAN_RULES[lang] || HUMAN_RULES.en}`,
     user: `Topic: ${topic}\nLength: about ${words} words.\n${dateRule(today)}\n${outline ? `\nPlan (follow it, improve it where the sources allow):\n${JSON.stringify(outline)}\n` : '\nNo plan was made: plan briefly in your head, then write.\n'}\n${sourceBlock(sources)}\n\nWrite the article in Markdown.\n- Start with "# " and the title, then "## " section headings.\n- Open with a specific fact, scene or number, not a general statement.\n- After each claim taken from a source put its number in brackets: [2] or [1, 4]. Use only the numbers above.\n- Copy numbers, names and dates exactly as the source has them. A claim no source supports is left out. No invented quotes.\n- Do NOT write a sources list; it is added afterwards.\nOutput the article only.`,
   }),

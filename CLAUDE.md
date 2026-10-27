@@ -30,6 +30,14 @@ Pieces that run in different places:
     - The benchmark saves the judge's failed claims per article (`judgeFailed`).
     - `HUMAN_RULES` forbid writing about the sources ("the source does not say …"), and `countTells` counts that as `source-talk`. It was in 3 of 6 baseline articles; `bench/articles-baseline.json` was recounted with that entry.
     - The fact-check and the critique run in parallel (`Promise.all`).
+  - Social posts (`cli/write/formats.mjs` `POSTS`, one table for limits, fold, hashtags and word ranges) run the same pipeline:
+    - The pipeline takes `format: 'linkedin' | 'facebook'` and uses `POST_PHASES` (no outline, critique or audit) and the post branch of `prompts.draft`.
+    - Every editing pass gets `postEditRule`.
+    - `runChecks` adds `postChecks` on the text without its `[n]` markers.
+    - The result has `post` (`stripCitations`), `comment` (`firstComment`, the sources to paste as the first comment) and `article` (both, for the CLI).
+    - `postPlatform` and `postTopic` (intent.mjs) are checked before `isArticleRequest`, in the hook and in `autoRoute`, because `isArticleRequest` also matches «ανάρτηση». `postPlatform` returns null for a blog post. `parseArticleOptions(text, { post: true })` reads two-digit word counts.
+    - The web answer (`renderPostResult`) escapes the post into `<p>` paragraphs, so a model's `**` or `1.` is not turned into formatting the platform will not show.
+    - Follow-up edits of posts are not supported yet: `parseArticleAnswer` needs a "# " title.
 - Single source of truth: OpenRouter's address is `OPENROUTER_BASE_URL` in `cli/image/openrouter.mjs`, and the CLI's catalogue calls go through that adapter too. Chat versus Image API is decided by `viaOf()` in `cli/image/catalogue.mjs`. A tier is a price band (cheapest/middle/dearest third of the family, disjoint), `selectModels` fills the primaries from the tier's own band before borrowing from neighbouring bands, and `TIER_FOR_MODE` maps Vane's Speed/Balanced/Quality to budget/value/premium (the chat patch passes `mode:b.config.mode` to the hook; the CLI keeps `--tier`, default value). Image option lists (`FAMILIES`, `TIERS`, `VIAS`, `ASPECT_RATIOS`, `IMAGE_SIZES`) are defined once and imported by the CLI for validation and help text. The pinned Vane digest lives only in `docker-compose.yml`; CI greps it from there. Accepted duplication: SearXNG engines named in a patch must also be enabled in `settings.yml`, since they are two layers, and a comment in each points to the other. The README option table restates `vane --help`.
 - Two ways to install the patches and settings, both must keep working:
   - Both publish Vane's port on 127.0.0.1 only: Vane has no login and `GET /api/config` returns the provider API keys. So the CLI's default URL is `http://127.0.0.1:3000`, not `localhost`: Node and browsers try `::1` first, and another dev server listening on `[::1]:3000` then gets every call.

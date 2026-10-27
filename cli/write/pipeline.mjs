@@ -1,17 +1,22 @@
 // Article pipeline, after reasoner's article method (ARTICLE_METHOD_SPECIFICATION.md):
 //   sources -> outline -> draft -> fact-check -> critique -> revise -> style/copy -> audit.
+// A social post (`format`, formats.mjs) runs the same pipeline with fewer phases (POST_PHASES) and a post prompt.
 // Which phases run depends on the Vane mode (models.mjs PHASES). Sources come from Vane's own
 // research (`retrieve`, injected). Everything that talks to a model goes through llm.mjs, which
 // rejects cut-off, empty and "thinking" answers and walks the role's fallback chain.
 // Dependencies are injected, so the pipeline is tested with fakes. Failures are returned as
 // values ({ ok: false, error }); a phase that fails after the draft is skipped and listed in
 // `degraded`, so a weakened run is never presented as a clean one.
-import { checkCitations, renumber, runChecks, sourcesSection } from './checks.mjs';
+import { checkCitations, firstComment, renumber, runChecks, sourcesSection, stripCitations } from './checks.mjs';
+import { clampPostWords, isPost } from './formats.mjs';
 import { AUDIT_DIMENSIONS, MIN_CLAIM_SUPPORT, auditResult, claimLedger, claimSupportRatio } from './gate.mjs';
 import { countTells, detectLanguage, repairFinalNu, repairHomoglyphs, wordCount } from './language.mjs';
 import { createRoleCaller } from './llm.mjs';
-import { DEFAULT_MODE, MODES, PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
-import { prompts } from './prompts.mjs';
+import { DEFAULT_MODE, MODES, PHASES, POST_PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
+import { postEditRule, prompts } from './prompts.mjs';
+
+// The passes that write the whole text back; on a post each gets the shape it must keep.
+const EDITORS = new Set(['revise', 'polish', 'style', 'copy', 'rewrite']);
 
 export const MAX_SOURCES = 16;
 export const THIN_SOURCES = 4;
@@ -33,14 +38,17 @@ class Stop extends Error {}
 export function createArticlePipeline({ client, retrieve, log = () => {}, now = Date.now }) {
   const call = createRoleCaller({ client, log });
 
-  return async function writeArticle({ topic, mode = DEFAULT_MODE, lang, words, models, chains, prices, onProgress = () => {} }) {
+  // format: 'article', or a platform of formats.mjs POSTS ('linkedin', 'facebook') for a social post.
+  return async function writeArticle({ topic, mode = DEFAULT_MODE, lang, words, models, chains, prices, format = 'article', onProgress = () => {} }) {
     if (!MODES.includes(mode)) throw new Error(`unknown mode "${mode}"`);
+    const post = isPost(format);
+    if (!post && format !== 'article') throw new Error(`unknown format "${format}"`);
     const t0 = now();
     const today = new Date(t0).toISOString().slice(0, 10); // prompts give figures their year and prefer new sources
     lang ||= detectLanguage(topic);
-    words = clampWords(words);
+    words = post ? clampPostWords(words, format) : clampWords(words);
     chains ||= chainsFor(models);
-    const plan = PHASES[mode];
+    const plan = (post ? POST_PHASES : PHASES)[mode];
     const phases = [], degraded = [];
     let cost = 0, calls = 0, repaired = 0;
     const emit = (e) => { try { onProgress(e); } catch { /* a throwing listener must not stop the article */ } };
@@ -51,7 +59,9 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const started = now();
       // an editor writes the whole article back, which may already be longer than the target
       const size = Math.max(words, ctx.article ? wordCount(ctx.article) : 0);
-      const r = await call(role, prompts[role]({ topic, lang, words, today, ...ctx }), { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, size, lang), prices });
+      const prompt = prompts[role]({ topic, lang, words, today, format, ...ctx });
+      if (post && EDITORS.has(role)) prompt.user += postEditRule(format);
+      const r = await call(role, prompt, { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, size, lang), prices });
       calls += r.attempts.length;
       cost += r.cost;
       const rec = { phase: role, model: r.model || null, status: r.ok ? (r.fallback ? 'fallback' : 'ok') : 'failed', ms: now() - started, note: r.ok ? (r.fallback ? `${r.attempts.filter(a => a.problem).map(a => `${a.model}: ${a.problem}`).join('; ')}` : '') : r.errors.join('; ') };
@@ -200,16 +210,20 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       if (raw.invalid.length) degraded.push(`removed citations to sources that do not exist: ${raw.invalid.map(n => `[${n}]`).join(' ')}`);
       const { text, used } = renumber(body, sources);
       // with no citation at all `used` is empty, and the citation check must still see the sources to fail
-      const checks = runChecks(text, { lang, sources: used.length ? used : sources, targetWords: words });
+      const checks = runChecks(text, { lang, sources: used.length ? used : sources, targetWords: words, format });
       for (const i of checks.items) if (i.level === 'fail') degraded.push(`check "${i.name}" failed: ${i.detail}`);
       emit({ phase: 'done', status: 'done' });
+      // a post is published without its [n] markers, and its sources go in the first comment
+      const published = post ? { post: stripCitations(text), comment: firstComment(used, lang) } : null;
       return {
         ok: true,
-        article: text.trimEnd() + sourcesSection(used, lang),
-        title: titleOf(text),
+        format,
+        article: post ? `${published.post}${published.comment ? `\n\n---\n\n${published.comment}` : ''}\n` : text.trimEnd() + sourcesSection(used, lang),
+        ...published,
+        title: post ? '' : titleOf(text),
         language: lang,
         mode,
-        words: checks.words,
+        words: post ? wordCount(published.post) : checks.words,
         targetWords: words,
         sources: used,
         phases,
