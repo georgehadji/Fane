@@ -31,6 +31,13 @@ function failure(errors) {
   return { text: `${summary} ${next}`, details: raw ? `<details><summary>Details</summary><ul>${raw}</ul></details>` : '' };
 }
 
+// Shown while the models work: finished images are only added to the answer at the end, because
+// every answer update re-sends the whole answer, and each embedded image is megabytes.
+export function renderProgress(done, total) {
+  const names = done.map(modelLabel).map(n => `✓ ${escapeHtml(n)}`);
+  return [`_Generating images… ${done.length} of ${total} ready_`, names.join(' · ')].filter(Boolean).join('\n\n');
+}
+
 export function renderResult(result, prompt) {
   const subject = imageSubject(prompt);
   const images = result.images.filter(i => isImageUrl(i.dataUrl));

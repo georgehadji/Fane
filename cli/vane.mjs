@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { FAMILIES, TIERS, VIAS } from './image/catalogue.mjs';
 import { imageSubject, isImageRequest } from './image/intent.mjs';
 import { ASPECT_RATIOS, DEFAULT_IMAGES, DEFAULT_TEXT_MODEL, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
+import { parseImageOptions } from './image/intent.mjs';
 import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient, findOpenRouterKey } from './image/openrouter.mjs';
 
 // The defaults for every Fane tool (scripts/ import this object).
@@ -77,7 +78,7 @@ Image generation (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane):
       --tier <t>         value (most capable at or below the median price; default) | budget (cheapest)
                          | premium (most capable)
       --family <f>       ${FAMILIES.join(' | ')}; default from the prompt
-      --aspect <r>       ${ASPECT_RATIOS.join(' | ')} (default 1:1)
+      --aspect <r>       ${ASPECT_RATIOS.join(' | ')} (default 1:1, or as the prompt says: "widescreen", "16:9")
       --size <s>         ${IMAGE_SIZES.join(' | ')} (models that support it)
       --ref <file>       Reference image to edit or follow (repeatable)
       --out-dir <dir>    Where to save images (default: ./vane-images)
@@ -121,7 +122,7 @@ export function parseCli(argv) {
       'list-image-models': { type: 'boolean', default: false },
       tier: { type: 'string' },
       family: { type: 'string' },
-      aspect: { type: 'string', default: '1:1' },
+      aspect: { type: 'string' },
       size: { type: 'string' },
       ref: { type: 'string', multiple: true, default: [] },
       'out-dir': { type: 'string', default: 'vane-images' },
@@ -151,7 +152,7 @@ export function parseCli(argv) {
     if (values.via && values['image-model'].length) throw new UsageError('--via and --image-model cannot be combined');
     if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
     if (values.family && !FAMILIES.includes(values.family)) throw new UsageError(`Invalid --family "${values.family}". Use: ${FAMILIES.join(', ')}`);
-    if (!ASPECT_RATIOS.includes(values.aspect)) throw new UsageError(`Invalid --aspect "${values.aspect}". Use: ${ASPECT_RATIOS.join(', ')}`);
+    if (values.aspect !== undefined && !ASPECT_RATIOS.includes(values.aspect)) throw new UsageError(`Invalid --aspect "${values.aspect}". Use: ${ASPECT_RATIOS.join(', ')}`);
     if (values.size && !IMAGE_SIZES.includes(values.size.toUpperCase())) throw new UsageError(`Invalid --size "${values.size}". Use: ${IMAGE_SIZES.join(', ')}`);
     if (values.size) values.size = values.size.toUpperCase();
     if (values.stream) throw new UsageError('--stream does not apply to --image');
@@ -628,7 +629,10 @@ async function runImage(opts) {
     textModel: IMAGE_TEXT_MODEL,
     log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); },
   });
-  const r = await generate({ prompt: opts.query, count: opts.count, tier: opts.tier, family: opts.family, aspect: opts.aspect, size: opts.size, references, enhance: !opts['no-enhance'], models: opts['image-model'], via: opts.via });
+  // Flags win; a count or shape written in the prompt ("2 images", "widescreen") fills what is unset.
+  const words = parseImageOptions(opts.query);
+  const aspect = opts.aspect ?? words.aspect ?? '1:1';
+  const r = await generate({ prompt: opts.query, count: opts.count ?? words.count, tier: opts.tier, family: opts.family, aspect, size: opts.size, references, enhance: !opts['no-enhance'], models: opts['image-model'], via: opts.via });
   const saved = r.images.length ? await saveImages(r.images, opts['out-dir'], imageSubject(opts.query)) : [];
   if (opts.json) {
     console.log(JSON.stringify({ prompt: opts.query, intent: r.intent, models: r.models, enhancedPrompt: r.enhancedPrompt, rewrittenPrompt: r.rewrittenPrompt, requested: r.requested, images: saved, errors: r.errors }, null, 2));
@@ -637,7 +641,7 @@ async function runImage(opts) {
     if (r.enhancedPrompt) console.log(`Enhanced prompt: ${r.enhancedPrompt}`);
     if (r.rewrittenPrompt) console.log(`Rewritten prompt: ${r.rewrittenPrompt}`);
     for (const s of saved) {
-      const how = `${s.via} model${s.endpoint !== s.via ? `, via the ${s.endpoint === 'images' ? 'Image API' : 'chat endpoint'}` : ''}${s.aspect !== opts.aspect ? `, ${s.aspect} (nearest supported)` : ''}`;
+      const how = `${s.via} model${s.endpoint !== s.via ? `, via the ${s.endpoint === 'images' ? 'Image API' : 'chat endpoint'}` : ''}${s.aspect !== aspect ? `, ${s.aspect} (nearest supported)` : ''}`;
       console.log(`Saved ${s.path} (${s.model}, ${how}, ${Math.round(s.bytes / 1024)} KB, ~$${(s.pricePerImage ?? 0).toFixed(3)})`);
       if (s.text) console.log(`  ${s.model.split('/')[0]} said: ${s.text.length > 300 ? `${s.text.slice(0, 297)}...` : s.text}`);
     }

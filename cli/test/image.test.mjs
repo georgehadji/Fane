@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { pricePerImage, toModelInfo, buildCatalogue, capability, selectModels, emitsSvg } from '../image/catalogue.mjs';
-import { classifyByRules, classifyIntent, parseClassification, isImageRequest, imageSubject } from '../image/intent.mjs';
+import { classifyByRules, classifyIntent, parseClassification, isImageRequest, imageSubject, parseImageOptions } from '../image/intent.mjs';
 import { heuristicRewrite, shouldRetry, isPolicyError } from '../image/policy.mjs';
 import { sniffMime, toDataUrl, collectImageCandidates, decodeDataUrl } from '../image/extract.mjs';
 import { isPrivateAddress, safeDownload } from '../image/download.mjs';
@@ -401,11 +401,61 @@ test('hook ignores questions and answers image requests with markdown images', a
   const seen = [];
   const generator = async (args) => { seen.push(args); return { images: [{ dataUrl: PNG_URL, model: 'black-forest-labs/flux', name: 'Black Forest Labs: FLUX.2 Pro', pricePerImage: 0.002, text: null }], requested: 2, complete: false, errors: [], rewrittenPrompt: null }; };
   assert.equal(await handleImageRequest('create an image of donald duck in a playground', { ...io, generator }), true);
-  assert.deepEqual(seen[0], { prompt: 'create an image of donald duck in a playground', format: 'jpeg' });
+  assert.equal(seen[0].prompt, 'create an image of donald duck in a playground');
+  assert.equal(seen[0].format, 'jpeg');
+  assert.equal(typeof seen[0].onProgress, 'function');
+  assert.equal('count' in seen[0] || 'aspect' in seen[0], false);
   const md = blocks.get('b1');
   assert.match(md, /<img src="data:image\/png;base64,[^"]+" alt="Image 1 of 1: donald duck in a playground \(FLUX\.2 Pro\)"/);
   assert.match(md, /<em>FLUX\.2 Pro · ~\$0\.002<\/em>/);
   assert.match(md, /> Made 1 of 2 images\./);
+});
+
+test('hook shows progress while images land, then the grid; words in the prompt set count and shape', async () => {
+  const shown = [];
+  let n = 0;
+  const io = { emit: () => 'b', update: (id, md) => shown.push(md) };
+  const generator = async (args) => {
+    args.onProgress({ ready: 1, total: 2, model: 'a/one', name: 'A: One' });
+    args.onProgress({ ready: 2, total: 2, model: 'b/two', name: 'B: Two' });
+    seen.push(args);
+    return { images: [{ dataUrl: PNG_URL, model: 'a/one', pricePerImage: 0.01 }], requested: 2, complete: false, errors: [] };
+  };
+  const seen = [];
+  await handleImageRequest('create 2 images of a fox, widescreen', { ...io, generator });
+  assert.equal(seen[0].count, 2);
+  assert.equal(seen[0].aspect, '16:9');
+  assert.equal(shown[0], '_Generating images… 1 of 2 ready_\n\n✓ One');
+  assert.equal(shown[1], '_Generating images… 2 of 2 ready_\n\n✓ One · ✓ Two');
+  assert.match(shown[2], /^<div style="display:grid/);
+});
+
+test('generate calls onProgress per image, and a throwing listener does not fail the run', async () => {
+  const events = [];
+  const gen = createImageGenerator({ client: fakeClient(), download: async () => PNG_URL });
+  const r = await gen({ prompt: 'x', count: 3, enhance: false, onProgress: (p) => events.push(p) });
+  assert.equal(r.images.length, 3);
+  assert.deepEqual(events.map(e => e.ready).sort(), [1, 2, 3]);
+  assert.ok(events.every(e => e.total === 3 && e.model && e.name));
+  const bad = await createImageGenerator({ client: fakeClient(), download: async () => PNG_URL })({ prompt: 'x', count: 2, enhance: false, onProgress: () => { throw new Error('boom'); } });
+  assert.equal(bad.images.length, 2);
+});
+
+test('isImageRequest accepts counts and shape words, not coding questions', () => {
+  for (const q of ['create 2 widescreen images of a lighthouse', 'make three different pictures of a fox', 'generate a high-res wallpaper of a beach', 'create a new square logo for a bakery']) assert.ok(isImageRequest(q), q);
+  for (const q of ['make the image responsive', 'create a React image carousel', 'create a user icon component', 'how do I resize an image in CSS']) assert.ok(!isImageRequest(q), q);
+});
+
+test('parseImageOptions reads count and shape from the prompt, ignoring scene words', () => {
+  assert.deepEqual(parseImageOptions('make 2 images of a fox'), { count: 2 });
+  assert.deepEqual(parseImageOptions('create 2 widescreen images of a lighthouse'), { count: 2, aspect: '16:9' });
+  assert.deepEqual(parseImageOptions('Create three different pictures of a fox in a 16:9 format'), { count: 3, aspect: '16:9' });
+  assert.deepEqual(parseImageOptions('a widescreen photo of a beach'), { aspect: '16:9' });
+  assert.deepEqual(parseImageOptions('a tall image of a tree'), { aspect: '9:16' });
+  assert.deepEqual(parseImageOptions('a square image of a cat'), { aspect: '1:1' });
+  assert.deepEqual(parseImageOptions('a wide shot of 3 cats on a square table at 10:30'), {});
+  assert.deepEqual(parseImageOptions('a poster at 5:4'), {});
+  assert.deepEqual(parseImageOptions(''), {});
 });
 
 test('hook reads the OpenRouter key from Vane config and explains when it is missing', async () => {

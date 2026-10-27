@@ -3,8 +3,8 @@
 // is answered with generated images instead of a text answer, using the same pipeline as
 // `vane --image` and the OpenRouter key from Vane's own provider settings.
 import { readFile } from 'node:fs/promises';
-import { isImageRequest } from './intent.mjs';
-import { renderResult } from './present.mjs';
+import { isImageRequest, parseImageOptions } from './intent.mjs';
+import { renderProgress, renderResult } from './present.mjs';
 import { DEFAULT_TEXT_MODEL, createImageGenerator } from './generate.mjs';
 import { createOpenRouterClient, findOpenRouterKey } from './openrouter.mjs';
 import { safeDownload } from './download.mjs';
@@ -29,7 +29,9 @@ export async function handleImageRequest(query, { emit, update, configPath, log 
     textModel: process.env.VANE_IMAGE_TEXT_MODEL || DEFAULT_TEXT_MODEL,
     log,
   });
-  const result = await generate({ prompt: query, format: 'jpeg' });
+  const done = [];
+  const onProgress = (p) => { done.push(p); update(id, renderProgress(done, p.total)); };
+  const result = await generate({ prompt: query, format: 'jpeg', ...parseImageOptions(query), onProgress });
   update(id, renderResult(result, query));
   return true;
 }

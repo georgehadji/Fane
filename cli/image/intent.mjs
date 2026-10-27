@@ -3,7 +3,7 @@
 // not (no key, no credits, bad JSON). The tier is always best value (DEFAULT_TIER) unless
 // --tier says otherwise: "highly detailed" in a prompt is not a reason to pay 10x per image.
 // An explicit --family / --tier always wins.
-import { DEFAULT_TIER, FAMILIES } from './catalogue.mjs';
+import { ASPECT_RATIOS, DEFAULT_TIER, FAMILIES } from './catalogue.mjs';
 
 const RULES = [
   ['vector', /\b(svg|vector|logo|icon|line[- ]?art|monogram|emblem)\b/i],
@@ -14,7 +14,7 @@ const RULES = [
 
 // "create an image of ...", "draw me a logo for ...": a request for a picture, not a question.
 // Vane's answer pipeline can only write text, so the CLI sends these to the image pipeline.
-const IMAGE_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:create|generate|make|draw|paint|render|design|produce|illustrate)\s+(?:me\s+|us\s+)?(?:an?\s+|some\s+|\d+\s+)?(?:new\s+)?(?:image|picture|pic|photo(?:graph)?|illustration|drawing|painting|sketch|logo|icon|poster|wallpaper|artwork|render(?:ing)?|portrait|cartoon)s?\b/i;
+const IMAGE_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:create|generate|make|draw|paint|render|design|produce|illustrate)\s+(?:me\s+|us\s+)?(?:(?:an?|some|\d+|one|two|three|four|five|six|seven|eight)\s+)?(?:(?:new|different|separate|wide|widescreen|landscape|portrait|tall|vertical|square|detailed|realistic|beautiful|high[- ]res(?:olution)?)\s+){0,2}(?:image|picture|pic|photo(?:graph)?|illustration|drawing|painting|sketch|logo|icon|poster|wallpaper|artwork|render(?:ing)?|portrait|cartoon)s?\b/i;
 // Drawing verbs need no noun ("draw a fox"), except figures of speech ("draw a conclusion").
 const DRAW_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:draw|paint|sketch|illustrate)\s+(?:me\s+|us\s+)?(?:an?|the|some|\d+|my|our)\s+(?!(?:conclusions?|comparisons?|distinctions?|parallels?|lines? between|picture of (?:the|how|why|what))\b)/i;
 export const isImageRequest = (text) => IMAGE_REQUEST.test(String(text || '')) || DRAW_REQUEST.test(String(text || ''));
@@ -54,4 +54,26 @@ export async function classifyIntent(prompt, { complete, hasReference = false, f
   }
   picked ||= classifyByRules(prompt, { hasReference });
   return { ...picked, family: family || picked.family, tier: tier || picked.tier };
+}
+
+// Count and shape asked for in the prompt itself: "make 2 images of ...", "a 16:9 picture",
+// "a wide image", "widescreen". Only unambiguous forms count ("wide shot", "a square table"
+// and "3 cats" are about the scene). An explicit --count / --aspect wins over these words.
+const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
+// The adjective list repeats IMAGE_REQUEST's, which decides whether this is an image request at all.
+const COUNT = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight)\s+(?:(?:new|different|separate|wide|widescreen|landscape|portrait|tall|vertical|square|detailed|realistic|beautiful|high[- ]res(?:olution)?)\s+){0,2}(?:images?|pictures?|photos?|variations?|versions?)\b/i;
+const RATIO = /\b(\d{1,2}):(\d{1,2})\b/;
+const SHAPE = /\b(wide|landscape|portrait|tall|vertical|square)[\s-]+(?:format|orientation|aspect|images?|pictures?|photos?|versions?)\b|\b(widescreen)\b/i;
+const SHAPE_RATIO = { wide: '16:9', widescreen: '16:9', landscape: '4:3', portrait: '3:4', tall: '9:16', vertical: '9:16', square: '1:1' };
+
+export function parseImageOptions(text) {
+  const t = String(text || '');
+  const out = {};
+  const c = COUNT.exec(t)?.[1];
+  if (c) out.count = Number(c) || NUMBER_WORDS[c.toLowerCase()];
+  const r = RATIO.exec(t);
+  const word = SHAPE.exec(t);
+  const aspect = r && ASPECT_RATIOS.includes(r[0]) ? r[0] : word ? SHAPE_RATIO[(word[1] || word[2]).toLowerCase()] : null;
+  if (aspect) out.aspect = aspect;
+  return out;
 }

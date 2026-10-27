@@ -13,6 +13,9 @@ export const FAMILIES = ['vector', 'photoreal', 'text_in_image', 'design', 'gene
 export const TIERS = ['value', 'budget', 'premium'];
 export const DEFAULT_TIER = 'value';
 export const FALLBACKS_PER_IMAGE = 4;
+// Aspect ratios Fane accepts, with the words that describe them to a model that ignores image_config.
+export const ASPECT_WORDS = { '1:1': 'square', '16:9': 'wide landscape', '9:16': 'tall portrait', '4:3': 'landscape', '3:4': 'portrait', '3:2': 'landscape', '2:3': 'portrait', '21:9': 'ultra-wide panorama' };
+export const ASPECT_RATIOS = Object.keys(ASPECT_WORDS);
 
 // The only hand-maintained ranking: size/quality words in model ids, weakest first.
 // '' is an id with none of them (a plain full-size model). "preview" loses to its stable twin.

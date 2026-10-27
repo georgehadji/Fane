@@ -4,7 +4,7 @@
 //   still missing (model rewrite, then local rewrite).
 // Dependencies (OpenRouter client, URL downloader) are injected, so the pipeline is
 // tested with fakes. Failures are returned as values; only programming errors throw.
-import { DEFAULT_TIER, buildCatalogue, emitsSvg, selectModels, viaOf } from './catalogue.mjs';
+import { ASPECT_RATIOS, ASPECT_WORDS, DEFAULT_TIER, buildCatalogue, emitsSvg, selectModels, viaOf } from './catalogue.mjs';
 import { classifyIntent } from './intent.mjs';
 import { REWRITE_SYSTEM, hasRiskTerms, heuristicRewrite, shouldRetry } from './policy.mjs';
 import { collectImageCandidates, sniffMime } from './extract.mjs';
@@ -18,8 +18,7 @@ export function nearestRatio(want, accepted) {
   return options.reduce((best, r) => (Math.abs(Math.log(val(r) / target)) < Math.abs(Math.log(val(best) / target)) ? r : best));
 }
 
-const ASPECT_WORDS = { '1:1': 'square', '16:9': 'wide landscape', '9:16': 'tall portrait', '4:3': 'landscape', '3:4': 'portrait', '3:2': 'landscape', '2:3': 'portrait', '21:9': 'ultra-wide panorama' };
-export const ASPECT_RATIOS = Object.keys(ASPECT_WORDS);
+export { ASPECT_RATIOS };
 export const IMAGE_SIZES = ['1K', '2K', '4K'];
 export const MAX_IMAGES = 8; // every image is a paid call, fanned out in parallel
 export const DEFAULT_IMAGES = 4; // one per model, from different labs where possible
@@ -114,13 +113,13 @@ export function createImageGenerator({ client, download, textModel = null, log =
 
   // Runs the chains whose slot in `images` is still empty, all in parallel; each chain tries
   // its models in order until one draws. A key/credit error stops every chain.
-  async function attempt(prompt, chains, images, opts) {
+  async function attempt(prompt, chains, images, opts, onImage) {
     const errors = [];
     let fatal = null;
     await Promise.all(chains.map(async (chain, slot) => {
       for (const m of images[slot] ? [] : chain) {
         if (fatal) return;
-        try { images[slot] = { ...(await generateOne(m, prompt, opts)), model: m }; return; } catch (err) {
+        try { images[slot] = { ...(await generateOne(m, prompt, opts)), model: m }; onImage(m); return; } catch (err) {
           errors.push(`${m.id}: ${err.message}`);
           if (FATAL.has(err.status)) fatal ||= err;
         }
@@ -140,9 +139,10 @@ export function createImageGenerator({ client, download, textModel = null, log =
     return heuristicRewrite(prompt);
   }
 
+  // onProgress({ready, total, model, name}) is called each time an image lands.
   // models: exact catalogue ids to use (no substitution); via: 'chat' | 'images' limits the
   // automatic choice to one kind of model. count defaults to one image per listed model.
-  return async function generate({ prompt, count, tier, family, aspect = '1:1', size, references = [], enhance = true, models, via, format }) {
+  return async function generate({ prompt, count, tier, family, aspect = '1:1', size, references = [], enhance = true, models, via, format, onProgress }) {
     count = Math.min(Math.max(1, Math.trunc(count ?? (models?.length || DEFAULT_IMAGES))), MAX_IMAGES);
     const started = now();
     const result = { ok: false, complete: false, requested: count, intent: null, models: [], enhancedPrompt: null, rewrittenPrompt: null, images: [], errors: [] };
@@ -180,7 +180,9 @@ export function createImageGenerator({ client, download, textModel = null, log =
     const opts = { aspect, size, references, format };
     const slots = chains.map(() => null);
     const drawn = () => slots.filter(Boolean).length;
-    let run = await attempt(finalPrompt, chains, slots, opts);
+    // Progress is cosmetic: a throwing listener must never fail an image run.
+    const onImage = (m) => { try { onProgress?.({ ready: drawn(), total: want, model: m.id, name: m.name }); } catch (err) { log(`progress listener failed: ${err.message}`); } };
+    let run = await attempt(finalPrompt, chains, slots, opts, onImage);
     result.errors.push(...run.errors);
 
     // Retry chain for the images still missing: a model-written rewrite after a refusal,
@@ -197,7 +199,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
       if (!p || tried.has(p)) continue;
       tried.add(p);
       log('retrying with a rewritten prompt');
-      run = await attempt(p, chains, slots, opts);
+      run = await attempt(p, chains, slots, opts, onImage);
       result.errors.push(...run.errors.map(e => `after rewrite: ${e}`));
     }
 
