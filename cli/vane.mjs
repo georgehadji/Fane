@@ -19,7 +19,9 @@ import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient, findOpenR
 
 // The defaults for every Fane tool (scripts/ import this object).
 export const DEFAULTS = {
-  url: process.env.VANE_URL || 'http://localhost:3000',
+  // 127.0.0.1, not localhost: Vane is published on 127.0.0.1 only, and "localhost" resolves to ::1 first, where
+  // another dev server on port 3000 answered every call with 404 in the middle of a benchmark run.
+  url: process.env.VANE_URL || 'http://127.0.0.1:3000',
   model: process.env.VANE_CHAT_MODEL || 'google/gemini-3.8-flash',
   embedding: process.env.VANE_EMBEDDING_MODEL || 'Xenova/all-MiniLM-L6-v2',
   container: process.env.VANE_CONTAINER || 'vane',
