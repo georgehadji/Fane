@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { pricePerImage, toModelInfo, buildCatalogue, capability, selectModels, emitsSvg, TIER_FOR_MODE } from '../image/catalogue.mjs';
-import { classifyByRules, classifyIntent, parseClassification, isImageRequest, imageSubject, parseImageOptions } from '../image/intent.mjs';
+import { classifyByRules, classifyIntent, parseClassification, isImageRequest, imageSubject, parseImageOptions, isImageEdit, pickReferenceIndex } from '../image/intent.mjs';
 import { heuristicRewrite, shouldRetry, isPolicyError } from '../image/policy.mjs';
 import { sniffMime, toDataUrl, collectImageCandidates, decodeDataUrl } from '../image/extract.mjs';
 import { isPrivateAddress, safeDownload } from '../image/download.mjs';
@@ -428,8 +428,8 @@ test('hook shows progress while images land, then the grid; words in the prompt 
   let n = 0;
   const io = { emit: () => 'b', update: (id, md) => shown.push(md) };
   const generator = async (args) => {
-    args.onProgress({ ready: 1, total: 2, model: 'a/one', name: 'A: One' });
-    args.onProgress({ ready: 2, total: 2, model: 'b/two', name: 'B: Two' });
+    args.onProgress({ ready: 1, total: 2, slot: 0, model: 'a/one', name: 'A: One', image: { dataUrl: PNG_URL, model: 'a/one', name: 'A: One' } });
+    args.onProgress({ ready: 2, total: 2, slot: 1, model: 'b/two', name: 'B: Two', image: { dataUrl: PNG_URL, model: 'b/two', name: 'B: Two' } });
     seen.push(args);
     return { images: [{ dataUrl: PNG_URL, model: 'a/one', pricePerImage: 0.01 }], requested: 2, complete: false, errors: [] };
   };
@@ -453,6 +453,87 @@ test('hook links stored images, and embeds one that cannot be stored', async () 
   const md = shown.at(-1);
   assert.equal(md.split(`<img src="${link}"`).length - 1, 1);
   assert.equal(md.split('<img src="data:image/png;base64,').length - 1, 1);
+});
+
+test('hook: finished images are stored on arrival, shown at once, and linked once in the final answer', async () => {
+  const shown = [];
+  const stored = [];
+  const store = { put: async (u) => { stored.push(u); return `/api/uploads?fane-image=${String(stored.length).repeat(64)}.png`; }, get: async () => '' };
+  const generator = async (args) => {
+    args.onProgress({ ready: 1, total: 2, slot: 1, model: 'b/two', name: 'B: Two', image: { dataUrl: PNG_URL, model: 'b/two', name: 'B: Two' } });
+    args.onProgress({ ready: 2, total: 2, slot: 0, model: 'a/one', name: 'A: One', image: { dataUrl: PNG_URL, model: 'a/one', name: 'A: One' } });
+    return { images: [{ dataUrl: PNG_URL, model: 'a/one', name: 'A: One' }, { dataUrl: PNG_URL, model: 'b/two', name: 'B: Two' }], requested: 2, complete: true, errors: [] };
+  };
+  await handleImageRequest('draw a fox', { emit: () => 'b', update: (id, md) => shown.push(md), log: () => {}, generator, store });
+  assert.equal(stored.length, 2); // once per image, not again for the final answer
+  assert.match(shown[0], /^<div style="display:grid[^]*1 of 2 ready_$/);
+  assert.equal(shown[0].split('<img ').length - 1, 1);
+  assert.equal(shown[1].split('<img ').length - 1, 2);
+  assert.ok(shown[1].indexOf('/api/uploads?fane-image=2') < shown[1].indexOf('/api/uploads?fane-image=1')); // slot order, not arrival order
+  assert.ok(!shown.at(-1).includes('base64'));
+  assert.equal(shown.at(-1).split('<img ').length - 1, 2);
+});
+
+test('isImageEdit reads edits, not questions; pickReferenceIndex finds "the second one"', () => {
+  for (const q of ['make it a watercolour', 'Now at night', 'ok, add a red hat', 'can you make the second one darker', 'in the style of Monet', 'with a blue sky', 'more contrast']) assert.ok(isImageEdit(q), q);
+  for (const q of ['what is this fox called?', 'why is it orange', 'explain the lighting', 'thanks', 'draw a cat']) assert.ok(!isImageEdit(q), q);
+  assert.equal(pickReferenceIndex('make it darker', 4), 0);
+  assert.equal(pickReferenceIndex('make the second one darker', 4), 1);
+  assert.equal(pickReferenceIndex('change image 3 to blue', 4), 2);
+  assert.equal(pickReferenceIndex('make #4 bigger', 4), 3);
+  assert.equal(pickReferenceIndex('make the fourth one red', 2), 0); // not there: the first
+  assert.equal(pickReferenceIndex('constructor toString', 4), 0);
+});
+
+test('hook: a follow-up edit after Fane images uses the earlier image as the reference', async () => {
+  const link = (c) => `/api/uploads?fane-image=${c.repeat(64)}.jpg`;
+  const history = [{ role: 'user', content: 'draw a fox' }, { role: 'assistant', content: `<img src="${link('a')}"><img src="${link('b')}">` }];
+  const shown = [];
+  const calls = [];
+  const generator = async (args) => { calls.push(args); return { images: [{ dataUrl: PNG_URL, model: 'a/one' }], requested: 1, complete: true, errors: [] }; };
+  const store = { get: async (u) => `data:image/png;base64,FROM-${u.slice(-9)}`, put: async () => link('c') };
+  const io = { emit: () => 'b', update: (id, md) => shown.push(md), log: () => {}, generator, store };
+
+  assert.equal(await handleImageRequest('make the second one a watercolour', { ...io, history }), true);
+  assert.deepEqual(calls[0].references, [`data:image/png;base64,FROM-${link('b').slice(-9)}`]);
+  assert.equal(calls[0].enhance, false);
+  assert.match(shown.at(-1), /> Edited image 2 of the previous answer\./);
+
+  // the browser's history can hold a partial copy of the answer: Vane's database copy wins, and
+  // the history is used only when lastAnswer is missing, fails or has nothing
+  const partial = [{ role: 'assistant', content: `<img src="${link('a')}">` }];
+  const full = async () => `<img src="${link('a')}"><img src="${link('b')}">`;
+  calls.length = 0;
+  await handleImageRequest('change image 2 to darker', { ...io, history: partial, lastAnswer: full });
+  assert.deepEqual(calls[0].references, [`data:image/png;base64,FROM-${link('b').slice(-9)}`]);
+  for (const lastAnswer of [async () => { throw new Error('db down'); }, async () => null, undefined]) {
+    calls.length = 0;
+    await handleImageRequest('change image 2 to darker', { ...io, history: partial, lastAnswer });
+    assert.deepEqual(calls[0].references, [`data:image/png;base64,FROM-${link('a').slice(-9)}`]); // image 2 is not there: the first
+  }
+  assert.equal(await handleImageRequest('make it blue', { ...io, lastAnswer: async () => 'a plain text answer' }), false);
+
+  // not an edit: a question, a fresh image request, no earlier images, an earlier text answer
+  assert.equal(await handleImageRequest('why is it orange?', { ...io, history }), false);
+  assert.equal(await handleImageRequest('make it blue', { ...io, history: [{ role: 'assistant', content: 'a plain text answer' }] }), false);
+  assert.equal(await handleImageRequest('make it blue', { ...io, history: [] }), false);
+  assert.equal(await handleImageRequest('make it blue', { ...io }), false);
+  assert.equal(await handleImageRequest('make it blue', { ...io, store: null, history }), false);
+  const before = calls.length;
+  assert.equal(await handleImageRequest('create an image of a dog', { ...io, history }), true);
+  assert.equal(calls[before].references, undefined);
+  assert.equal(calls[before].enhance, undefined);
+});
+
+test('hook: an earlier image that is gone is explained, not guessed', async () => {
+  const history = [{ role: 'assistant', content: `<img src="/api/uploads?fane-image=${'a'.repeat(64)}.jpg">` }];
+  const shown = [];
+  const store = { get: async () => { throw new Error('ENOENT'); }, put: async () => '' };
+  let ran = false;
+  const generator = async () => { ran = true; return { images: [], requested: 1, complete: false, errors: [] }; };
+  assert.equal(await handleImageRequest('make it blue', { emit: () => 'b', update: (id, md) => shown.push(md), log: () => {}, generator, store, history }), true);
+  assert.equal(ran, false);
+  assert.match(shown.at(-1), /no longer stored/);
 });
 
 test("hook maps Vane's optimization mode to the price tier", async () => {

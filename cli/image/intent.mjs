@@ -77,3 +77,19 @@ export function parseImageOptions(text) {
   if (aspect) out.aspect = aspect;
   return out;
 }
+
+// A follow-up that changes the images of the previous answer: "make it a watercolour", "now at
+// night", "add a hat", "in the style of ...". The caller only asks this when the previous
+// answer was Fane's images, so the words may be short. Questions are not edits.
+const EDIT_START = /^\s*(?:(?:ok(?:ay)?|now|and|but|then|please|can you|could you)[,.]?\s+)*(?:make|turn|change|add|remove|replace|redo|recolou?r|restyle|try|give|put|keep|use|same|again|more|less|in|at|as|during|under|with|without|but)\b/i;
+const QUESTION_START = /^\s*(?:what|why|how|who|when|where|which|is|are|does|do|did|explain|tell|describe)\b/i;
+export const isImageEdit = (text) => EDIT_START.test(String(text || '')) && !QUESTION_START.test(String(text || ''));
+
+// Which of the earlier images an edit means: "the second one", "image 3", "#2"; the first by default.
+const ORDINALS = { first: 0, '1st': 0, second: 1, '2nd': 1, third: 2, '3rd': 2, fourth: 3, '4th': 3 };
+export function pickReferenceIndex(text, count) {
+  const t = String(text || '').toLowerCase();
+  const word = t.split(/\W+/).find(w => Object.hasOwn(ORDINALS, w));
+  const n = word !== undefined ? ORDINALS[word] : /(?:image|picture|number|#)\s*(\d)\b/.exec(t)?.[1] - 1;
+  return Number.isInteger(n) && n >= 0 && n < count ? n : 0;
+}

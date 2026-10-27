@@ -64,3 +64,20 @@ test('the answer links stored images and no longer embeds them', () => {
 test('storeDirFor puts the images next to the config file', () => {
   assert.equal(storeDirFor('/home/vane/data/config.json').split(String.fromCharCode(92)).join('/'), '/home/vane/data/fane-images');
 });
+
+test('storedUrlsIn finds the links of an earlier answer, in order, once each', async () => {
+  const { storedUrlsIn } = await import('../image/store.mjs');
+  const a = imageUrl(`${'a'.repeat(64)}.jpg`), b = imageUrl(`${'b'.repeat(64)}.png`);
+  const html = `<a href="${a}"><img src="${a}"></a><a href="${b}"><img src="${b}"></a> and /api/uploads?fane-image=../x.png`;
+  assert.deepEqual(storedUrlsIn(html), [a, b]);
+  assert.deepEqual(storedUrlsIn('no images here'), []);
+  assert.deepEqual(storedUrlsIn(undefined), []);
+});
+
+test('get turns a stored link back into a data URL, and refuses anything else', async () => {
+  const name = `${'a'.repeat(64)}.png`;
+  const store = createImageStore({ dir: '/d', fs: fakeFs(), read: async (p) => { assert.ok(p.includes(name)); return PNG; } });
+  assert.equal(await store.get(imageUrl(name)), PNG_URL);
+  await assert.rejects(store.get('/api/uploads?fane-image=../../etc/passwd'), /not a stored image link/);
+  await assert.rejects(store.get(PNG_URL), /not a stored image link/);
+});

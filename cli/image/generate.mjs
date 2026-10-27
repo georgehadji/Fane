@@ -29,6 +29,8 @@ const ENHANCE_SYSTEM = 'You are an image-prompt engineer. Expand the description
 const unquote = (s) => String(s || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
 const FATAL = new Set([401, 402]); // bad key or no credits: every model fails the same way
 
+const toResultImage = (i) => ({ dataUrl: i.dataUrl, model: i.model.id, name: i.model.name, via: viaOf(i.model), endpoint: i.endpoint, aspect: i.aspect, pricePerImage: i.model.price, text: i.text });
+
 export function createImageGenerator({ client, download, textModel = null, log = () => {}, now = Date.now }) {
   const complete = textModel ? (system, user) => client.complete(textModel, system, user) : null;
 
@@ -119,7 +121,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
     await Promise.all(chains.map(async (chain, slot) => {
       for (const m of images[slot] ? [] : chain) {
         if (fatal) return;
-        try { images[slot] = { ...(await generateOne(m, prompt, opts)), model: m }; onImage(m); return; } catch (err) {
+        try { images[slot] = { ...(await generateOne(m, prompt, opts)), model: m }; onImage(slot); return; } catch (err) {
           errors.push(`${m.id}: ${err.message}`);
           if (FATAL.has(err.status)) fatal ||= err;
         }
@@ -139,7 +141,8 @@ export function createImageGenerator({ client, download, textModel = null, log =
     return heuristicRewrite(prompt);
   }
 
-  // onProgress({ready, total, model, name}) is called each time an image lands.
+  // onProgress({ready, total, slot, model, name, image}) is called each time an image lands; image is
+  // the same object result.images will hold.
   // models: exact catalogue ids to use (no substitution); via: 'chat' | 'images' limits the
   // automatic choice to one kind of model. count defaults to one image per listed model.
   return async function generate({ prompt, count, tier, family, aspect = '1:1', size, references = [], enhance = true, models, via, format, onProgress }) {
@@ -181,7 +184,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
     const slots = chains.map(() => null);
     const drawn = () => slots.filter(Boolean).length;
     // Progress is cosmetic: a throwing listener must never fail an image run.
-    const onImage = (m) => { try { onProgress?.({ ready: drawn(), total: want, model: m.id, name: m.name }); } catch (err) { log(`progress listener failed: ${err.message}`); } };
+    const onImage = (slot) => { try { onProgress?.({ ready: drawn(), total: want, slot, model: slots[slot].model.id, name: slots[slot].model.name, image: toResultImage(slots[slot]) }); } catch (err) { log(`progress listener failed: ${err.message}`); } };
     let run = await attempt(finalPrompt, chains, slots, opts, onImage);
     result.errors.push(...run.errors);
 
@@ -204,7 +207,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
     }
 
     const images = slots.filter(Boolean);
-    result.images = images.map(i => ({ dataUrl: i.dataUrl, model: i.model.id, name: i.model.name, via: viaOf(i.model), endpoint: i.endpoint, aspect: i.aspect, pricePerImage: i.model.price, text: i.text }));
+    result.images = images.map(toResultImage);
     result.ok = images.length > 0;
     result.complete = images.length >= want;
     result.elapsedMs = now() - started;

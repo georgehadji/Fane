@@ -34,11 +34,18 @@ function failure(errors) {
   return { text: `${summary} ${next}`, details: raw ? `<details><summary>Details</summary><ul>${raw}</ul></details>` : '' };
 }
 
-// Shown while the models work: finished images are only added to the answer at the end, because
-// every answer update re-sends the whole answer, and each embedded image is megabytes.
-export function renderProgress(done, total) {
-  const names = done.map(modelLabel).map(n => `✓ ${escapeHtml(n)}`);
-  return [`_Generating images… ${done.length} of ${total} ready_`, names.join(' · ')].filter(Boolean).join('\n\n');
+const grid = (images, subject, n = images.length) => `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">${images.map((img, i) => figure(img, subject, i + 1, n)).join('')}</div>`;
+
+// Shown while the models work. A finished image is stored the moment it lands, so it appears in
+// the answer at once (a link is tiny). One that could not be stored is only named: every answer
+// update re-sends the whole answer, and an embedded image is megabytes. Vane's browser keeps this
+// text as the earlier answer until the page is reloaded, so the links in it are what a follow-up
+// edit finds.
+export function renderProgress(done, total, prompt = '') {
+  const sorted = [...done].sort((x, y) => x.slot - y.slot);
+  const shown = sorted.filter(i => isStoredUrl(i.url));
+  const named = sorted.filter(i => !isStoredUrl(i.url)).map(i => `✓ ${escapeHtml(modelLabel(i))}`).join(' · ');
+  return [shown.length ? grid(shown, imageSubject(prompt), total) : null, `_Generating images… ${done.length} of ${total} ready_`, named || null].filter(Boolean).join('\n\n');
 }
 
 export function renderResult(result, prompt) {
@@ -48,12 +55,12 @@ export function renderResult(result, prompt) {
     const f = failure(result.errors);
     return [`**No images this time.** ${f.text}`, f.details].filter(Boolean).join('\n\n');
   }
-  const grid = `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">${images.map((img, i) => figure(img, subject, i + 1, images.length)).join('')}</div>`;
   const total = images.reduce((sum, i) => sum + (i.pricePerImage || 0), 0);
   const summary = [`${images.length} image${images.length > 1 ? 's' : ''}`, total ? `~$${total.toFixed(3)}` : null, result.elapsedMs ? formatDuration(result.elapsedMs) : null].filter(Boolean).join(' · ');
   const notes = [
+    result.editedImage ? `Edited image ${result.editedImage} of the previous answer.` : null,
     result.rewrittenPrompt ? `Rewritten after a refusal: ${escapeHtml(result.rewrittenPrompt)}` : null,
     !result.complete ? `Made ${images.length} of ${result.requested} images. ${failure(result.errors).text}` : null,
   ].filter(Boolean).map(n => `> ${n}`);
-  return [grid, summary, ...notes].join('\n\n');
+  return [grid(images, subject), summary, ...notes].join('\n\n');
 }

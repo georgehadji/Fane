@@ -25,9 +25,23 @@ export const storeDirFor = (configPath) => join(dirname(configPath), 'fane-image
 export const imageUrl = (name) => `${IMAGE_ROUTE}?${IMAGE_PARAM}=${name}`;
 export const isStoredUrl = (url) => typeof url === 'string' && url.startsWith(`${IMAGE_ROUTE}?${IMAGE_PARAM}=`) && IMAGE_NAME.test(url.slice(IMAGE_ROUTE.length + IMAGE_PARAM.length + 2));
 
-// put(dataUrl) -> link to the stored image. Rejects what is not a storable image.
-export function createImageStore({ dir, fs = { mkdir, writeFile } }) {
+// The stored-image links in a piece of text (an earlier answer), in order, without repeats.
+export function storedUrlsIn(text) {
+  const prefix = `${IMAGE_ROUTE}?${IMAGE_PARAM}=`;
+  const found = String(text ?? '').match(new RegExp(prefix.replace('?', '[?]') + IMAGE_NAME.source.slice(1, -1), 'g')) || [];
+  return [...new Set(found)];
+}
+
+// put(dataUrl) -> link to the stored image; get(link) -> data URL again (for an edit that uses
+// the image as a reference). put rejects what is not a storable image; get what is not a link.
+export function createImageStore({ dir, fs = { mkdir, writeFile }, read = readFile }) {
   return {
+    async get(url) {
+      if (!isStoredUrl(url)) throw new Error('not a stored image link');
+      const name = url.slice(IMAGE_ROUTE.length + IMAGE_PARAM.length + 2);
+      const bytes = await read(join(dir, name));
+      return `data:${MIME_OF[name.slice(name.lastIndexOf('.') + 1)]};base64,${Buffer.from(bytes).toString('base64')}`;
+    },
     async put(dataUrl) {
       const image = decodeDataUrl(dataUrl);
       const ext = image && EXT_OF[image.mime];
