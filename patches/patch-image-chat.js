@@ -52,5 +52,5 @@ const TARGETS = [
   },
 ];
 
-module.exports = { TARGETS };
+module.exports = { TARGETS, FINISH };
 if (require.main === module) run('patch-image-chat', TARGETS);

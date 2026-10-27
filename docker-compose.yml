@@ -16,6 +16,8 @@ services:
       - ./docker:/fane/docker:ro
       # FANE_IMAGE_DIR in patches/lib/vane.js; used by patch-image-chat (images in the web UI)
       - ./cli/image:/fane/image:ro
+      # FANE_WRITE_DIR in patches/lib/vane.js; used by patch-article-chat (articles in the web UI)
+      - ./cli/write:/fane/write:ro
     entrypoint: ["sh", "/fane/docker/fane-entrypoint.sh"]
     command: ["/home/vane/entrypoint.sh"]
 

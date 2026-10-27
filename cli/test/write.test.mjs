@@ -133,7 +133,10 @@ test('sourcesSection is written from real sources, in the article language', () 
   assert.match(sourcesSection([{ title: 'a [b]\nc', url: 'https://x.org' }], 'en'), /\[a b c\]/);
   const junk = sourcesSection([{ title: 'sample', url: 'https://www.aspete.gr/a.pdf' }, { title: 'Microsoft Word - fulltext096113.docx', url: 'https://jestr.org/f.pdf' }, { title: '', url: 'not a url' }], 'en');
   assert.match(junk, /1\. \[aspete\.gr\]\(https:\/\/www\.aspete\.gr\/a\.pdf\)\n2\. \[jestr\.org\]/);
-  assert.match(junk, /3\. \[not a url\]/);
+  assert.match(junk, /3\. not a url\n/); // not a web link: named, not linked
+  const odd = sourcesSection([{ title: 'Tides', url: 'https://x.org/a b/(c)' }, { title: 'Jabber', url: 'javascript:alert(1)' }], 'en');
+  assert.match(odd, /1\. \[Tides\]\(https:\/\/x\.org\/a%20b\/%28c%29\)/);
+  assert.match(odd, /2\. Jabber\n/); // not a web link: named, never linked
 });
 
 test('sentences skips headings and fragments; rhythm needs enough sentences', () => {
@@ -195,7 +198,8 @@ test('phases per mode: Speed 2 model calls, Balanced 6, Quality 8 (sources are f
 });
 
 test('token budgets: Greek needs more than English, nothing falls back to a 2048 default', () => {
-  assert.ok(tokensFor('draft', 900, 'el') > tokensFor('draft', 900, 'en') * 1.5);
+  assert.ok(tokensFor('draft', 900, 'el') > tokensFor('draft', 900, 'en') * 1.3);
+  assert.ok(tokensFor('outline', 900, 'el') >= 7000); // the first live run: an outline cut off at 3880 tokens by three models
   for (const role of ['queries', 'outline', 'draft', 'factcheck', 'critique', 'revise', 'polish', 'style', 'copy', 'audit']) assert.ok(tokensFor(role, 900, 'en') >= 1400, role);
   assert.equal(clampWords(10), 300);
   assert.equal(clampWords(99999), 2500);
@@ -458,7 +462,7 @@ test('Greek: English search queries are written, Latin look-alikes are repaired,
   assert.equal(r.ok, true, r.error);
   assert.equal(r.language, 'el');
   assert.deepEqual(c.calls.map(x => x.role), ['queries', 'outline', 'draft']);
-  assert.deepEqual(r.queries, ['η παλιρροϊκή ενέργεια', 'tidal power', 'marine energy costs', 'παλιρροϊκή ενέργεια']);
+  assert.deepEqual(r.queries, ['η παλιρροϊκή ενέργεια', 'tidal power']); // the topic and one English query: each is a full Vane research
   assert.equal(r.repaired, 1);
   assert.doesNotMatch(r.article, /eνέργεια/);
   assert.match(r.article, /## Πηγές/);
@@ -471,7 +475,7 @@ test('progress events report each phase and a throwing listener is ignored', asy
   const pipeline = createArticlePipeline({ client: fake(), retrieve: async () => SOURCES });
   const r = await pipeline({ topic: 'tides', words: 300, mode: 'speed', onProgress: (e) => { events.push(`${e.phase}:${e.status}`); throw new Error('listener'); } });
   assert.equal(r.ok, true);
-  assert.deepEqual(events, ['sources:running', 'sources:done', 'outline:running', 'outline:ok', 'draft:running', 'draft:ok', 'done:done']);
+  assert.deepEqual(events, ['sources:running', 'sources:done', 'outline:running', 'outline:ok', 'draft:running', 'draft:ok', 'draft:preview', 'done:done']);
 });
 
 test('an unknown mode is a programming error', async () => {

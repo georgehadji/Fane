@@ -55,6 +55,22 @@ export function renumber(article, sources) {
   return { text, used: [...order.keys()].map(n => sources[n - 1]) };
 }
 
+// Only web links become links; spaces and parentheses would end a Markdown link early.
+export const isWebUrl = (u) => /^https?:\/\//i.test(String(u || ''));
+export const safeUrl = (u) => String(u).replace(/\s/g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
+
+const SUPERSCRIPT = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+// "[1]" and "[2, 3]" -> superscript links to the sources: ¹ ²  ³. Vane's web UI turns every "[n]" into a chip
+// for its own research sources (a different numbering), and does not touch superscript digits.
+// `used` is the list renumber() returned, so [n] is used[n - 1].
+export function linkCitations(text, used) {
+  return String(text).replace(CITE, (_, group) => citeNumbers(group).map((n) => {
+    const sup = String(n).replace(/\d/g, d => SUPERSCRIPT[d]);
+    const s = used[n - 1];
+    return s && isWebUrl(s.url) ? `[${sup}](${safeUrl(s.url)})` : sup;
+  }).join(' '));
+}
+
 const HEADING = { en: 'Sources', el: 'Πηγές' };
 export function sourcesSection(used, lang) {
   if (!used.length) return '';
@@ -64,9 +80,10 @@ export function sourcesSection(used, lang) {
   const label = (s) => {
     const title = clean(s.title);
     if (title && !JUNK.test(title)) return title;
-    try { return new URL(s.url).hostname.replace(/^www\./, ''); } catch { return s.url; }
+    try { return new URL(s.url).hostname.replace(/^www\./, '') || s.url; } catch { return s.url; }
   };
-  return `\n\n## ${HEADING[lang] || HEADING.en}\n\n${used.map((s, i) => `${i + 1}. [${label(s)}](${s.url})`).join('\n')}\n`;
+  const link = (s) => (isWebUrl(s.url) ? `[${label(s)}](${safeUrl(s.url)})` : label(s));
+  return `\n\n## ${HEADING[lang] || HEADING.en}\n\n${used.map((s, i) => `${i + 1}. ${link(s)}`).join('\n')}\n`;
 }
 
 // Sentence-length spread (std / mean). Machine text is even; people vary. Under ~0.3 reads flat.

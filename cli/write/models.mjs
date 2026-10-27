@@ -37,12 +37,15 @@ export const chainsFor = (models) => {
 // cut at a 2048 default.
 const TOKENS_PER_WORD = { en: 1.5, el: 3.6 };
 const PROSE = new Set(['draft', 'revise', 'polish', 'style', 'copy']);
-const JSON_TOKENS = { queries: 400, outline: 1800, factcheck: 2600, critique: 2000, audit: 1500 };
+const JSON_TOKENS = { queries: 800, outline: 3000, factcheck: 4000, critique: 3500, audit: 2500 };
+// Room for thinking on top of the answer, even at low effort: the first live run in Vane's web UI had an
+// outline cut off at 3880 tokens by three models in a row. A cap is not a spend: only generated tokens are paid.
+const THINKING_HEADROOM = 4000;
 
 export function tokensFor(role, words, lang) {
   const k = TOKENS_PER_WORD[lang] || TOKENS_PER_WORD.en;
-  if (PROSE.has(role)) return Math.ceil(words * k * 1.3) + 1500;
-  return Math.ceil((JSON_TOKENS[role] || 1500) * (lang === 'el' ? 1.6 : 1)) + 1000;
+  if (PROSE.has(role)) return Math.ceil(words * k * 1.3) + THINKING_HEADROOM;
+  return Math.ceil((JSON_TOKENS[role] || 1500) * (lang === 'el' ? 1.6 : 1)) + THINKING_HEADROOM;
 }
 
 export const isJsonRole = (role) => role in JSON_TOKENS;

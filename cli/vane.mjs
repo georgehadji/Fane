@@ -621,6 +621,13 @@ async function doctor(opts) {
       dockerOut(['exec', container, 'test', '-f', `${FANE_IMAGE_DIR}/vane-hook.mjs`]);
       report('ok', `image modules present in ${FANE_IMAGE_DIR} (web UI image requests work)`);
     } catch { report('warn', `image modules missing in ${FANE_IMAGE_DIR}; web UI image requests fall back to text (run node scripts/apply.mjs)`); }
+    // patch-article-chat imports the article modules (and trial.json, the models that passed the trial) the same way.
+    const { FANE_WRITE_DIR } = createRequire(import.meta.url)(join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches', 'lib', 'vane.js'));
+    try {
+      dockerOut(['exec', container, 'test', '-f', `${FANE_WRITE_DIR}/vane-hook.mjs`]);
+      dockerOut(['exec', container, 'test', '-f', `${FANE_WRITE_DIR}/trial.json`]);
+      report('ok', `article modules present in ${FANE_WRITE_DIR} (web UI article requests work)`);
+    } catch { report('warn', `article modules missing in ${FANE_WRITE_DIR}; web UI article requests fall back to a normal answer (run node scripts/apply.mjs)`); }
   }
 
   try {

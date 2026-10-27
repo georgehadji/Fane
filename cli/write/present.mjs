@@ -1,0 +1,65 @@
+// How an article looks in Vane's web UI: Markdown for the article, one small dimmed status
+// paragraph (the same quiet() the image answers use) for progress, cost, time and warnings.
+// Pure functions. Status words are in the language of the article, so a Greek request gets
+// Greek status lines. Everything that comes from a model or a web page is escaped or cleaned:
+// Vane renders raw HTML in answers.
+import { escapeHtml, formatDuration, quiet } from '../image/present.mjs';
+import { linkCitations, renumber, sourcesSection } from './checks.mjs';
+
+const NBSP = ' ';
+
+const LABELS = {
+  en: { sources: 'Researching sources', queries: 'Writing search queries', outline: 'Planning the outline', draft: 'Writing the draft', factcheck: 'Checking the facts', critique: 'Reviewing the argument', revise: 'Revising', polish: 'Polishing', style: 'Editing the style', copy: 'Copy editing', audit: 'Final check' },
+  el: { sources: 'Αναζήτηση πηγών', queries: 'Διατύπωση αναζητήσεων', outline: 'Σχεδιασμός δομής', draft: 'Γράψιμο του κειμένου', factcheck: 'Έλεγχος γεγονότων', critique: 'Κριτική ανάγνωση', revise: 'Αναθεώρηση', polish: 'Επιμέλεια', style: 'Επιμέλεια ύφους', copy: 'Γλωσσική επιμέλεια', audit: 'Τελικός έλεγχος' },
+};
+const WORDS = {
+  en: { words: 'words', sources: 'sources', source: 'source', draft: 'Draft. Checking and editing next…', modes: { speed: 'Speed', balanced: 'Balanced', quality: 'Quality' } },
+  el: { words: 'λέξεις', sources: 'πηγές', source: 'πηγή', draft: 'Πρώτη μορφή. Ακολουθεί έλεγχος και επιμέλεια…', modes: { speed: 'Speed', balanced: 'Balanced', quality: 'Quality' } },
+};
+const words = (lang) => WORDS[lang] || WORDS.en;
+const labels = (lang) => LABELS[lang] || LABELS.en;
+
+// Model text may carry HTML (or a page may have talked it into writing some): tags are removed,
+// the Markdown stays.
+export const cleanMarkdown = (text) => String(text || '').replace(/<(?=[a-zA-Z/!?])[^>]*>/g, '');
+
+// What the user sees while the pipeline runs. `state`: { lang, phases: [{ phase, status }],
+// running: phase | null, draft: { text, sources } | null }. Once a draft exists it is shown, with
+// the sources list, above the status line.
+export function renderArticleProgress(state) {
+  const lang = state.lang || 'en';
+  const L = labels(lang);
+  const done = (state.phases || []).filter(p => p.status !== 'running' && L[p.phase]).map(p => L[p.phase]);
+  const current = state.draft ? words(lang).draft : state.running ? `${L[state.running] || state.running}…` : '';
+  const status = quiet([escapeHtml(current), done.length ? escapeHtml(done.join(' · ')) : '']);
+  if (!state.draft) return status;
+  const { text, used } = renumber(cleanMarkdown(state.draft.text), state.draft.sources);
+  return `${linkCitations(text, used).trimEnd()}${sourcesSection(used, lang)}\n\n${status}`;
+}
+
+// The finished article and one status paragraph: size, sources, cost, time, mode, then what went
+// wrong or was weak (degraded phases, failed or weak checks), each on its own line.
+export function renderArticleResult(r) {
+  const lang = r.language || 'en';
+  const W = words(lang);
+  const summary = [
+    `${r.words}${NBSP}${W.words}`,
+    `${r.sources.length}${NBSP}${r.sources.length === 1 ? W.source : W.sources}`,
+    r.cost ? `≈${NBSP}$${r.cost.toFixed(3)}` : null,
+    r.ms ? formatDuration(r.ms).replace(' ', NBSP) : null,
+    W.modes[r.mode] || r.mode,
+  ].filter(Boolean).join(' · ');
+  const notes = [...new Set([...r.degraded, ...r.checks.items.filter(i => i.level !== 'ok').map(i => `${i.name}: ${i.detail}`)])].slice(0, 6);
+  // r.article already ends with the sources list; only the [n] marks in the text become links
+  const [body, ...rest] = cleanMarkdown(r.article).split(/\n\n(?=## (?:Sources|Πηγές)\n)/);
+  return `${[linkCitations(body, r.sources), ...rest].join('\n\n').trimEnd()}\n\n${quiet([escapeHtml(summary), ...notes.map(n => escapeHtml(n))])}`;
+}
+
+// A run that produced no article.
+export function renderArticleFailure(result, lang = 'en') {
+  const why = result.status === 402 ? 'OpenRouter has no credits left (402). Add credits at openrouter.ai and ask again.'
+    : result.status === 401 ? "OpenRouter refused the API key (401). Check the key of the OpenRouter provider in Vane's Settings."
+      : result.error;
+  const head = lang === 'el' ? 'Δεν μπόρεσα να γράψω το άρθρο.' : 'The article could not be written.';
+  return quiet([escapeHtml(head), escapeHtml(why)]);
+}

@@ -15,6 +15,9 @@ import { prompts } from './prompts.mjs';
 
 export const MAX_SOURCES = 16;
 export const THIN_SOURCES = 4;
+// English queries added to a non-English topic. One: each query is a full Vane research (three searches
+// and a page of progress in the answer), and in the first live run four of them took minutes.
+export const EXTRA_QUERIES = 1;
 
 const pct = (x) => `${Math.round(x * 100)}%`;
 const titleOf = (text) => /^\s*#\s+(.+)$/m.exec(text)?.[1].trim() || '';
@@ -85,8 +88,9 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       let queries = [topic];
       if (lang !== 'en' && plan.includes('queries')) {
         const q = await step('queries', {});
-        if (q.ok) queries = [topic, ...(Array.isArray(q.data.queries) ? q.data.queries.filter(s => typeof s === 'string' && s.trim()).slice(0, 3) : [])];
+        if (q.ok) queries = [topic, ...(Array.isArray(q.data.queries) ? q.data.queries.filter(s => typeof s === 'string' && s.trim()).slice(0, EXTRA_QUERIES) : [])];
         else degraded.push('English search queries failed: searched with the topic only');
+        emit({ phase: 'sources', status: 'running' }); // the query step had its own status; the searches are next
       }
       const found = await Promise.allSettled(queries.map(q => retrieve(q)));
       const seen = new Set();
@@ -112,6 +116,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const d = await step('draft', { sources, outline });
       if (!d.ok) return { ok: false, error: `the draft failed: ${d.errors.join('; ')}`, phases, language: lang, mode, calls, cost, sources };
       body = fix(d.text);
+      emit({ phase: 'draft', status: 'preview', text: body, sources }); // lets a UI show the draft while the checks and edits run
 
       // 4. Fact-check: a ledger of claims against their cited sources.
       let ledger = [], claimSupport = null;
