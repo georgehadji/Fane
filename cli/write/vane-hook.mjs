@@ -9,9 +9,9 @@
 // adds the audit. The answer is one block, updated as the work goes: status lines, then the draft
 // as soon as it exists, then the finished article.
 import { readFile } from 'node:fs/promises';
-import { openRouterClientFromVane, openRouterNeeded, withFreeLlm } from '../image/openrouter.mjs';
+import { openRouterClientFromVane, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
-import { escapeHtml, previousAnswer, quiet, tagged } from '../image/present.mjs';
+import { escapeHtml, previousAnswer, providerMissing, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue, selectChains } from './catalogue.mjs';
 import { createArticleEditor, isArticleEdit, parseArticleAnswer, targetLanguage } from './edit.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from '../core/intent-article.mjs';
@@ -52,7 +52,7 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   try {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
-      say(quiet([escapeHtml(openRouterNeeded('Article writing', { free: true }))]));
+      say(providerMissing('Article writing', { free: true }));
       return true;
     }
     trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {};

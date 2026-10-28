@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderResult, renderProgress, quiet, altText, escapeHtml, modelLabel, formatDuration } from '../image/present.mjs';
+import { renderResult, renderProgress, quiet, altText, escapeHtml, modelLabel, formatDuration, providerMissing } from '../image/present.mjs';
 import { explainFailure } from '../image/policy.mjs';
 
 const URL = 'data:image/png;base64,AAAA';
@@ -22,7 +22,10 @@ test('grid, captions, summary line, escaped text', () => {
 test('typography: captions, notes and summary are quiet, never italic, quoted or spaced-dash', () => {
   const md = renderResult({ images: [img(1, 0.01, 'A lighthouse at dawn.'), img(2, 0.02)], requested: 4, complete: false, errors: ['a: 503 upstream'], rewrittenPrompt: 'a fox', editedImage: 1, elapsedMs: 9000 }, 'draw a fox');
   assert.doesNotMatch(md, /<em>|<i>|font-style|^> |\n> | — |~\$/); // no italics, no blockquotes, no spaced em dash, no tilde
-  assert.match(md, /<figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0\.4em">Model 1<\/span><span style="opacity:0\.7">≈ \$0\.010<\/span><br><span style="opacity:0\.7">A lighthouse at dawn\.<\/span><\/figcaption>/);
+  assert.match(md, /<figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0\.4em">Model 1<\/span><span>≈ \$0\.010<\/span><br><span>A lighthouse at dawn\.<\/span><\/figcaption>/);
+  // no opacity on caption text: Vane already greys figcaptions, and dimming again fell to 2.8:1 (light) and 4.2:1 (dark)
+  assert.doesNotMatch(md.slice(md.indexOf('<figcaption'), md.indexOf('</figcaption>')), /opacity/);
+  assert.match(providerMissing('Code writing'), /^<p role="status"><strong>Code writing needs an OpenRouter provider\.<\/strong> In Settings/);
   const quiet = md.slice(md.lastIndexOf('<p role='));
   assert.match(quiet, /^<p role="status" style="font-size:14px;opacity:0\.7">2 images · ≈ \$0\.030 · 9s<br>Edited image 1 of the previous answer\.<br>Rewritten after a refusal: “a fox”<br>Made 2 of 4 images\./);
   assert.equal(quiet.split('<p ').length - 1, 1); // one quiet block, not one paragraph per line

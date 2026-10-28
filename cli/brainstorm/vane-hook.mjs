@@ -6,9 +6,9 @@
 // (withFreeLlm). The answer is one
 // block, updated as the work goes, and ends with ANSWER_MARKER (tagged()) like every Fane answer.
 import { readFile } from 'node:fs/promises';
-import { openRouterClientFromVane, openRouterNeeded, withFreeLlm } from '../image/openrouter.mjs';
+import { openRouterClientFromVane, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
-import { escapeHtml, quiet, tagged } from '../image/present.mjs';
+import { escapeHtml, providerMissing, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue } from '../write/catalogue.mjs';
 import { detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
@@ -36,7 +36,7 @@ export async function handleBrainstormRequest(query, { emit, update, configPath,
   try {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
-      say(quiet([escapeHtml(openRouterNeeded('Brainstorming', { free: true }))]));
+      say(providerMissing('Brainstorming', { free: true }));
       return true;
     }
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below

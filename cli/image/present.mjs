@@ -7,6 +7,7 @@
 // regular or medium weight, never italic (italic sans barely stands out) and never quoted.
 import { imageSubject } from './intent.mjs';
 import { explainFailure } from './policy.mjs';
+import { openRouterNeeded } from './openrouter.mjs';
 import { isStoredUrl } from './store.mjs';
 
 // Ends every answer the hook writes. An HTML comment shows nothing; patches/patch-image-ui.js uses
@@ -36,6 +37,13 @@ export const quiet = (lines) => `<p role="status" style="font-size:14px;${DIM}">
 // A run that produced nothing: the whole answer, so body size with a bold lead, not a dimmed quiet() line.
 // HTML, not Markdown, so an error message's * or _ stays text. Both arguments are already escaped.
 export const failed = (head, why) => `<p role="status"><strong>${head}</strong> ${why}</p>`;
+
+// No provider set up, so nothing ran: the whole answer, like any failure. The lead is the first clause of
+// openRouterNeeded(), the setup steps follow it.
+export const providerMissing = (what, opts) => {
+  const [lead, steps = ''] = openRouterNeeded(what, opts).split(/:\s(.*)/s);
+  return failed(escapeHtml(`${lead}.`), escapeHtml(steps.charAt(0).toUpperCase() + steps.slice(1)));
+};
 
 // Why a text run (article, post, code, brainstorm) stopped: the two OpenRouter answers that need the user, else
 // the error as it came.
@@ -78,9 +86,9 @@ const figure = (img, subject, i, n) => {
   // Vane's HTML parser trims the space at the edge of a span, so the gap after the name is a margin.
   // No "·" before the price: weight, opacity and the margin separate them, and a dot left at a line end dangles.
   const price = img.pricePerImage ? `≈${NBSP}$${img.pricePerImage.toFixed(3)}` : '';
-  const words = img.text ? `<br><span style="${DIM}">${escapeHtml(img.text)}</span>` : '';
+  const words = img.text ? `<br><span>${escapeHtml(img.text)}</span>` : '';
   // The tile keeps its place (the asked ratio, then the picture's own) while a large original loads.
-  return `<figure style="margin:0"><a href="${src(img)}" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="${src(img)}" alt="${attr(altText(subject, i, n))}" width="100%" loading="lazy" style="display:block;margin:0;height:auto;aspect-ratio:auto ${ratio(img.aspect)};background:${PLACEHOLDER};border-radius:8px"></a><figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0.4em">${escapeHtml(modelLabel(img))}</span><span style="${DIM}">${price}</span>${words}</figcaption></figure>`;
+  return `<figure style="margin:0"><a href="${src(img)}" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="${src(img)}" alt="${attr(altText(subject, i, n))}" width="100%" loading="lazy" style="display:block;margin:0;height:auto;aspect-ratio:auto ${ratio(img.aspect)};background:${PLACEHOLDER};border-radius:8px"></a><figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0.4em">${escapeHtml(modelLabel(img))}</span><span>${price}</span>${words}</figcaption></figure>`;
 };
 
 // The raw provider errors are code-like: small and in code type.

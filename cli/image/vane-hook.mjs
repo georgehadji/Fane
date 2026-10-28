@@ -6,11 +6,11 @@
 // with the earlier image as the reference.
 import { TIER_FOR_MODE } from './catalogue.mjs';
 import { isImageEdit, isImageRequest, parseImageOptions, pickReferenceIndex } from './intent.mjs';
-import { previousAnswer, quiet, renderProgress, renderResult, tagged } from './present.mjs';
+import { previousAnswer, providerMissing, quiet, renderProgress, renderResult, tagged } from './present.mjs';
 import { IMAGE_TEXT_MODEL, createImageGenerator } from './generate.mjs';
 import { createImageStore, storeDirFor, storedUrlsIn } from './store.mjs';
 import { beginRun } from '../core/runlog.mjs';
-import { openRouterClientFromVane, openRouterNeeded } from './openrouter.mjs';
+import { openRouterClientFromVane } from './openrouter.mjs';
 import { safeDownload } from './download.mjs';
 
 // The links of the earlier images when this message edits them: the previous turn was Fane's
@@ -37,7 +37,7 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
   const client = generator ? null : await openRouterClientFromVane({ configPath, readConfig, log, signal });
   // freellmapi alone is not enough: images are drawn on OpenRouter
   if ((!client || client.freeLlm === 'only') && !generator) {
-    update(id, tagged(openRouterNeeded('Image generation')));
+    update(id, tagged(providerMissing('Image generation')));
     return true;
   }
   let references = [];

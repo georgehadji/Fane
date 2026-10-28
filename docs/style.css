@@ -113,6 +113,12 @@ button { cursor: pointer; }
 .band[data-field="navy"] { background: var(--navy); color: var(--navy-ink); }
 .band[data-field="grey"] { background: var(--field-2); color: var(--field-2-ink); }
 .band[data-field="black"] { background: var(--field-1); color: var(--field-1-ink); }
+/* wide screens: sentence left, reason right (the Questions layout), so nine claims scan in half the height */
+@media (min-width: 1024px) {
+  .band { display: grid; grid-template-columns: repeat(12, 1fr); column-gap: 24px; align-items: start; padding-block: 40px; }
+  .band .sentence { grid-column: 1 / span 7; max-width: none; }
+  .band .why { grid-column: 9 / span 4; margin-top: 0.4em; }
+}
 code, pre { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; }
 code { font-size: 0.9em; }
 :not(pre) > code { white-space: nowrap; } /* "--json" must not break at its hyphen */

@@ -6,9 +6,9 @@
 // (selectCodeChains over trial.json), or on freellmapi (withFreeLlm). The answer is one block, updated as the work goes. Every answer carries
 // CODE_ANSWER_MARKER, so the patched browser code leaves its "[x]" alone.
 import { readFile } from 'node:fs/promises';
-import { openRouterClientFromVane, openRouterNeeded, withFreeLlm } from '../image/openrouter.mjs';
+import { openRouterClientFromVane, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
-import { escapeHtml, quiet } from '../image/present.mjs';
+import { escapeHtml, providerMissing, quiet } from '../image/present.mjs';
 import { detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { retryEmpty } from '../write/research.mjs';
@@ -38,7 +38,7 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
   try {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
-      say(quiet([escapeHtml(openRouterNeeded('Code writing', { free: true }))]));
+      say(providerMissing('Code writing', { free: true }));
       return true;
     }
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
