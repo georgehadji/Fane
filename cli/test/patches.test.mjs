@@ -64,6 +64,23 @@ test('patch-colors: balanced rules after the last one of the stylesheet, every c
   assert.ok(COLORS.match(/#[0-9a-f]+\b/gi).every(c => c.length === 7));
 });
 
+test('patch-type: an intact Greek WOFF2 for Montserrat, and it stacks with patch-colors in either order', () => {
+  const colors = require('../../patches/patch-colors.js');
+  const type = require('../../patches/patch-type.js');
+  const font = Buffer.from(type.TYPE.match(/base64,([A-Za-z0-9+/=]+)\)/)[1], 'base64');
+  assert.equal(font.toString('latin1', 0, 4), 'wOF2');
+  assert.equal(font.readUInt32BE(8), font.length); // the WOFF2 header's own length matches
+  assert.match(type.TYPE, /font-family:Montserrat;[^}]*unicode-range:U\+0370-03FF\}/); // Greek only: Latin keeps Montserrat
+  assert.equal(type.TYPE.split('{').length, type.TYPE.split('}').length);
+  const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
+  for (const order of [[colors, type], [type, colors]]) {
+    let css = { [FILES.appCss]: `x{}${end}` };
+    for (const p of order) { const r = planPatch(css, p.TARGETS); assert.deepEqual(r.errors, []); css = r.next; }
+    assert.ok(css[FILES.appCss].includes(colors.COLORS) && css[FILES.appCss].includes(type.TYPE));
+    for (const p of order) assert.deepEqual(planPatch(css, p.TARGETS).applied, []); // both still count as applied
+  }
+});
+
 test('every patch declares well-formed targets on known Vane files', () => {
   const dir = new URL('../../patches/', import.meta.url);
   const known = new Set(Object.values(FILES));
@@ -143,4 +160,23 @@ test('the Fane link patch adds one nav item that opens the page in a new tab, in
 test('patch-image-chat runs together with patch-image-serve, so a failing serve target leaves no hook with dead links', () => {
   const src = readFileSync(new URL('../../patches/patch-image-chat.js', import.meta.url), 'utf8');
   assert.match(src, /run\('patch-image-chat', \[\.\.\.TARGETS, \.\.\.require\('\.\/patch-image-serve'\)\.TARGETS\]\)/);
+});
+
+test('run: a write that fails leaves every bundle as it was', async () => {
+  const { mkdtempSync, mkdirSync, readFileSync: read, rmSync, writeFileSync, existsSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { run } = require('../../patches/lib/apply-targets.js');
+  const dir = mkdtempSync(join(tmpdir(), 'fane-patch-'));
+  const a = join(dir, 'a.js'), b = join(dir, 'b.js');
+  writeFileSync(a, 'var a=1;');
+  writeFileSync(b, 'var b=1;');
+  mkdirSync(`${b}.fane-tmp`); // the second write fails
+  try {
+    assert.throws(() => run('t', [{ name: 'a', file: a, from: 'a=1', to: 'a=2' }, { name: 'b', file: b, from: 'b=1', to: 'b=2' }]));
+    assert.deepEqual([read(a, 'utf8'), read(b, 'utf8'), existsSync(`${a}.fane-tmp`)], ['var a=1;', 'var b=1;', false]);
+    rmSync(`${b}.fane-tmp`, { recursive: true });
+    run('t', [{ name: 'a', file: a, from: 'a=1', to: 'a=2' }, { name: 'b', file: b, from: 'b=1', to: 'b=2' }]);
+    assert.deepEqual([read(a, 'utf8'), read(b, 'utf8'), read(`${a}.bak`, 'utf8')], ['var a=2;', 'var b=2;', 'var a=1;']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -18,6 +18,7 @@ export const MAX_ISSUES = 12;
 
 const strings = (a) => (Array.isArray(a) ? a.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim()) : []);
 const text = (s) => (typeof s === 'string' ? s.trim() : '');
+const isFolderOf = (dir, path) => path.toLowerCase().startsWith(`${dir.toLowerCase()}/`);
 
 // The model's spec, with every path checked: an unsafe or repeated path is dropped, the list is cut at MAX_FILES.
 // -> { spec, dropped: [notes] } | { spec: null }
@@ -28,6 +29,8 @@ export function normalizeSpec(data) {
     const path = safePath(f?.path);
     if (!path) { dropped.push(`the spec named an unusable path (${String(f?.path ?? '').slice(0, 60)}): skipped`); continue; }
     if (files.some(x => sameFile(x.path, path)) || /^readme(?:\.md)?$/i.test(path)) continue;
+    // "config" and "config/settings.py" cannot both be written: the second one fails after the run is paid for
+    if (files.some(x => isFolderOf(x.path, path) || isFolderOf(path, x.path))) { dropped.push(`the spec named ${path.slice(0, 60)} next to a file or folder of the same name: skipped`); continue; }
     files.push({ path, purpose: text(f.purpose) || path, exports: strings(f.exports), imports: strings(f.imports) });
   }
   if (!files.length) return { spec: null, dropped };

@@ -123,10 +123,6 @@ function tierPool(catalogue, family, tier, needsReference, via) {
     .sort((a, b) => a.id.localeCompare(b.id)); // deterministic ties
   return split(pool, tier);
 }
-export function candidates(...args) {
-  const { band, others } = tierPool(...args);
-  return [...band, ...others];
-}
 
 function take(pool, count, picked, labs, allowRepeatLab = false) {
   for (const m of pool) {

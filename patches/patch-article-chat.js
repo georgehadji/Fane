@@ -34,7 +34,8 @@ const TARGETS = [
     file: FILES.chatRoute,
     from: 'handleArticleRequest(b.followUp,{mode:b.config.mode,configPath:',
     to: `handleArticleRequest(b.followUp,{lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:`,
-    marker: 'lastAnswer:async()=>', // patch-pipeline-abort puts `signal` in front of it
+    // patch-pipeline-abort puts `signal` in front of it; the image hook has the same parameters but ,emit: after them
+    marker: `${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},research:`,
   },
 ];
 

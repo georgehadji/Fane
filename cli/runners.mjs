@@ -1,7 +1,7 @@
 // What each command does once the command line is parsed: image generation, articles and posts, code and brainstorming.
 // They run Fane's pipelines (cli/image, cli/write, cli/code, cli/brainstorm); Vane itself is needed only for their research.
 import { dirname, join } from 'node:path';
-import { TIER_FOR_MODE } from './image/catalogue.mjs';
+import { TIER_FOR_MODE, buildCatalogue, viaOf } from './image/catalogue.mjs';
 import { imageSubject } from './image/intent.mjs';
 import { IMAGE_TEXT_MODEL } from './image/generate.mjs';
 import { parseImageOptions } from './image/intent.mjs';
@@ -10,8 +10,9 @@ import { POSTS } from './core/formats.mjs';
 import { buildTextCatalogue, selectChains, selectFreeChains } from './write/catalogue.mjs';
 import { detectLanguage } from './core/language.mjs';
 import { chainsFor } from './write/models.mjs';
+import { retryEmpty } from './write/research.mjs';
 import { OPENROUTER_BASE_URL, createOpenRouterClient, fromHost, modelClientFor, withFreeLlm } from './image/openrouter.mjs';
-import { DEFAULTS, UsageError, getProviders, getProvidersStartingVane, search } from './client.mjs';
+import { DEFAULTS, UsageError, getProvidersStartingVane, search } from './client.mjs';
 
 // ---- image generation ----------------------------------------------------
 
@@ -23,6 +24,7 @@ async function resolveClient(opts, { images = false } = {}) {
   let providers = [];
   if (opts['key-from-vane']) {
     try {
+      await getProvidersStartingVane(opts.url, DEFAULTS.container); // a stopped Vane is started, as for a search
       const res = await fetch(`${opts.url}/api/config`, { signal: AbortSignal.timeout(10_000) });
       providers = (await res.json()).values?.modelProviders || [];
     } catch (err) { if (!apiKey) throw err; }
@@ -33,6 +35,13 @@ async function resolveClient(opts, { images = false } = {}) {
 }
 
 // ---- articles ------------------------------------------------------------
+
+// Vane's own research as a pipeline's retrieve(query): its sources (its answer text is not used), asked again when it
+// finds none. Vane is started at the first search, so a run that needs none works without it.
+function vaneRetrieve(opts, mode) {
+  let providers;
+  return retryEmpty(async (query) => (await search({ ...opts, query, stream: false, mode }, providers ??= await getProvidersStartingVane(opts.url, DEFAULTS.container))).sources);
+}
 
 const MODE_FOR_TIER = Object.fromEntries(Object.entries(TIER_FOR_MODE).map(([mode, tier]) => [tier, mode]));
 
@@ -83,16 +92,8 @@ export async function runArticle(opts) {
   if (!opts.query) throw new UsageError('Missing topic. Example: vane --article "tidal power in Greece"');
   const client = await resolveClient(opts);
   const { createArticlePipeline } = await import('./write/pipeline.mjs');
-  const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);
   const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
-  // Sources are Vane's own research; its answer text is not used. Vane sometimes returns none for a query that worked a minute ago.
-  const retrieve = async (query) => {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const { sources } = await search({ ...opts, query, stream: false, mode }, providers);
-      if (sources.length) return sources;
-    }
-    return [];
-  };
+  const retrieve = vaneRetrieve(opts, mode);
   const write = createArticlePipeline({ client, retrieve, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
   const post = opts.post; // a platform of formats.mjs, or undefined for an article
   const topic = post ? postTopic(opts.query) : articleTopic(opts.query);
@@ -144,14 +145,7 @@ export async function runArticleEdit(opts) {
   const explicit = opts['article-model'].length > 0;
   const chosen = explicit ? { chains: chainsFor(opts['article-model']) } : await defaultChains({ mode, lang, client });
   // Vane is started only when the change needs a search.
-  const retrieve = async (query) => {
-    const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const { sources } = await search({ ...opts, query, stream: false, mode }, providers);
-      if (sources.length) return sources;
-    }
-    return [];
-  };
+  const retrieve = vaneRetrieve(opts, mode);
   const log = (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); };
   const edit = createArticleEditor({ client, log });
   const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: opts.query, lang, mode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: (e) => { if (e.status !== 'running') log(`${e.phase} ${e.status}${e.note ? `: ${e.note}` : ''}`); } });
@@ -186,7 +180,7 @@ export async function listCodeModels(opts) {
 }
 
 // The files go to a new or empty folder only, so nothing of the user's is ever overwritten.
-async function codeDir(opts) {
+export async function codeDir(opts) {
   const { readdir } = await import('node:fs/promises');
   const empty = async (d) => { try { return (await readdir(d)).length === 0; } catch (err) { if (err.code === 'ENOENT') return true; throw err; } };
   if (opts['out-dir'] !== undefined) {
@@ -200,7 +194,7 @@ async function codeDir(opts) {
   }
 }
 
-async function writeCodeFiles(dir, r) {
+export async function writeCodeFiles(dir, r) {
   const { mkdir, writeFile } = await import('node:fs/promises');
   const { resolve, sep } = await import('node:path');
   const root = resolve(dir);
@@ -235,15 +229,7 @@ export async function runCode(opts) {
   const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
   const chosen = opts['code-model'].length ? { chains: codeChainsFor(opts['code-model']) } : await defaultCodeChains({ mode, client });
   // Documentation is Vane's own research (Balanced, Quality); Vane is started only then.
-  let providers;
-  const retrieve = async (query) => {
-    providers ??= await getProvidersStartingVane(opts.url, DEFAULTS.container);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const { sources } = await search({ ...opts, query, stream: false, mode }, providers);
-      if (sources.length) return sources;
-    }
-    return [];
-  };
+  const retrieve = vaneRetrieve(opts, mode);
   const log = (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); };
   const write = createCodePipeline({ client, retrieve, checkSyntax: createSyntaxChecker(), log });
   const r = await write({
@@ -282,15 +268,7 @@ export async function runBrainstorm(opts) {
     if (!chosen) throw new UsageError('No text model has passed the article trial. Pass --brainstorm-model <id>[,<fallback>...], or run node scripts/article-trial.mjs.');
   }
   // Existing work is Vane's own research (Balanced, Quality); Vane is started only then.
-  let providers;
-  const retrieve = async (query) => {
-    providers ??= await getProvidersStartingVane(opts.url, DEFAULTS.container);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const { sources } = await search({ ...opts, query, stream: false, mode }, providers);
-      if (sources.length) return sources;
-    }
-    return [];
-  };
+  const retrieve = vaneRetrieve(opts, mode);
   const log = (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); };
   const run = createBrainstormPipeline({ client, retrieve, log });
   const r = await run({
@@ -355,7 +333,6 @@ export async function runImage(opts) {
 }
 
 export async function listImageModels(filter, asJson) {
-  const [{ createOpenRouterClient }, { buildCatalogue, viaOf }] = await Promise.all([import('./image/openrouter.mjs'), import('./image/catalogue.mjs')]);
   const f = String(filter || '').toLowerCase();
   const rows = buildCatalogue(await createOpenRouterClient().imageModels())
     .filter(m => !f || m.id.toLowerCase().includes(f) || viaOf(m) === f)

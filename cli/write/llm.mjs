@@ -88,7 +88,7 @@ export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new P
         log(`${role}: ${model} failed (${attempts.at(-1).problem})`);
         if (FATAL_STATUS.has(status)) {
           if (status !== STOPPED_STATUS && !isFreeModel(model) && chain.slice(i + 1).some(isFreeModel)) {
-            paidOut = `${model}: ${attempts.at(-1).problem}`;
+            paidOut = { error: `${model}: ${attempts.at(-1).problem}`, status };
             log(`${role}: OpenRouter is out (${status}); the rest of the run uses freellmapi`);
             continue;
           }
@@ -122,7 +122,7 @@ export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new P
       return { ok: true, text, ...(json ? { data } : {}), model: served, fallback: i > 0, attempts, cost };
     }
     // every model skipped: OpenRouter is out and this chain has no free: model
-    if (!attempts.length && paidOut) return { ok: false, fatal: true, errors: [paidOut], attempts, cost };
+    if (!attempts.length && paidOut) return { ok: false, fatal: true, status: paidOut.status, errors: [paidOut.error], attempts, cost };
     return { ok: false, fatal: false, errors: attempts.map(a => `${a.model}: ${a.problem}`), attempts, cost };
   };
 }

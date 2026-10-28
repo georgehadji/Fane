@@ -16,7 +16,7 @@ import { LANGUAGES } from './core/language.mjs';
 import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
 import { isCodeRequest } from './core/intent-code.mjs';
 import { isBrainstormRequest } from './core/intent-brainstorm.mjs';
-import { DEFAULTS, UsageError, VALID_MODES, VALID_SOURCES, addOpenRouterModel, findOpenRouterProvider, getProviders, getProvidersStartingVane, listOpenRouter, openRouterBaseUrlWarning, resolveChatModel, resolveModel, search, vaneModelRequest } from './client.mjs';
+import { DEFAULTS, UsageError, VALID_MODES, VALID_SOURCES, addOpenRouterModel, findOpenRouterProvider, getProviders, getProvidersStartingVane, listOpenRouter, openRouterBaseUrlWarning, resolveModel, search, vaneModelRequest } from './client.mjs';
 import { listArticleModels, listCodeModels, listImageModels, runArticle, runArticleEdit, runBrainstorm, runCode, runImage } from './runners.mjs';
 export { DEFAULTS, findOpenRouterProvider, resolveModel } from './client.mjs';
 
@@ -193,49 +193,38 @@ export function parseCli(argv) {
   const timeoutSec = Number(values.timeout);
   if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) throw new UsageError(`Invalid timeout "${values.timeout}"`);
   if (values.stream && values.json) throw new UsageError('--stream cannot be combined with --json');
+  // model lists: repeated flags or commas
+  for (const key of ['image-model', 'article-model', 'code-model', 'brainstorm-model']) values[key] = values[key].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
+  if (values.post !== undefined) {
+    values.post = values.post.toLowerCase();
+    if (!POST_PLATFORMS.includes(values.post)) throw new UsageError(`Invalid --post "${values.post}". Use: ${POST_PLATFORMS.join(', ')}`);
+    values.article = true; // a post is the article pipeline with another format
+  }
+  const article = values.article || values['list-article-models'] || values['edit-article'] !== undefined;
+  const feature = values.image ? 'image' : article ? 'article' : values.code || values['list-code-models'] ? 'code' : values.brainstorm ? 'brainstorm' : null;
+  if (feature) {
+    if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
+    if (values.stream) throw new UsageError(`--stream does not apply to --${feature}`);
+  }
+  if ((article || values.brainstorm) && values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
   if (values.image) {
     if (values.count !== undefined) {
       const n = Number(values.count);
       if (!Number.isInteger(n) || n < 1 || n > MAX_IMAGES) throw new UsageError(`Invalid --count "${values.count}" (1-${MAX_IMAGES})`);
       values.count = n;
     }
-    values['image-model'] = values['image-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
     if (values.via && !VIAS.includes(values.via)) throw new UsageError(`Invalid --via "${values.via}". Use: ${VIAS.join(', ')}`);
     if (values.via && values['image-model'].length) throw new UsageError('--via and --image-model cannot be combined');
-    if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
     if (values.family && !FAMILIES.includes(values.family)) throw new UsageError(`Invalid --family "${values.family}". Use: ${FAMILIES.join(', ')}`);
     if (values.aspect !== undefined && !ASPECT_RATIOS.includes(values.aspect)) throw new UsageError(`Invalid --aspect "${values.aspect}". Use: ${ASPECT_RATIOS.join(', ')}`);
     if (values.size && !IMAGE_SIZES.includes(values.size.toUpperCase())) throw new UsageError(`Invalid --size "${values.size}". Use: ${IMAGE_SIZES.join(', ')}`);
     if (values.size) values.size = values.size.toUpperCase();
-    if (values.stream) throw new UsageError('--stream does not apply to --image');
   }
-  if (values.post !== undefined) {
-    values.post = values.post.toLowerCase();
-    if (!POST_PLATFORMS.includes(values.post)) throw new UsageError(`Invalid --post "${values.post}". Use: ${POST_PLATFORMS.join(', ')}`);
-    values.article = true; // a post is the article pipeline with another format
-  }
-  if (values.article || values['list-article-models'] || values['edit-article'] !== undefined) {
-    values['article-model'] = values['article-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
-    if (values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
-    if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
-    if (values.words !== undefined) {
-      const n = Number(values.words);
-      const [min, max] = values.post ? [POSTS[values.post].minWords, POSTS[values.post].maxWords] : [MIN_WORDS, MAX_WORDS];
-      if (!Number.isInteger(n) || n < min || n > max) throw new UsageError(`Invalid --words "${values.words}" (${min}-${max})`);
-      values.words = n;
-    }
-    if (values.stream) throw new UsageError('--stream does not apply to --article');
-  }
-  if (values.code || values['list-code-models']) {
-    values['code-model'] = values['code-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
-    if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
-    if (values.stream) throw new UsageError('--stream does not apply to --code');
-  }
-  if (values.brainstorm) {
-    values['brainstorm-model'] = values['brainstorm-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
-    if (values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
-    if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
-    if (values.stream) throw new UsageError('--stream does not apply to --brainstorm');
+  if (article && values.words !== undefined) {
+    const n = Number(values.words);
+    const [min, max] = values.post ? [POSTS[values.post].minWords, POSTS[values.post].maxWords] : [MIN_WORDS, MAX_WORDS];
+    if (!Number.isInteger(n) || n < min || n > max) throw new UsageError(`Invalid --words "${values.words}" (${min}-${max})`);
+    values.words = n;
   }
   if (values['min-support'] !== undefined) {
     const r = Number(values['min-support']);
@@ -251,7 +240,8 @@ export function parseCli(argv) {
 // are parsed again with that flag, so its options are checked as when it is typed (-n abc, --tier bogus).
 // -> the options for runImage / runCode / runArticle, or null for a search.
 export function autoRoute(opts, argv) {
-  if (opts['list-models']) return null;
+  // --stream is a streamed search: routed, it would be refused ("--stream does not apply to --article")
+  if (opts['list-models'] || opts.stream) return null;
   if (!opts['no-auto-image'] && isImageRequest(opts.query)) return parseCli(['--image', ...argv]);
   if (!opts['no-auto-brainstorm'] && isBrainstormRequest(opts.query)) return parseCli(['--brainstorm', ...argv]);
   if (!opts['no-auto-code'] && isCodeRequest(opts.query)) return parseCli(['--code', ...argv]);
@@ -449,34 +439,22 @@ async function doctor(opts) {
         else report('ok', `${p.name} applied (${rows.length - skipped.length}/${rows.length} targets${skipped.length ? `; optional skipped: ${skipped.map(r => r.name).join(', ')}` : ''})`);
       }
     } catch (err) { report('FAIL', `could not inspect patches: ${err.message.split('\n')[0]}`); }
-    // Every hook imports the shared modules as ../core.
-    const { FANE_CORE_DIR, FANE_IMAGE_DIR } = createRequire(import.meta.url)(join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches', 'lib', 'vane.js'));
-    try {
-      dockerOut(['exec', container, 'test', '-f', `${FANE_CORE_DIR}/language.mjs`]);
-      report('ok', `shared modules present in ${FANE_CORE_DIR}`);
-    } catch { report('warn', `shared modules missing in ${FANE_CORE_DIR}: every web UI feature (articles, code, brainstorming, images) falls back to a normal answer (run node scripts/apply.mjs)`); }
-    try {
-      dockerOut(['exec', container, 'test', '-f', `${FANE_IMAGE_DIR}/vane-hook.mjs`]);
-      report('ok', `image modules present in ${FANE_IMAGE_DIR} (web UI image requests work)`);
-    } catch { report('warn', `image modules missing in ${FANE_IMAGE_DIR}; web UI image requests fall back to text (run node scripts/apply.mjs)`); }
-    // patch-article-chat imports the article modules (and trial.json, the models that passed the trial) the same way.
-    const { FANE_WRITE_DIR, FANE_CODE_DIR, FANE_BRAINSTORM_DIR } = createRequire(import.meta.url)(join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches', 'lib', 'vane.js'));
-    try {
-      dockerOut(['exec', container, 'test', '-f', `${FANE_WRITE_DIR}/vane-hook.mjs`]);
-      dockerOut(['exec', container, 'test', '-f', `${FANE_WRITE_DIR}/trial.json`]);
-      report('ok', `article modules present in ${FANE_WRITE_DIR} (web UI article requests work)`);
-    } catch { report('warn', `article modules missing in ${FANE_WRITE_DIR}; web UI article requests fall back to a normal answer (run node scripts/apply.mjs)`); }
-    // patch-code-chat: the coding modules and their trial.json (scripts/code-trial.mjs).
-    try {
-      dockerOut(['exec', container, 'test', '-f', `${FANE_CODE_DIR}/vane-hook.mjs`]);
-      dockerOut(['exec', container, 'test', '-f', `${FANE_CODE_DIR}/trial.json`]);
-      report('ok', `code modules present in ${FANE_CODE_DIR} (web UI coding requests work)`);
-    } catch { report('warn', `code modules or their trial.json missing in ${FANE_CODE_DIR}; web UI coding requests say so (run node scripts/code-trial.mjs, then node scripts/apply.mjs)`); }
-    // patch-brainstorm-chat: the brainstorming modules (their models come from the article trial checked above).
-    try {
-      dockerOut(['exec', container, 'test', '-f', `${FANE_BRAINSTORM_DIR}/vane-hook.mjs`]);
-      report('ok', `brainstorm modules present in ${FANE_BRAINSTORM_DIR} (web UI brainstorm requests work)`);
-    } catch { report('warn', `brainstorm modules missing in ${FANE_BRAINSTORM_DIR}; web UI brainstorm requests fall back to a normal answer (run node scripts/apply.mjs)`); }
+    // The modules each hook imports (every hook imports ../core too), and the trial.json of the models that passed.
+    const { FANE_CORE_DIR, FANE_IMAGE_DIR, FANE_WRITE_DIR, FANE_CODE_DIR, FANE_BRAINSTORM_DIR } = createRequire(import.meta.url)(join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches', 'lib', 'vane.js'));
+    const MODULES = [
+      [FANE_CORE_DIR, ['language.mjs'], 'shared modules', '', 'every web UI feature (articles, code, brainstorming, images) falls back to a normal answer (run node scripts/apply.mjs)'],
+      [FANE_IMAGE_DIR, ['vane-hook.mjs'], 'image modules', 'web UI image requests work', 'web UI image requests fall back to text (run node scripts/apply.mjs)'],
+      [FANE_WRITE_DIR, ['vane-hook.mjs', 'trial.json'], 'article modules', 'web UI article requests work', 'web UI article requests fall back to a normal answer (run node scripts/apply.mjs)'],
+      [FANE_CODE_DIR, ['vane-hook.mjs', 'trial.json'], 'code modules', 'web UI coding requests work', 'web UI coding requests say so (run node scripts/code-trial.mjs, then node scripts/apply.mjs)'],
+      // the brainstorm models come from the article trial checked above
+      [FANE_BRAINSTORM_DIR, ['vane-hook.mjs'], 'brainstorm modules', 'web UI brainstorm requests work', 'web UI brainstorm requests fall back to a normal answer (run node scripts/apply.mjs)'],
+    ];
+    for (const [dir, files, what, works, otherwise] of MODULES) {
+      try {
+        for (const f of files) dockerOut(['exec', container, 'test', '-f', `${dir}/${f}`]);
+        report('ok', `${what} present in ${dir}${works ? ` (${works})` : ''}`);
+      } catch { report('warn', `${what}${files.length > 1 ? ` or their ${files[1]}` : ''} missing in ${dir}; ${otherwise}`); }
+    }
   }
 
   try {

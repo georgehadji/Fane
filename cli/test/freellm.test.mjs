@@ -137,6 +137,7 @@ test('createRoleCaller: no OpenRouter credits move the run to the free: models, 
   const paidOnly = await call('copy',{ system: 's', user: 'u' }, { chain: ['a/1'], maxTokens: 100 });
   assert.equal(paidOnly.fatal, true);
   assert.match(paidOnly.errors[0], /a\/1: 402 no credits/);
+  assert.equal(paidOnly.status, 402); // so the answer says "out of credits" in its own words
 });
 
 test('createRoleCaller: a 402 with no free: model left, or a stopped run, still stops', async () => {

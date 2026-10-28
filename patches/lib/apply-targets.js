@@ -53,10 +53,22 @@ function run(name, targets) {
     return;
   }
   if (!applied.length) return console.log(`${name}: already patched`);
-  for (const f of files) {
-    if (next[f] === contents[f]) continue;
+  // Every new bundle is written in full before any is replaced, so a failing write (disk full) leaves no file
+  // patched without its partner (an image hook without the route that serves its links).
+  const changed = files.filter(f => next[f] !== contents[f]);
+  try {
+    for (const f of changed) {
+      const st = fs.statSync(f); // the renamed file keeps the bundle's mode and owner
+      fs.writeFileSync(`${f}.fane-tmp`, next[f], { mode: st.mode });
+      try { fs.chownSync(`${f}.fane-tmp`, st.uid, st.gid); } catch { /* not root: the owner is already ours */ }
+    }
+  } catch (err) {
+    for (const f of changed) fs.rmSync(`${f}.fane-tmp`, { force: true });
+    throw err;
+  }
+  for (const f of changed) {
     if (!fs.existsSync(`${f}.bak`)) fs.writeFileSync(`${f}.bak`, contents[f]);
-    fs.writeFileSync(f, next[f]);
+    fs.renameSync(`${f}.fane-tmp`, f);
   }
   console.log(`${name}: patched ${applied.length} of ${targets.length} targets (backups: *.bak)`);
 }

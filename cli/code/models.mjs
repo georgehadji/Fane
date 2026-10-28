@@ -8,7 +8,8 @@
 import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
 import { THINKING_HEADROOM } from '../write/models.mjs';
 
-export const CODE_ROLES = ['spec', 'generate', 'review', 'fix', 'tests'];
+// In the order the roles take primaries from the ranked list (catalogue.mjs): the writer and its reviewer differ in lab.
+export const CODE_ROLES = ['generate', 'review', 'fix', 'tests', 'spec'];
 export const CODE_JSON_ROLES = new Set(['spec', 'review']);
 
 export const CODE_PHASES = {

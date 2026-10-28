@@ -81,7 +81,8 @@ export function applyClusters(data, ideas, prior = []) {
       if (!idea || placed.has(idea.id)) continue;
       placed.add(idea.id);
       const dup = text(s.duplicate_of);
-      if (dup && dup !== idea.id && byId.has(dup)) { dropped.add(idea.id); continue; }
+      // a pair marked as duplicates of each other keeps the second one
+      if (dup && dup !== idea.id && byId.has(dup) && !dropped.has(dup)) { dropped.add(idea.id); continue; }
       idea.feasibility = score(s.feasibility); idea.novelty = score(s.novelty); idea.impact = score(s.impact);
       if (idea.feasibility != null && idea.novelty != null && idea.impact != null) {
         idea.score = Math.round((WEIGHTS.novelty * idea.novelty + WEIGHTS.impact * idea.impact + WEIGHTS.feasibility * idea.feasibility) * 10) / 10;
@@ -98,7 +99,8 @@ export function applyClusters(data, ideas, prior = []) {
 }
 
 // The ideas to develop: the best of each theme in turn (themes ordered by their best idea), so a run does not develop
-// three variants of one idea; ideas below MIN_FEASIBILITY are skipped. Without scores: the rarest ideas first.
+// three variants of one idea; ideas below MIN_FEASIBILITY are skipped, unless no idea reaches it (then the best
+// scored, rather than paying for a development and a synthesis of nothing). Without scores: the rarest ideas first.
 export function pickIdeas(ideas, themes, n) {
   if (n <= 0) return [];
   const byId = new Map(ideas.map(i => [i.id, i]));
@@ -108,6 +110,7 @@ export function pickIdeas(ideas, themes, n) {
     .map(t => t.ids.map(id => byId.get(id)).filter(i => i?.score != null && i.feasibility >= MIN_FEASIBILITY).sort((a, b) => b.score - a.score))
     .filter(q => q.length)
     .sort((a, b) => b[0].score - a[0].score);
+  if (!queues.length) return [...scored].sort((a, b) => b.score - a.score).slice(0, n);
   const out = [];
   while (out.length < n && queues.some(q => q.length)) for (const q of queues) if (q.length && out.length < n) out.push(q.shift());
   return out;

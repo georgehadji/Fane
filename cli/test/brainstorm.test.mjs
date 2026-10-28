@@ -76,6 +76,9 @@ test('applyClusters: scores and themes from the answer, unknown ids ignored, dup
   assert.equal(a.novelty, 2); // the second listing of R1I1 is ignored
   assert.equal(a.score, Math.round((0.4 * 2 + 0.35 * 7 + 0.25 * 8) * 10) / 10);
   assert.deepEqual(a.exists, { title: 'Existing A', url: 'https://example.org/a' });
+  // two ideas marked as duplicates of each other: one stays
+  const pair = applyClusters({ themes: [{ theme: 'T', ideas: [{ id: 'R1I1', duplicate_of: 'R1I2' }, { id: 'R1I2', duplicate_of: 'R1I1' }] }] }, ideas);
+  assert.deepEqual(pair.ideas.map(i => i.id), ['R1I2', 'R1I3', 'R2I1']);
 });
 
 test('pickIdeas: the best of each theme in turn, never an unbuildable idea; without scores, the rarest first', () => {
@@ -84,6 +87,8 @@ test('pickIdeas: the best of each theme in turn, never an unbuildable idea; with
   const themes = [{ theme: 'A', ids: ['a1', 'a2', 'a3'] }, { theme: 'B', ids: ['b1'] }, { theme: 'C', ids: ['c1', 'c2'] }];
   assert.deepEqual(pickIdeas(ideas, themes, 3).map(i => i.id), ['a1', 'b1', 'c2']); // not a1, a2, a3; c1 is not feasible
   assert.deepEqual(pickIdeas(ideas, themes, 5).map(i => i.id), ['a1', 'b1', 'c2', 'a2', 'a3']);
+  // no idea is feasible enough: the best scored, not nothing
+  assert.deepEqual(pickIdeas([s('x', 5, 1), s('y', 7, 2)], [{ theme: 'X', ids: ['x', 'y'] }], 1).map(i => i.id), ['y']);
   assert.deepEqual(pickIdeas([idea('x', 'x', { probability: 0.5 }), idea('y', 'y', { probability: 0.02 })], [{ theme: '', ids: ['x', 'y'] }], 1).map(i => i.id), ['y']);
 });
 

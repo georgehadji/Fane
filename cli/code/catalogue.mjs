@@ -6,18 +6,16 @@
 import { buildTextCatalogue, selectChains, selectFreeChains } from '../write/catalogue.mjs';
 import { extractJson } from '../write/llm.mjs';
 import { extractCode, safePath } from './files.mjs';
-import { CODE_JSON_ROLES } from './models.mjs';
+import { CODE_JSON_ROLES, CODE_ROLES } from './models.mjs';
 
-// Order in which roles take primaries from the ranked list: the writer and its reviewer differ in lab.
-export const CODE_ROLE_ORDER = ['generate', 'review', 'fix', 'tests', 'spec'];
 export const TRIAL_KEY = 'code';
 
 export const buildCodeCatalogue = (entries, opts) => buildTextCatalogue(entries, { ...opts, code: true });
 
 export const selectCodeChains = (catalogue, trial, { mode = 'balanced' } = {}) =>
-  selectChains(catalogue, trial, { mode, lang: TRIAL_KEY, roles: CODE_ROLE_ORDER, jsonRoles: CODE_JSON_ROLES });
+  selectChains(catalogue, trial, { mode, lang: TRIAL_KEY, roles: CODE_ROLES, jsonRoles: CODE_JSON_ROLES });
 export const selectFreeCodeChains = (trial, ready, last) =>
-  selectFreeChains(trial, ready, { lang: TRIAL_KEY, roles: CODE_ROLE_ORDER, jsonRoles: CODE_JSON_ROLES, last });
+  selectFreeChains(trial, ready, { lang: TRIAL_KEY, roles: CODE_ROLES, jsonRoles: CODE_JSON_ROLES, last });
 
 // ---- the live trial: a task with one right answer ----
 

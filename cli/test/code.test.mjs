@@ -77,6 +77,8 @@ test('code requests are not articles or posts, and the CLI routes them to --code
   assert.equal(route('write a Python script that renames photos', '--no-auto-code'), null);
   assert.equal(route('generate an image of a Python snake').image, true);
   assert.throws(() => parseCli(['--code', 'x', '--stream']), /does not apply to --code/);
+  // --stream asks for a streamed search: it stays one instead of failing as --code --stream
+  assert.equal(route('write a Python script that renames photos', '--stream'), null);
 });
 
 test('safePath keeps relative paths inside the folder and refuses the rest', () => {
@@ -127,6 +129,9 @@ test('normalizeSpec drops unsafe and repeated paths and a README, and caps the f
   assert.ok(dropped.some(d => /listed 15 files/.test(d)));
   assert.equal(normalizeSpec({ language: 'x', files: [{ path: '/abs' }] }).spec, null);
   assert.deepEqual(normalizeSpec({ language: 'JavaScript', files: [{ path: 'App.js' }, { path: 'app.js' }] }).spec.files.map(f => f.path), ['App.js']);
+  // a file and a folder of the same name cannot both be written
+  const clash = normalizeSpec({ language: 'Python', files: [{ path: 'config' }, { path: 'Config\\settings.py' }, { path: 'configs.py' }] });
+  assert.deepEqual([clash.spec.files.map(f => f.path), clash.dropped.length], [['config', 'configs.py'], 1]);
 });
 
 test('the fix prompt holds the whole file, up to MAX_FILE_CHARS', () => {
@@ -451,4 +456,22 @@ test('the code trial runs model code with an empty environment', async () => {
     const code = "if (process.env.FANE_SANDBOX_PROBE) throw new Error('env leaked');\nexport const parseDuration = (s) => Number(s);";
     assert.deepEqual(await runCases(code, [['5', 5]]), { results: [{ ok: true }] });
   } finally { delete process.env.FANE_SANDBOX_PROBE; }
+});
+
+test('the CLI writes generated files only inside a new or empty folder, never over a file', async () => {
+  const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { codeDir, writeCodeFiles } = await import('../runners.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'fane-code-out-'));
+  try {
+    const r = { files: [{ path: 'src/a.py', content: 'x = 1\n' }], tests: [], readme: '# R\n' };
+    assert.deepEqual(await writeCodeFiles(dir, r), ['src/a.py', 'README.md']);
+    assert.equal(await readFile(join(dir, 'src', 'a.py'), 'utf8'), 'x = 1\n');
+    await assert.rejects(writeCodeFiles(dir, r), /EEXIST/); // wx: an existing file is never overwritten
+    await assert.rejects(writeCodeFiles(join(dir, 'b'), { files: [{ path: '../escape.py', content: '' }], tests: [], readme: '' }), /outside/);
+    await assert.rejects(codeDir({ 'out-dir': dir, query: 'q' }), /not empty/);
+    const fresh = join(dir, 'new');
+    assert.equal(await codeDir({ 'out-dir': fresh, query: 'q' }), fresh);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

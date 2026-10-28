@@ -20,8 +20,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { DEFAULTS } from '../cli/vane.mjs';
-import { createOpenRouterClient, findOpenRouterKey } from '../cli/image/openrouter.mjs';
+import { createOpenRouterClient } from '../cli/image/openrouter.mjs';
 import { sourcesSection } from '../cli/write/checks.mjs';
 import { auditResult, claimLedger, claimSupportRatio } from '../cli/write/gate.mjs';
 import { countTells } from '../cli/core/language.mjs';
@@ -29,6 +28,7 @@ import { createRoleCaller } from '../cli/write/llm.mjs';
 import { MODES, tokensFor } from '../cli/write/models.mjs';
 import { prompts } from '../cli/write/prompts.mjs';
 import { aggregate, median, runCli } from './bench.mjs';
+import { apiKey } from './trial-lib.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -142,15 +142,6 @@ export function compareArticles(base, cur, tol = TOLERANCE) {
     if (has('secs') && c.secs > b.secs * (1 + tol.secsRise) && c.secs - b.secs > 60) regressions.push(`${name}: time ${b.secs}s -> ${c.secs}s`);
   }
   return { rows, regressions };
-}
-
-async function apiKey(fromVane) {
-  if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY;
-  if (!fromVane) throw new Error('Set OPENROUTER_API_KEY or pass --key-from-vane.');
-  const res = await fetch(`${DEFAULTS.url}/api/config`, { signal: AbortSignal.timeout(10_000) });
-  const key = findOpenRouterKey((await res.json()).values?.modelProviders);
-  if (!key) throw new Error(`No Vane provider with an OpenRouter Base URL and an API key at ${DEFAULTS.url}.`);
-  return key;
 }
 
 const fmt = (x) => (x == null ? '-' : String(x));

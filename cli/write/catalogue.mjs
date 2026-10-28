@@ -14,14 +14,16 @@ import { THINKING_LEAK, checkCitations, rhythm } from './checks.mjs';
 import { countTells, findHomoglyphs, greekShare, greekTypography, wordCount } from '../core/language.mjs';
 import { extractJson } from './llm.mjs';
 import { FREE_PREFIX, isFreeModel } from '../image/openrouter.mjs';
+import { JSON_ROLES } from './models.mjs';
 
 export const FALLBACKS_PER_ROLE = 3;
 export const MIN_CONTEXT = 64_000; // 16 sources of 700 characters plus the article fit with room to spare
 
-// Not for writing: routers, embedding/vision/code/translation specialists, preview aliases.
-const NOT_FOR_ARTICLES = /(?:^|[/-])(?:router|switchyard|embed\w*|moderation|guard\w*|ocr|vl|vision|omni|coder?|codex|math|summari[sz]e|extract|translate\w*|moondream|image|audio|tts|whisper)(?:$|[/-])/i;
-// The coding pipeline (cli/code) takes the code specialists too.
-const NOT_FOR_CODE = /(?:^|[/-])(?:router|switchyard|embed\w*|moderation|guard\w*|ocr|vl|vision|omni|math|summari[sz]e|extract|translate\w*|moondream|image|audio|tts|whisper)(?:$|[/-])/i;
+// Not for writing: routers, embedding/vision/code/translation specialists, preview aliases. The coding pipeline
+// (cli/code) takes the code specialists too.
+const NOT_TEXT = String.raw`router|switchyard|embed\w*|moderation|guard\w*|ocr|vl|vision|omni|math|summari[sz]e|extract|translate\w*|moondream|image|audio|tts|whisper`;
+const NOT_FOR_CODE = new RegExp(String.raw`(?:^|[/-])(?:${NOT_TEXT})(?:$|[/-])`, 'i');
+const NOT_FOR_ARTICLES = new RegExp(String.raw`(?:^|[/-])(?:coder?|codex|${NOT_TEXT})(?:$|[/-])`, 'i');
 const VARIANT = /:(?:free|batch|extended|nitro|floor|online|exacto)$|^~/;
 
 // OpenRouter prices are USD per token strings; the blend weighs output 3:1 over input
@@ -76,7 +78,6 @@ function diverse(list, better) {
   return out;
 }
 
-const JSON_ROLES = new Set(['queries', 'outline', 'factcheck', 'critique', 'audit']);
 // Order in which roles take primaries from the ranked list: neighbours differ in lab.
 const ROLE_ORDER = ['draft', 'critique', 'factcheck', 'revise', 'audit', 'polish', 'style', 'copy', 'outline'];
 const BANDS = { speed: [0, 1 / 3], balanced: [1 / 3, 2 / 3], quality: [2 / 3, 1] };

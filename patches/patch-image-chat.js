@@ -17,6 +17,10 @@ const LAST_ANSWER = 'async()=>{let R=await i.A.select().from(j.messages).where((
 
 const HOOK = `if(await(async()=>{try{let H=await import(${JSON.stringify(`file://${FANE_IMAGE_DIR}/vane-hook.mjs`)});return await H.handleImageRequest(b.followUp,{lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},emit:x=>{let B={id:crypto.randomUUID(),type:"text",data:x};a.emitBlock(B);return B.id},update:(I,x)=>{let B=a.getBlock(I);B&&(B.data=x,a.updateBlock(I,[{op:"replace",path:"/data",value:x}]))}})}catch(E){console.log("fane: image hook unavailable:",E&&E.message);return!1}})()){${FINISH};return}/*fane:image-chat*/`;
 
+// The image hook's own text after its parameters (the other hooks pass research: there), so an upgrade marker below
+// cannot be found in another hook's call.
+const TAIL = `mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},emit:`;
+
 const CLASSIFY = 'let d=await (0,e.L)({chatHistory:b.chatHistory,enabledSources:b.config.sources,query:b.followUp,llm:b.config.llm}),l=h.u.executeAll(';
 
 const TARGETS = [
@@ -33,7 +37,7 @@ const TARGETS = [
     file: FILES.chatRoute,
     from: 'handleImageRequest(b.followUp,{configPath:',
     to: 'handleImageRequest(b.followUp,{mode:b.config.mode,configPath:',
-    marker: 'mode:b.config.mode,configPath:', // later versions put `history` in front of it
+    marker: TAIL, // later versions put `history` in front of it
   },
   {
     // Upgrade for a hook that has `mode` but not the chat history (needed for edits of earlier images).
@@ -41,7 +45,7 @@ const TARGETS = [
     file: FILES.chatRoute,
     from: 'handleImageRequest(b.followUp,{mode:b.config.mode,configPath:',
     to: 'handleImageRequest(b.followUp,{history:b.chatHistory,mode:b.config.mode,configPath:',
-    marker: 'history:b.chatHistory,mode:b.config.mode,configPath:', // later versions put `lastAnswer` in front of it
+    marker: `history:b.chatHistory,${TAIL}`, // later versions put `lastAnswer` in front of it
   },
   {
     // Upgrade for a hook that has the history but not lastAnswer (the history can be stale in the browser).
@@ -49,7 +53,7 @@ const TARGETS = [
     file: FILES.chatRoute,
     from: 'handleImageRequest(b.followUp,{history:b.chatHistory,mode:b.config.mode,configPath:',
     to: `handleImageRequest(b.followUp,{lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:`,
-    marker: 'lastAnswer:async()=>', // patch-pipeline-abort puts `signal` in front of it
+    marker: `${LAST_ANSWER},history:b.chatHistory,${TAIL}`, // patch-pipeline-abort puts `signal` in front of it
   },
 ];
 

@@ -6,7 +6,7 @@
 // with the earlier image as the reference.
 import { TIER_FOR_MODE } from './catalogue.mjs';
 import { isImageEdit, isImageRequest, parseImageOptions, pickReferenceIndex } from './intent.mjs';
-import { previousAnswer, providerMissing, quiet, renderProgress, renderResult, tagged } from './present.mjs';
+import { escapeHtml, previousAnswer, providerMissing, quiet, renderProgress, renderResult, tagged } from './present.mjs';
 import { IMAGE_TEXT_MODEL, createImageGenerator } from './generate.mjs';
 import { createImageStore, storeDirFor, storedUrlsIn } from './store.mjs';
 import { beginRun } from '../core/runlog.mjs';
@@ -34,46 +34,55 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
   const track = beginRun(earlier ? 'image-edit' : 'image', log);
   log = track.log;
   const id = emit(tagged(quiet([earlier ? 'Editing the image…' : 'Generating images…'])));
-  const client = generator ? null : await openRouterClientFromVane({ configPath, readConfig, log, signal });
-  // freellmapi alone is not enough: images are drawn on OpenRouter
-  if ((!client || client.freeLlm === 'only') && !generator) {
-    update(id, tagged(providerMissing('Image generation')));
-    return true;
-  }
-  let references = [];
-  let editedImage = null;
-  if (earlier) {
-    const index = pickReferenceIndex(query, earlier.length);
-    try { references = [await store.get(earlier[index])]; editedImage = index + 1; } catch (err) {
-      log(`earlier image not readable: ${err.message}`);
-      update(id, tagged('The earlier image is no longer stored, so I cannot edit it. Describe the picture you want and I will make new images.'));
+  // Once the answer exists this hook owns the turn: a throw would make Vane answer again under it.
+  const say = (markdown) => { try { update(id, tagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
+  try {
+    const client = generator ? null : await openRouterClientFromVane({ configPath, readConfig, log, signal });
+    // freellmapi alone is not enough: images are drawn on OpenRouter
+    if ((!client || client.freeLlm === 'only') && !generator) {
+      say(providerMissing('Image generation'));
       return true;
     }
-  }
-  const generate = generator || createImageGenerator({
-    client,
-    download: (url) => safeDownload(url),
-    textModel: IMAGE_TEXT_MODEL,
-    log,
-  });
-  // Each image is stored the moment it lands and shown at once; the queue keeps the updates in order.
-  const done = [];
-  let queue = Promise.resolve();
-  const keep = async (image) => {
-    try { return store ? await store.put(image.dataUrl) : undefined; } catch (err) { log(`image not stored, embedding it: ${err.message}`); return undefined; }
-  };
-  const onProgress = (p) => {
-    queue = queue.then(async () => {
-      done.push({ ...p.image, slot: p.slot, url: await keep(p.image) });
-      update(id, tagged(renderProgress(done, p.total, query)));
+    let references = [];
+    let editedImage = null;
+    if (earlier) {
+      const index = pickReferenceIndex(query, earlier.length);
+      try { references = [await store.get(earlier[index])]; editedImage = index + 1; } catch (err) {
+        log(`earlier image not readable: ${err.message}`);
+        say('The earlier image is no longer stored, so I cannot edit it. Describe the picture you want and I will make new images.');
+        return true;
+      }
+    }
+    const generate = generator || createImageGenerator({
+      client,
+      download: (url) => safeDownload(url),
+      textModel: IMAGE_TEXT_MODEL,
+      log,
     });
-  };
-  // An edit instruction is sent as written: the prompt enhancer would turn "make it blue" into a new scene.
-  const result = await generate({ prompt: query, format: 'jpeg', ...(references.length && { references, enhance: false }), ...(TIER_FOR_MODE[mode] && { tier: TIER_FOR_MODE[mode] }), ...parseImageOptions(query), onProgress });
-  await queue;
-  // Stored images are linked, not embedded; one that could not be stored is embedded as before.
-  const images = await Promise.all(result.images.map(async (i) => ({ ...i, url: done.find(d => d.model === i.model)?.url ?? await keep(i) })));
-  update(id, tagged(renderResult({ ...result, images, editedImage }, query)));
-  track.finish({ ok: images.length > 0, cost: images.reduce((n, i) => n + (i.pricePerImage || 0), 0) });
-  return true;
+    // Each image is stored the moment it lands and shown at once; the queue keeps the updates in order.
+    const done = [];
+    let queue = Promise.resolve();
+    const keep = async (image) => {
+      try { return store ? await store.put(image.dataUrl) : undefined; } catch (err) { log(`image not stored, embedding it: ${err.message}`); return undefined; }
+    };
+    const onProgress = (p) => {
+      queue = queue.then(async () => {
+        done.push({ ...p.image, slot: p.slot, url: await keep(p.image) });
+        say(renderProgress(done, p.total, query));
+      });
+    };
+    // An edit instruction is sent as written: the prompt enhancer would turn "make it blue" into a new scene.
+    const result = await generate({ prompt: query, format: 'jpeg', ...(references.length && { references, enhance: false }), ...(TIER_FOR_MODE[mode] && { tier: TIER_FOR_MODE[mode] }), ...parseImageOptions(query), onProgress });
+    await queue;
+    // Stored images are linked, not embedded; one that could not be stored is embedded as before.
+    const images = await Promise.all(result.images.map(async (i) => ({ ...i, url: done.find(d => d.model === i.model)?.url ?? await keep(i) })));
+    say(renderResult({ ...result, images, editedImage }, query));
+    track.finish({ ok: images.length > 0, cost: images.reduce((n, i) => n + (i.pricePerImage || 0), 0) });
+    return true;
+  } catch (err) {
+    log(`image failed: ${err.message}`);
+    say(quiet([escapeHtml(`The images could not be made: ${err.message}`)]));
+    track.finish({ ok: false });
+    return true;
+  }
 }

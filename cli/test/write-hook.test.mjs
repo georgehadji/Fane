@@ -371,3 +371,12 @@ test('the patch can upgrade a hook installed before follow-up edits', () => {
   assert.match(r.next[FILES.chatRoute], /handleArticleRequest\(b\.followUp,\{lastAnswer:async\(\)=>\{.*,history:b\.chatHistory,mode:b\.config\.mode,configPath:"\/c"\}\)/);
   assert.deepEqual(planPatch(r.next, [ARTICLE[1]]).applied, []); // and a second pass changes nothing
 });
+
+test('an upgrade is not taken as applied because the other hook passes the same parameters', () => {
+  const C = JSON.stringify(CONFIG_JSON);
+  const old = (first, call) => ({ [FILES.chatRoute]: planPatch({ [FILES.chatRoute]: ROUTE }, [first]).next[FILES.chatRoute].replace('m=null;', `m=await H.${call};`) });
+  const image = planPatch(old(ARTICLE[0], `handleImageRequest(b.followUp,{configPath:${C},emit:x=>1})`), IMAGE.slice(1));
+  assert.deepEqual([image.errors, image.applied.length], [[], 3]);
+  const article = planPatch(old(IMAGE[0], `handleArticleRequest(b.followUp,{mode:b.config.mode,configPath:${C},research:1})`), [ARTICLE[1]]);
+  assert.deepEqual([article.errors, article.applied.length], [[], 1]);
+});

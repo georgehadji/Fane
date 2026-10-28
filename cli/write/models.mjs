@@ -58,4 +58,5 @@ export function tokensFor(role, words, lang) {
   return Math.ceil((JSON_TOKENS[role] || 1500) * (lang === 'el' ? 1.6 : 1)) + THINKING_HEADROOM;
 }
 
-export const isJsonRole = (role) => role in JSON_TOKENS;
+export const JSON_ROLES = new Set(Object.keys(JSON_TOKENS));
+export const isJsonRole = (role) => JSON_ROLES.has(role);

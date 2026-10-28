@@ -200,6 +200,18 @@ test('download follows redirects with a re-check and sniffs the bytes', async ()
   await assert.rejects(safeDownload('https://img.test/x', { fetchImpl: async () => new Response('not an image'), resolve }), /not an image/);
 });
 
+test('download caps the size, declared or streamed, and the number of redirects', async () => {
+  const resolve = async () => [{ address: '93.184.216.34' }];
+  const declared = async () => new Response(PNG, { headers: { 'content-length': '999' } });
+  await assert.rejects(safeDownload('https://img.test/x', { fetchImpl: declared, resolve, maxBytes: 100 }), /size cap/);
+  const streamed = async () => new Response(new Uint8Array(200)); // no content-length
+  await assert.rejects(safeDownload('https://img.test/x', { fetchImpl: streamed, resolve, maxBytes: 100 }), /size cap/);
+  let hops = 0;
+  const loop = async () => { hops++; return new Response(null, { status: 302, headers: { location: 'https://img.test/again' } }); };
+  await assert.rejects(safeDownload('https://img.test/x', { fetchImpl: loop, resolve, maxRedirects: 2 }), /too many redirects/);
+  assert.equal(hops, 3);
+});
+
 // ---- save ---------------------------------------------------------------
 
 test('file names are safe and never overwrite', async () => {
@@ -430,6 +442,17 @@ test('pipeline: remote image URLs go through the downloader (both endpoints)', a
 // ---- Vane web UI hook ---------------------------------------------------
 
 const { handleImageRequest } = await import('../image/vane-hook.mjs');
+
+test('once the hook has answered, a failure stays in its answer and never reaches Vane', async () => {
+  let shown = '';
+  const io = { emit: () => 'b1', update: (id, md) => { shown = md; }, log: () => {} };
+  assert.equal(await handleImageRequest('draw a fox', { ...io, generator: async () => { throw new Error('boom'); } }), true);
+  assert.match(shown, /The images could not be made: boom/);
+  // an update that throws (Vane's block gone) is logged, not thrown
+  const broken = { emit: () => 'b1', update: () => { throw new Error('no block'); }, log: () => {} };
+  const generator = async ({ onProgress }) => { onProgress({ ready: 1, total: 1, slot: 0, image: { dataUrl: PNG_URL, model: 'm' } }); return { images: [], requested: 1, complete: false, errors: [], rewrittenPrompt: null }; };
+  assert.equal(await handleImageRequest('draw a fox', { ...broken, generator }), true);
+});
 
 test('hook ignores questions and answers image requests with markdown images', async () => {
   const blocks = new Map();
