@@ -54,12 +54,18 @@ export function parseArticleOptions(text, { post = false } = {}) {
 // για ...». Checked before isArticleRequest, which also matches «ανάρτηση» (a blog post, «ανάρτηση για το blog μου»,
 // stays an article). A post request that names no platform gets DEFAULT_PLATFORM.
 const PLATFORM = String.raw`(?:linkedin|λινκ(?:ε)?ντ(?:ι|ε)ν|facebook|φει?σ ?μπουκ|fb)`;
-const EN_POST = new RegExp(String.raw`^\s*${POLITE}${EN_VERB}\s+(?:me\s+|us\s+)?(?:(?:an?|the|one)\s+)?(?:\d{2,4}[- ]words?\s+)?${EN_ADJ}(?:${PLATFORM}\s+)?(?:post|update)s?(?![\p{L}])`, 'iu');
+const EN_POST = new RegExp(String.raw`^\s*${POLITE}${EN_VERB}\s+(?:me\s+|us\s+)?(?:(?:an?|the|one)\s+)?(?:\d{2,4}[- ]words?\s+)?${EN_ADJ}(?:(?:${PLATFORM}\s+)?posts?|${PLATFORM}\s+updates?)(?![\p{L}])`, 'iu'); // a bare "update" is a status report
 const EL_POST = new RegExp(String.raw`^\s*${POLITE}${EL_VERB}\s+(?:μου\s+|μασ\s+)?(?:(?:ενα|μια|μιασ|το|την|εναν)\s+)?(?:\p{L}+\s+){0,2}?(?:αναρτησ\p{L}*|ποστ|post)(?![\p{L}])`, 'iu');
 const platformIn = (folded) => {
   const m = new RegExp(String.raw`(?<![\p{L}])${PLATFORM}(?![\p{L}])`, 'iu').exec(folded);
   if (!m) return null;
   return /^(?:facebook|φει?σ ?μπουκ|fb)$/iu.test(m[0]) ? 'facebook' : 'linkedin';
+};
+
+// "make a LinkedIn post from it", «κάνε το ανάρτηση για το Facebook»: names a platform and a post, whatever the verb.
+export const namesPost = (text) => {
+  const folded = fold(text);
+  return Boolean(platformIn(folded)) && /(?<![\p{L}])(?:posts?|updates?|αναρτησ\p{L}*|ποστ)(?![\p{L}])/iu.test(folded);
 };
 
 export function postPlatform(text) {

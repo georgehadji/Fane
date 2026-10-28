@@ -30,7 +30,9 @@ test('a post request names its platform, or gets LinkedIn; a blog post stays an 
     assert.equal(postPlatform(q), platform, q);
     assert.equal(postTopic(q), topic, q);
   }
-  for (const q of ['Δημιούργησε μια ανάρτηση για το blog μου', 'write a blog post on AI', 'write an article about LinkedIn', 'how long should a LinkedIn post be?']) assert.equal(postPlatform(q), null, q);
+  for (const q of ['Δημιούργησε μια ανάρτηση για το blog μου', 'write a blog post on AI', 'write an article about LinkedIn', 'how long should a LinkedIn post be?', 'write an update on the project for my manager']) assert.equal(postPlatform(q), null, q);
+  assert.equal(postPlatform('write a LinkedIn update about our launch'), 'linkedin');
+  assert.equal(postTopic('write a LinkedIn update about our launch'), 'our launch');
   assert.ok(isArticleRequest('Δημιούργησε μια ανάρτηση για το blog μου'));
   assert.equal(parseArticleOptions('a 90-word post', { post: true }).words, 90);
   assert.equal(parseArticleOptions('a 90-word post').words, undefined); // articles read 3-4 digits only

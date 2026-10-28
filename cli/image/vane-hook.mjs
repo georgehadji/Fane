@@ -4,12 +4,12 @@
 // `vane --image` and the OpenRouter key from Vane's own provider settings. A follow-up that
 // edits the images of the previous answer ("make it a watercolour") is answered the same way,
 // with the earlier image as the reference.
-import { TIER_FOR_MODE } from './catalogue.mjs';
+import { ASPECT_RATIOS, TIER_FOR_MODE } from './catalogue.mjs';
 import { isImageEdit, isImageRequest, parseImageOptions, pickReferenceIndex } from './intent.mjs';
 import { escapeHtml, previousAnswer, providerMissing, quiet, renderProgress, renderResult, tagged } from './present.mjs';
 import { IMAGE_TEXT_MODEL, createImageGenerator } from './generate.mjs';
 import { createImageStore, storeDirFor, storedUrlsIn } from './store.mjs';
-import { beginRun } from '../core/runlog.mjs';
+import { STOPPED_STATUS, beginRun } from '../core/runlog.mjs';
 import { openRouterClientFromVane } from './openrouter.mjs';
 import { safeDownload } from './download.mjs';
 
@@ -17,8 +17,15 @@ import { safeDownload } from './download.mjs';
 // images and the message reads like an edit. A fresh image request is a new picture, not an edit.
 async function earlierImages(query, { history, lastAnswer, store }) {
   if (!store || isImageRequest(query) || !isImageEdit(query)) return null;
-  const links = storedUrlsIn(await previousAnswer(history, lastAnswer));
-  return links.length ? links : null;
+  const text = await previousAnswer(history, lastAnswer);
+  const links = storedUrlsIn(text);
+  return links.length ? { links, aspect: earlierAspect(text) } : null;
+}
+
+// The shape of the earlier images (present.mjs writes "aspect-ratio:auto 16/9"), so an edit keeps it.
+function earlierAspect(text) {
+  const m = /aspect-ratio:auto (\d+)\/(\d+)/.exec(text);
+  return m && ASPECT_RATIOS.includes(`${m[1]}:${m[2]}`) ? `${m[1]}:${m[2]}` : undefined;
 }
 
 // lastAnswer() -> text of the previous answer (from Vane's database); history is the chat history
@@ -41,15 +48,23 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
     // freellmapi alone is not enough: images are drawn on OpenRouter
     if ((!client || client.freeLlm === 'only') && !generator) {
       say(providerMissing('Image generation'));
+      track.finish({ ok: false });
       return true;
     }
     let references = [];
     let editedImage = null;
     if (earlier) {
-      const index = pickReferenceIndex(query, earlier.length);
-      try { references = [await store.get(earlier[index])]; editedImage = index + 1; } catch (err) {
+      const index = pickReferenceIndex(query, earlier.links.length);
+      // the edit models take raster images only
+      if (earlier.links[index].endsWith('.svg')) {
+        say('Vector images (SVG) cannot be edited. Describe the picture you want and I will make new images.');
+        track.finish({ ok: false });
+        return true;
+      }
+      try { references = [await store.get(earlier.links[index])]; editedImage = index + 1; } catch (err) {
         log(`earlier image not readable: ${err.message}`);
         say('The earlier image is no longer stored, so I cannot edit it. Describe the picture you want and I will make new images.');
+        track.finish({ ok: false });
         return true;
       }
     }
@@ -72,12 +87,13 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
       });
     };
     // An edit instruction is sent as written: the prompt enhancer would turn "make it blue" into a new scene.
-    const result = await generate({ prompt: query, format: 'jpeg', ...(references.length && { references, enhance: false }), ...(TIER_FOR_MODE[mode] && { tier: TIER_FOR_MODE[mode] }), ...parseImageOptions(query), onProgress });
+    const result = await generate({ prompt: query, format: 'jpeg', ...(references.length && { references, enhance: false }), ...(TIER_FOR_MODE[mode] && { tier: TIER_FOR_MODE[mode] }), ...(earlier?.aspect && { aspect: earlier.aspect }), ...parseImageOptions(query), onProgress });
     await queue;
     // Stored images are linked, not embedded; one that could not be stored is embedded as before.
     const images = await Promise.all(result.images.map(async (i) => ({ ...i, url: done.find(d => d.model === i.model)?.url ?? await keep(i) })));
     say(renderResult({ ...result, images, editedImage }, query));
-    track.finish({ ok: images.length > 0, cost: images.reduce((n, i) => n + (i.pricePerImage || 0), 0) });
+    const stopped = !images.length && (result.errors || []).some(e => /\b499\b|\bstopped:/i.test(String(e)));
+    track.finish({ ok: images.length > 0, ...(stopped && { status: STOPPED_STATUS }), cost: images.reduce((n, i) => n + (i.pricePerImage || 0), 0) });
     return true;
   } catch (err) {
     log(`image failed: ${err.message}`);

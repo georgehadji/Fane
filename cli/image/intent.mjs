@@ -84,22 +84,26 @@ export function parseImageOptions(text) {
 // night", "add a hat", "in the style of ...". The caller only asks this when the previous
 // answer was Fane's images, so the words may be short. Questions are not edits.
 const EDIT_START = /^\s*(?:(?:ok(?:ay)?|now|and|but|then|please|can you|could you)[,.]?\s+)*(?:make|turn|change|add|remove|replace|redo|recolou?r|restyle|try|give|put|keep|use|same|again|more|less|in|at|as|during|under|with|without|but)\b/i;
-const QUESTION_START = /^\s*(?:(?:what|why|how|who|when|where|which|is|are|does|do|did|explain|tell|describe)\b|(?:in|at|with|for|from|by|to)\s+(?:which|what|whom|whose)\b)/i;
+const QUESTION_START = /^\s*(?:(?:what|why|how|who|when|where|which|is|are|does|do|did|explain|tell|describe)\b|(?:in|at|as|with|without|during|under|for|from|by|to)\s+(?:which|what|whom|whose)\b)/i;
+// a question after a lead-in ("again, who built it", "keep it short: when was it built") or about one ("same question for Rome")
+const QUESTION_INSIDE = /[,:;]\s*(?:what|why|how|who|when|where|which)\b|\bquestions?\b/i;
 // "give", "use", "try" and "make a ..." also start other tasks ("Use Python to sort a list", "Make a list of ..."),
 // so they count only with a word that points at the picture.
 const BROAD_START = /^\s*(?:(?:ok(?:ay)?|now|and|but|then|please|can you|could you)[,.]?\s+)*(?:give|use|try|make\s+(?:me\s+)?(?:an?|some)\b)/i;
 const REFERS = /\b(?:it|its|them|this|that|these|those|images?|pictures?|photos?|ones?|versions?|style|look|background|colou?rs?|filter|lighting|palette|tones?)\b/i;
 export function isImageEdit(text) {
   const t = String(text || '');
-  if (!EDIT_START.test(t) || QUESTION_START.test(t) || /\?["'”’)]*\s*$/.test(t)) return false;
+  if (!EDIT_START.test(t) || QUESTION_START.test(t) || QUESTION_INSIDE.test(t) || /\?["'”’)]*\s*$/.test(t)) return false;
   return !BROAD_START.test(t) || REFERS.test(t);
 }
 
 // Which of the earlier images an edit means: "the second one", "image 3", "#2"; the first by default.
+// An ordinal counts only for a picture: "add a second moon" is about the scene.
 const ORDINALS = { first: 0, '1st': 0, second: 1, '2nd': 1, third: 2, '3rd': 2, fourth: 3, '4th': 3 };
+const ORDINAL_PICK = /\b(first|1st|second|2nd|third|3rd|fourth|4th)(?=\s+(?:one|image|picture|photo|version)s?\b|\s*[.,;:!]|\s*$)/;
 export function pickReferenceIndex(text, count) {
   const t = String(text || '').toLowerCase();
-  const word = t.split(/\W+/).find(w => Object.hasOwn(ORDINALS, w));
+  const word = ORDINAL_PICK.exec(t)?.[1];
   const n = word !== undefined ? ORDINALS[word] : /(?:image|picture|number|#)\s*(\d)\b/.exec(t)?.[1] - 1;
   return Number.isInteger(n) && n >= 0 && n < count ? n : 0;
 }

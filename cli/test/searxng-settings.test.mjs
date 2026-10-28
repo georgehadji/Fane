@@ -32,3 +32,11 @@ test('docker/fane-entrypoint.sh renders the same CORE block as renderSettings', 
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trimEnd(), renderSettings(repo, { coreKey: KEY }).trimEnd());
 });
+
+test('docker/fane-entrypoint.sh refuses the same keys as renderSettings, a newline included', { skip: spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh' }, () => {
+  const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
+  const check = /case "\$CORE_API_KEY" in[\s\S]*?\n {2}esac/.exec(script)[0];
+  const accepts = (key) => spawnSync('sh', ['-c', `${check}\necho "$ok"`], { env: { ...process.env, CORE_API_KEY: key }, encoding: 'utf8' }).stdout.trim() === 'yes';
+  assert.equal(accepts(KEY), true);
+  for (const bad of ["abc'def123", 'abc def123', 'short', 'a'.repeat(201), `${KEY}\nx: y`, `${KEY}\n`]) assert.equal(accepts(bad), false, JSON.stringify(bad));
+});

@@ -2,9 +2,8 @@
 // They run Fane's pipelines (cli/image, cli/write, cli/code, cli/brainstorm); Vane itself is needed only for their research.
 import { dirname, join } from 'node:path';
 import { TIER_FOR_MODE, buildCatalogue, viaOf } from './image/catalogue.mjs';
-import { imageSubject } from './image/intent.mjs';
+import { imageSubject, parseImageOptions } from './image/intent.mjs';
 import { IMAGE_TEXT_MODEL } from './image/generate.mjs';
-import { parseImageOptions } from './image/intent.mjs';
 import { articleTopic, parseArticleOptions, postTopic } from './core/intent-article.mjs';
 import { POSTS } from './core/formats.mjs';
 import { buildTextCatalogue, selectChains, selectFreeChains } from './write/catalogue.mjs';
@@ -12,7 +11,7 @@ import { detectLanguage } from './core/language.mjs';
 import { chainsFor } from './write/models.mjs';
 import { retryEmpty } from './write/research.mjs';
 import { OPENROUTER_BASE_URL, createOpenRouterClient, fromHost, modelClientFor, withFreeLlm } from './image/openrouter.mjs';
-import { DEFAULTS, UsageError, getProvidersStartingVane, search } from './client.mjs';
+import { DEFAULTS, UsageError, getModelProviders, getProvidersStartingVane, search } from './client.mjs';
 
 // ---- image generation ----------------------------------------------------
 
@@ -25,14 +24,17 @@ async function resolveClient(opts, { images = false } = {}) {
   if (opts['key-from-vane']) {
     try {
       await getProvidersStartingVane(opts.url, DEFAULTS.container); // a stopped Vane is started, as for a search
-      const res = await fetch(`${opts.url}/api/config`, { signal: AbortSignal.timeout(10_000) });
-      providers = (await res.json()).values?.modelProviders || [];
+      providers = await getModelProviders(opts.url);
     } catch (err) { if (!apiKey) throw err; }
   } else if (!apiKey) throw new UsageError('This needs an OpenRouter key: set OPENROUTER_API_KEY, or pass --key-from-vane to use the one configured in Vane.');
   const client = modelClientFor(providers, { apiKey, freeBaseUrl: fromHost });
   if (!client || (images && client.freeLlm === 'only')) throw new UsageError(`No Vane provider with Base URL ${OPENROUTER_BASE_URL} and an API key at ${opts.url}${images ? '' : ', nor a freellmapi one'}.`);
   return client;
 }
+
+// The --list-*-models commands work without a key (OpenRouter's catalogue is public). With one they use the client a
+// run would, so a freellmapi provider in Vane shows the same chains.
+export const listingClient = (opts) => (opts['key-from-vane'] || process.env.OPENROUTER_API_KEY ? resolveClient(opts) : createOpenRouterClient());
 
 // ---- articles ------------------------------------------------------------
 
@@ -43,7 +45,7 @@ function vaneRetrieve(opts, mode) {
   return retryEmpty(async (query) => (await search({ ...opts, query, stream: false, mode }, providers ??= await getProvidersStartingVane(opts.url, DEFAULTS.container))).sources);
 }
 
-const MODE_FOR_TIER = Object.fromEntries(Object.entries(TIER_FOR_MODE).map(([mode, tier]) => [tier, mode]));
+export const MODE_FOR_TIER = Object.fromEntries(Object.entries(TIER_FOR_MODE).map(([mode, tier]) => [tier, mode]));
 
 function printArticleReport(r) {
   const say = (s) => process.stderr.write(`${s}\n`);
@@ -79,10 +81,10 @@ async function defaultChains({ mode, lang, client }) {
 export async function listArticleModels(opts) {
   const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
   const lang = opts.lang ?? (opts.query ? detectLanguage(opts.query) : 'en');
-  const client = createOpenRouterClient();
+  const client = await listingClient(opts);
   const chosen = await defaultChains({ mode, lang, client });
   const price = new Map(buildTextCatalogue(await client.models()).map(m => [m.id, m]));
-  const show = (id) => `${id} ($${price.get(id)?.priceIn}/${price.get(id)?.priceOut})`;
+  const show = (id) => (price.has(id) ? `${id} ($${price.get(id).priceIn}/${price.get(id).priceOut})` : id); // a free: model has no price
   if (opts.json) return console.log(JSON.stringify({ mode, language: lang, trialDate: chosen.trialDate, pool: chosen.pool, band: chosen.band, chains: chosen.chains }, null, 2));
   console.log(`${mode}, ${lang === 'el' ? 'Greek' : 'English'}: ${chosen.pool} models passed the trial (${chosen.trialDate || 'undated'}); this mode's price band: ${chosen.band.join(', ')}`);
   for (const [role, chain] of Object.entries(chosen.chains)) console.log(`  ${role.padEnd(10)}${chain.map(show).join('  >  ')}`);
@@ -171,9 +173,9 @@ async function defaultCodeChains({ mode, client }) {
 
 export async function listCodeModels(opts) {
   const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
-  const client = createOpenRouterClient();
+  const client = await listingClient(opts);
   const chosen = await defaultCodeChains({ mode, client });
-  const show = (id) => `${id} ($${chosen.prices[id]?.in}/${chosen.prices[id]?.out})`;
+  const show = (id) => (chosen.prices?.[id] ? `${id} ($${chosen.prices[id].in}/${chosen.prices[id].out})` : id); // a free: model has no price
   if (opts.json) return console.log(JSON.stringify({ mode, trialDate: chosen.trialDate, pool: chosen.pool, band: chosen.band, chains: chosen.chains }, null, 2));
   console.log(`${mode}: ${chosen.pool} models passed the coding trial (${chosen.trialDate || 'undated'}); this mode's price band: ${chosen.band.join(', ')}`);
   for (const [role, chain] of Object.entries(chosen.chains)) console.log(`  ${role.padEnd(10)}${chain.map(show).join('  >  ')}`);

@@ -4,6 +4,7 @@
 // citations renumbered, sources list written by code, checks run. Pure except for the injected client.
 import { ANSWER_MARKER } from '../image/present.mjs';
 import { checkCitations, renumber, runChecks, sourcesSection } from './checks.mjs';
+import { namesPost } from '../core/intent-article.mjs';
 import { detectLanguage, fold, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
 import { createRoleCaller } from './llm.mjs';
 import { DEFAULT_MODE, tokensFor } from './models.mjs';
@@ -20,6 +21,7 @@ export function isArticleEdit(text) {
   const t = String(text || '');
   // ";" is the Greek question mark (fold() turns U+037E into it); in English it is only a semicolon
   if (NOT_EDIT.test(fold(t)) || (/;/.test(fold(t)) && /[α-ω]/.test(fold(t)))) return false;
+  if (namesPost(t)) return false; // a post made from the article: the rewrite would keep it an article
   return EN_EDIT.test(t) || EL_EDIT.test(fold(t));
 }
 

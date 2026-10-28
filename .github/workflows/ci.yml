@@ -41,3 +41,14 @@ jobs:
         run: |
           image=$(grep -o 'itzcrazykns1337/vane@sha256:[0-9a-f]*' docker-compose.yml)
           docker run --rm -u 0 --entrypoint node             -v "$PWD/cli/core:/fane/core:ro" -v "$PWD/cli/image:/fane/image:ro" -v "$PWD/cli/write:/fane/write:ro" -v "$PWD/cli/code:/fane/code:ro" -v "$PWD/cli/brainstorm:/fane/brainstorm:ro"             "$image" --input-type=module -e "for (const d of ['image', 'write', 'code', 'brainstorm']) { const m = await import('/fane/' + d + '/vane-hook.mjs'); console.log('imports:', d, Object.keys(m).join(',')); }"
+      # docker/fane-entrypoint.sh runs only under Compose. Start it as a user would: Vane must answer and the
+      # entrypoint must have patched it (a patch leaves a .bak; a failing one only warns and Vane starts unpatched).
+      - name: Start with Compose and check the entrypoint patched Vane
+        run: |
+          docker compose up -d
+          ok=0
+          for i in $(seq 60); do curl -fs http://127.0.0.1:3000/api/providers >/dev/null && ok=1 && break; sleep 2; done
+          if [ "$ok" = 1 ]; then docker exec vane test -f /home/vane/.next/server/chunks/641.js.bak || ok=0; fi
+          if [ "$ok" != 1 ]; then docker compose logs; fi
+          docker compose down -v
+          [ "$ok" = 1 ]

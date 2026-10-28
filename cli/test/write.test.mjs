@@ -44,10 +44,13 @@ test('countTells: the noun-heavy Greek style and "διαδραματίζει ...
   assert.equal(countTells('Η παραγωγή αυξήθηκε κατά 40% το 2023. Το έργο έγινε το 2016.', 'el').total, 0);
 });
 
-test('repairFinalNu puts back the final ν of την, στην, μην where Greek keeps it, and nowhere else', () => {
-  const r = repairFinalNu('Οι επιδράσεις στη ξηρά. Τη πόλη. Μη ανησυχείς. ΣΤΗ ΑΘΗΝΑ. Στη θάλασσα, τη Λέσβο, μη λες. Το παιδί, το κόστος.');
-  assert.equal(r.text, 'Οι επιδράσεις στην ξηρά. Την πόλη. Μην ανησυχείς. ΣΤΗΝ ΑΘΗΝΑ. Στη θάλασσα, τη Λέσβο, μη λες. Το παιδί, το κόστος.');
-  assert.deepEqual(r.fixed, ['στη ξηρά', 'Τη πόλη', 'Μη ανησυχείς', 'ΣΤΗ ΑΘΗΝΑ']);
+test('repairFinalNu puts back the final ν of την and στην where Greek keeps it, and nowhere else', () => {
+  const r = repairFinalNu('Οι επιδράσεις στη ξηρά. Τη πόλη. ΣΤΗ ΑΘΗΝΑ. Στη θάλασσα, τη Λέσβο, μη λες. Το παιδί, το κόστος.');
+  assert.equal(r.text, 'Οι επιδράσεις στην ξηρά. Την πόλη. ΣΤΗΝ ΑΘΗΝΑ. Στη θάλασσα, τη Λέσβο, μη λες. Το παιδί, το κόστος.');
+  assert.deepEqual(r.fixed, ['στη ξηρά', 'Τη πόλη', 'ΣΤΗ ΑΘΗΝΑ']);
+  assert.equal(wordCount('Solar output rose [1, 4]. Wind fell [2–3]. Prices [3]'), 6); // citation markers are not words
+  // «μη» before a noun or an adjective keeps no ν
+  assert.equal(repairFinalNu('οι μη κυβερνητικές οργανώσεις και τα μη επανδρωμένα αεροσκάφη').fixed.length, 0);
   assert.equal(repairFinalNu('μητέρα στήθος τηλέφωνο').fixed.length, 0); // only the whole words
 });
 

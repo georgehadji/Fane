@@ -9,12 +9,12 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { decodeDataUrl } from './extract.mjs';
+import { EXTENSIONS as EXT_OF } from './save.mjs';
 
 export const IMAGE_ROUTE = '/api/uploads';
 export const IMAGE_PARAM = 'fane-image';
 export const MAX_STORED_BYTES = 30 * 1024 * 1024;
 
-const EXT_OF = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'image/svg+xml': 'svg' };
 const MIME_OF = Object.fromEntries(Object.entries(EXT_OF).map(([mime, ext]) => [ext, mime]));
 export const IMAGE_NAME = /^[a-f0-9]{64}\.(?:jpg|png|webp|gif|svg)$/;
 

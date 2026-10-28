@@ -2,7 +2,7 @@
 // refusals and text-only replies, and rewrite prompts that name protected characters,
 // studios or franchises into original descriptions. Pure functions.
 
-const POLICY_MARKERS = ['content policy', 'policy violation', 'moderated', 'safety', 'copyright', 'trademark', 'franchise', 'disallowed', 'not allowed', 'refused'];
+const POLICY_MARKERS = ['content policy', 'policy violation', 'moderated', 'flagged', 'safety', 'copyright', 'trademark', 'franchise', 'disallowed', 'not allowed', 'refused'];
 const NON_IMAGE_MARKERS = ['no image in response', 'could not extract image', 'empty choices'];
 
 const REPLACEMENTS = [
@@ -55,8 +55,10 @@ export function heuristicRewrite(prompt) {
 // Why a run failed, in words for the person reading the answer. First match wins; the raw
 // provider errors stay available next to it.
 const FAILURE_CAUSES = [
+  { test: (e) => /\b499\b|\bstopped:/i.test(e), summary: 'The run was stopped before an image was made.', next: 'It reached its time limit or the chat was stopped; ask again to start a new run.' },
   { test: (e) => /\b402\b|insufficient credits|payment required/i.test(e), summary: 'Your OpenRouter account is out of credits.', next: 'Add credits at https://openrouter.ai/credits, then ask again.' },
-  { test: (e) => /\b40[13]\b|invalid api key|unauthorized|no auth/i.test(e), summary: 'OpenRouter did not accept the API key.', next: 'Check the OpenRouter key in Vane’s Settings → Models.' },
+  // a 403 is OpenRouter's moderation refusing the prompt, not the key: isPolicyError below explains it
+  { test: (e) => /\b401\b|invalid api key|unauthorized|no auth/i.test(e), summary: 'OpenRouter did not accept the API key.', next: 'Check the OpenRouter key in Vane’s Settings → Models.' },
   { test: isPolicyError, summary: 'The image models refused this prompt.', next: 'Describe the subject in your own words, without brand or character names.' },
   { test: (e) => /\b429\b|\b5\d\d\b|rate.?limit|timed? ?out|no endpoints|unavailable|fetch failed|network/i.test(e), summary: 'The image models were busy or unreachable.', next: 'Try again in a minute.' },
 ];

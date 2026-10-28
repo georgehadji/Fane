@@ -18,10 +18,8 @@
 const fs = require('fs');
 const path = require('path');
 const { run } = require('./lib/apply-targets');
-const { FILES } = require('./lib/vane');
+const { APP_CSS_END: END, FILES } = require('./lib/vane');
 
-// The last rule of the stylesheet (the xl: media block); patch-colors anchors here too.
-const END = String.raw`.xl\:text-8xl{font-size:6rem;line-height:1}}`;
 
 // Ranges as Google Fonts serves each subset.
 const SUBSETS = [

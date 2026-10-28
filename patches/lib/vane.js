@@ -21,6 +21,8 @@ module.exports = {
     // Vane's compiled Tailwind stylesheet (served with max-age=0); fixed by the pinned digest.
     appCss: '/home/vane/public/_next/static/css/d3fb2aad7d23930e.css',
   },
+  // The last rule of FILES.appCss (the xl: media block): patch-colors, patch-type and patch-editorial-greek append after it.
+  APP_CSS_END: String.raw`.xl\:text-8xl{font-size:6rem;line-height:1}}`,
   // Title Vane's scraper returns instead of throwing when a page cannot be loaded.
   SCRAPE_FAILED_TITLE: 'Failed to scrape',
   // Vane's settings (providers and their API keys).

@@ -90,12 +90,17 @@ export function findOpenRouterProvider(providers, wanted) {
     : `No Vane provider named like "${w}" (have: ${names}). Add an OpenRouter provider in Vane Settings -> Models, or use --provider.`);
 }
 
+// Vane's model providers from /api/config, API keys included: hand them to a client and nowhere else (never log or keep them).
+export async function getModelProviders(url) {
+  const res = await fetch(`${url}/api/config`, { signal: AbortSignal.timeout(10_000) });
+  return (await res.json()).values?.modelProviders || [];
+}
+
 // Returns a warning string if the provider's Base URL is not OpenRouter, else null.
-// Reads only baseURL from /api/config (which also contains API keys: never keep or print them).
+// Reads only baseURL from the providers (which also contain API keys: never keep or print them).
 export async function openRouterBaseUrlWarning(url, provider) {
   try {
-    const res = await fetch(`${url}/api/config`, { signal: AbortSignal.timeout(10_000) });
-    const cfg = (await res.json()).values?.modelProviders?.find(p => p.id === provider.id);
+    const cfg = (await getModelProviders(url)).find(p => p.id === provider.id);
     const base = cfg?.config?.baseURL;
     if (!cfg || (base && base.includes(OPENROUTER_HOST))) return null;
     return `provider "${provider.name}" (${cfg.type}) uses Base URL ${base || '(default)'}, not OpenRouter. Models will fail until you set Base URL ${OPENROUTER_BASE_URL} and an OpenRouter API key in Vane Settings -> Models.`;

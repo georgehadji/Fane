@@ -62,51 +62,57 @@ for (const file of readdirSync(join(ROOT, 'patches')).filter(f => /^patch-.*\.js
 // 1b. Fane's shared, image, article, code and brainstorming modules, used by patch-image-chat, patch-article-chat,
 // patch-code-chat and patch-brainstorm-chat from inside Vane (the article and code folders also hold their
 // trial.json). Node caches imported modules, so a changed copy needs the restart below.
-for (const [name, dest] of [['core', FANE_CORE_DIR], ['image', FANE_IMAGE_DIR], ['write', FANE_WRITE_DIR], ['code', FANE_CODE_DIR], ['brainstorm', FANE_BRAINSTORM_DIR]]) {
-  const keep = (f) => f.endsWith('.mjs') || f.endsWith('.json');
-  const local = Object.fromEntries(readdirSync(join(ROOT, 'cli', name)).filter(keep).sort()
-    .map(f => [f, createHash('sha256').update(readFileSync(join(ROOT, 'cli', name, f))).digest('hex')]));
-  let remote = {};
-  try {
-    remote = JSON.parse(docker(['exec', CONTAINER, 'node', '-e', `const fs=require('fs'),c=require('crypto'),d=${JSON.stringify(dest)};const o={};try{for(const f of fs.readdirSync(d).filter(f=>f.endsWith('.mjs')||f.endsWith('.json')).sort())o[f]=c.createHash('sha256').update(fs.readFileSync(d+'/'+f)).digest('hex')}catch{}console.log(JSON.stringify(o))`]));
-  } catch { /* treat as missing */ }
-  if (JSON.stringify(local) === JSON.stringify(remote)) console.log(`cli/${name}: already in ${dest}`);
-  else {
-    docker(['exec', '-u', '0', CONTAINER, 'sh', '-c', `rm -rf ${dest} && mkdir -p ${dirname(dest)}`]);
-    docker(['cp', join(ROOT, 'cli', name), `${CONTAINER}:${dest}`]);
-    console.log(`cli/${name}: copied to ${dest}`);
-    changed = true;
-  }
-}
-
-// 2. SearXNG settings. The secret_key is generated per install and the CORE key comes from the
-// environment; neither is written to the repo or printed.
-if (withSearxng) {
-  const repoText = readFileSync(join(ROOT, 'searxng', 'settings.yml'), 'utf8');
-  let coreKey = process.env.CORE_API_KEY?.trim() || undefined;
-  try { renderSettings(repoText, { coreKey }); } catch (err) {
-    console.error(`searxng/settings.yml: ${err.message}; the CORE engine stays off`);
-    coreKey = undefined;
-  }
-  const wanted = renderSettings(repoText, { coreKey });
-  const norm = (s) => s.replace(/\r\n/g, '\n').replace(SECRET_KEY_LINE, '$1 X').trim();
-  let current = '';
-  try { current = docker(['exec', CONTAINER, 'cat', SETTINGS_PATH]); } catch { /* treat as different */ }
-  if (norm(current) === norm(wanted)) {
-    console.log(`searxng/settings.yml: already applied (CORE ${coreKey ? 'on' : 'off'})`);
-  } else {
-    const dir = mkdtempSync(join(tmpdir(), 'fane-'));
+// A step that throws after some copy landed must not skip that restart: the next run would see nothing to do.
+try {
+  for (const [name, dest] of [['core', FANE_CORE_DIR], ['image', FANE_IMAGE_DIR], ['write', FANE_WRITE_DIR], ['code', FANE_CODE_DIR], ['brainstorm', FANE_BRAINSTORM_DIR]]) {
+    const keep = (f) => f.endsWith('.mjs') || f.endsWith('.json');
+    const local = Object.fromEntries(readdirSync(join(ROOT, 'cli', name)).filter(keep).sort()
+      .map(f => [f, createHash('sha256').update(readFileSync(join(ROOT, 'cli', name, f))).digest('hex')]));
+    let remote = {};
     try {
-      const tmp = join(dir, 'settings.yml');
-      writeFileSync(tmp, renderSettings(repoText, { coreKey, secretKey: randomBytes(32).toString('hex') }));
-      docker(['cp', tmp, `${CONTAINER}:${SETTINGS_PATH}`]);
-      docker(['exec', '-u', '0', CONTAINER, 'chown', 'searxng:searxng', SETTINGS_PATH]);
-      console.log(`searxng/settings.yml: applied with a new random secret_key (CORE ${coreKey ? 'on' : 'off: set CORE_API_KEY to switch it on'})`);
-      changed = true;
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
+      remote = JSON.parse(docker(['exec', CONTAINER, 'node', '-e', `const fs=require('fs'),c=require('crypto'),d=${JSON.stringify(dest)};const o={};try{for(const f of fs.readdirSync(d).filter(f=>f.endsWith('.mjs')||f.endsWith('.json')).sort())o[f]=c.createHash('sha256').update(fs.readFileSync(d+'/'+f)).digest('hex')}catch{}console.log(JSON.stringify(o))`]));
+    } catch { /* treat as missing */ }
+    if (JSON.stringify(local) === JSON.stringify(remote)) console.log(`cli/${name}: already in ${dest}`);
+    else {
+      changed = true; // before the copy: a copy that fails halfway has still changed the container
+      docker(['exec', '-u', '0', CONTAINER, 'sh', '-c', `rm -rf ${dest} && mkdir -p ${dirname(dest)}`]);
+      docker(['cp', join(ROOT, 'cli', name), `${CONTAINER}:${dest}`]);
+      console.log(`cli/${name}: copied to ${dest}`);
     }
   }
+
+  // 2. SearXNG settings. The secret_key is generated per install and the CORE key comes from the
+  // environment; neither is written to the repo or printed.
+  if (withSearxng) {
+    const repoText = readFileSync(join(ROOT, 'searxng', 'settings.yml'), 'utf8');
+    let coreKey = process.env.CORE_API_KEY?.trim() || undefined;
+    try { renderSettings(repoText, { coreKey }); } catch (err) {
+      console.error(`searxng/settings.yml: ${err.message}; the CORE engine stays off`);
+      coreKey = undefined;
+    }
+    const wanted = renderSettings(repoText, { coreKey });
+    const norm = (s) => s.replace(/\r\n/g, '\n').replace(SECRET_KEY_LINE, '$1 X').trim();
+    let current = '';
+    try { current = docker(['exec', CONTAINER, 'cat', SETTINGS_PATH]); } catch { /* treat as different */ }
+    if (norm(current) === norm(wanted)) {
+      console.log(`searxng/settings.yml: already applied (CORE ${coreKey ? 'on' : 'off'})`);
+    } else {
+      const dir = mkdtempSync(join(tmpdir(), 'fane-'));
+      try {
+        const tmp = join(dir, 'settings.yml');
+        writeFileSync(tmp, renderSettings(repoText, { coreKey, secretKey: randomBytes(32).toString('hex') }));
+        docker(['cp', tmp, `${CONTAINER}:${SETTINGS_PATH}`]);
+        changed = true; // the file is in place even if the chown below fails
+        docker(['exec', '-u', '0', CONTAINER, 'chown', 'searxng:searxng', SETTINGS_PATH]);
+        console.log(`searxng/settings.yml: applied with a new random secret_key (CORE ${coreKey ? 'on' : 'off: set CORE_API_KEY to switch it on'})`);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }
+} catch (err) {
+  failed = true;
+  console.error(`apply: ${(err.stderr || err.message).toString().trim().split('\n')[0]}`);
 }
 
 // 3. Restart only if something changed, then wait for the API.

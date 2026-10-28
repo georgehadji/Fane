@@ -56,7 +56,17 @@ test('code requests: a request verb and a code noun, or "in <language>"; text an
     'φτιάξε μου ένα πρόγραμμα γυμναστικής',
     'γράψε ένα πρόγραμμα διατροφής για την εβδομάδα',
     'φτιάξε μια λίστα με εργαλεία κήπου',
+    // a screenplay or a plan
+    'write a script for my YouTube video about cooking',
+    'write a script for a 2-minute podcast intro',
+    'write me a short script for a wedding toast',
+    'write a program for my 10k training',
   ]) assert.equal(isCodeRequest(q), false, q);
+  for (const q of [
+    'write a script for my YouTube channel that downloads videos',
+    'write a script for the event registration form',
+    'write a script for a video in Python',
+  ]) assert.equal(isCodeRequest(q), true, q);
   for (const q of [
     'show me a Python script that renames files',
     'give me a function to slugify text',

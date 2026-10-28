@@ -78,7 +78,7 @@ export function renderBrainstormResult(r) {
   const W = words(r.language);
   const summary = [
     `${r.ideas.length}${NBSP}${W.ideas}`,
-    r.themes.filter(x => x.theme).length ? `${r.themes.length}${NBSP}${W.themes}` : null,
+    r.themes.filter(x => x.theme).length ? `${r.themes.filter(x => x.theme).length}${NBSP}${W.themes}` : null,
     r.cost ? `≈${NBSP}$${r.cost.toFixed(3)}` : null,
     r.ms ? formatDuration(r.ms).replace(' ', NBSP) : null,
     W.modes[r.mode] || r.mode,

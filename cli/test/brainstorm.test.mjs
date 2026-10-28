@@ -69,7 +69,11 @@ test('applyClusters: scores and themes from the answer, unknown ids ignored, dup
     { theme: 'Sharing', ideas: [{ id: 'R1I1', feasibility: 8, novelty: 2, impact: 7, exists: 1 }, { id: 'R2I1', duplicate_of: 'R1I1' }, { id: 'R9I9', novelty: 10 }] },
     { theme: 'Pricing', ideas: [{ id: 'R1I2', feasibility: 6, novelty: 9, impact: 8 }, { id: 'R1I1', novelty: 10 }] },
   ] }, ideas, prior);
-  assert.deepEqual(r.themes, [{ theme: 'Sharing', ids: ['R1I1'] }, { theme: 'Pricing', ids: ['R1I2'] }]);
+  // C, which the answer left out, is listed under no heading instead of disappearing
+  assert.deepEqual(r.themes, [{ theme: 'Sharing', ids: ['R1I1'] }, { theme: 'Pricing', ids: ['R1I2'] }, { theme: '', ids: ['R1I3'] }]);
+  const run = { ...r, picked: [], language: 'en', degraded: [], mode: 'speed' };
+  assert.match(renderBrainstorm(run), /\*\*C\*\*/);
+  assert.match(renderBrainstormResult(run), /2\sthemes/);
   assert.deepEqual(r.ideas.map(i => i.id), ['R1I1', 'R1I2', 'R1I3']); // the duplicate is gone, C is unscored
   assert.equal(r.unscored, 1);
   const a = r.ideas[0];

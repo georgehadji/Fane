@@ -9,10 +9,8 @@
 // One block appended to the end of Vane's stylesheet, so it wins on order without editing the minified rules.
 // The stylesheet is served with max-age=0, so a normal reload picks the change up.
 const { run } = require('./lib/apply-targets');
-const { FILES } = require('./lib/vane');
+const { APP_CSS_END: END, FILES } = require('./lib/vane');
 
-// The last rule of the stylesheet (the xl: media block).
-const END = String.raw`.xl\:text-8xl{font-size:6rem;line-height:1}}`;
 
 // Light-only rules use html:not(.dark): next-themes puts "dark" or "light" on <html>.
 // The focus ring needs !important, because Vane's `focus:outline-none` and `focus-visible:outline-none` set a

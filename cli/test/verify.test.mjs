@@ -14,6 +14,18 @@ test('splitSentences: headings, list markers, tables, abbreviations', () => {
   assert.deepEqual(splitSentences(md), ['First point about releases[1].', '| Model | Price |', '| Aspire | $549 [2] |', 'Chen et al. (2025) show gains[1].', 'Second sentence here[2].']);
 });
 
+test('splitSentences: Greek capitals start a sentence, and so does one after the Greek question mark', () => {
+  assert.deepEqual(splitSentences('Είναι σωστό αυτό το συμπέρασμα; Ναι, είναι. Άλλη πρόταση εδώ.'), ['Είναι σωστό αυτό το συμπέρασμα;', 'Ναι, είναι.', 'Άλλη πρόταση εδώ.']);
+  assert.deepEqual(splitSentences('Use Node; Python is also fine.'), ['Use Node; Python is also fine.']);
+});
+
+test('verifyCitations: two cited Greek sentences, one supported and one citing an unrelated source', () => {
+  const el = 'Η Ελλάδα παράγει πολλή ηλιακή ενέργεια σήμερα';
+  const v = verifyCitations(`${el}[1]. Το Άγιον Όρος έχει πολλά ιστορικά μοναστήρια[2].`, [{ title: '', content: el }, sources[1]]);
+  assert.equal(v.cited, 2);
+  assert.equal(v.supportRate, 0.5);
+});
+
 test('tokenize drops stop words and short words, stems plurals', () => {
   assert.deepEqual([...tokenize('The laptops are with 16 GB')].sort(), ['laptop']);
 });

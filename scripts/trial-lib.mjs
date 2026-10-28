@@ -4,6 +4,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 
 import { DEFAULTS } from '../cli/vane.mjs';
+import { getModelProviders } from '../cli/client.mjs';
 import { OpenRouterError, createOpenRouterClient, findOpenRouterKey, fromHost, modelClientFor } from '../cli/image/openrouter.mjs';
 import { freeTrialCandidates } from '../cli/write/catalogue.mjs';
 import { REASONING } from '../cli/write/models.mjs';
@@ -21,7 +22,7 @@ export const TRIAL_OPTIONS = {
 
 const MAX_TOKENS = 12000; // room for models that think before they write
 
-const vaneProviders = async () => (await (await fetch(`${DEFAULTS.url}/api/config`, { signal: AbortSignal.timeout(10_000) })).json()).values?.modelProviders || [];
+const vaneProviders = () => getModelProviders(DEFAULTS.url);
 
 // OPENROUTER_API_KEY, or with fromVane the key of Vane's OpenRouter provider (never printed).
 export async function apiKey(fromVane) {
@@ -46,9 +47,10 @@ export async function pickCandidates(values, { code = false, paid, estimate }) {
     if (values.dry) process.exit(0);
     return { client, candidates };
   }
+  const budget = Number(values.budget);
+  if (!(budget >= 0)) throw new Error(`invalid --budget "${values.budget}"`); // NaN would trim nothing
   const { catalogue, candidates: picked } = await paid(only, createOpenRouterClient());
   let candidates = picked;
-  const budget = Number(values.budget);
   while (candidates.length > 1 && candidates.reduce((s, m) => s + estimate(m), 0) > budget) {
     const dearest = candidates.reduce((a, b) => (estimate(b) > estimate(a) ? b : a));
     candidates = candidates.filter(m => m !== dearest);

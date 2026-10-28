@@ -37,6 +37,14 @@ test('parseCli timeout depends on mode unless given', () => {
   assert.equal(parseCli(['q', '-o', 'balanced']).timeoutMs, 180_000);
 });
 
+test('parseCli: --tier premium researches in quality mode, so it gets the long timeout', () => {
+  for (const flag of ['--article', '--code', '--brainstorm']) {
+    assert.equal(parseCli([flag, '--tier', 'premium', 'x']).timeoutMs, 600_000, flag);
+    assert.equal(parseCli([flag, '--tier', 'premium', '-t', '90', 'x']).timeoutMs, 90_000, flag);
+    assert.equal(parseCli([flag, '--tier', 'value', 'x']).timeoutMs, 180_000, flag);
+  }
+});
+
 test('parseCli marks -m as explicit', () => {
   const o = parseCli(['q', '-m', 'gpt-5']);
   assert.equal(o.model, 'gpt-5');

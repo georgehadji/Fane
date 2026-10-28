@@ -34,6 +34,8 @@ const EN_START = new RegExp(String.raw`^\s*${POLITE}${EN_VERB}\s+`, 'iu');
 const EN_TEXT = new RegExp(String.raw`^${ART}(?:[\w-]+\s+){0,3}?${TEXT}s?${TEXT_NEXT}`, 'iu');
 const EN_STRONG = new RegExp(String.raw`^${ART}${WORDS}${STRONG}s?${NEXT}`, 'iu');
 const EN_CODE_ONLY = new RegExp(String.raw`^${ART}${WORDS}${CODE_ONLY}s?${NEXT}`, 'iu');
+// "a script for my video", "a program for my 10k training": a screenplay or a plan, not code
+const EN_SCRIPT_FOR = new RegExp(String.raw`^${ART}${WORDS}(?:script|program(?:me)?)s?\s+for\s+(?:(?:an?|the|my|our|your|his|her|their|this|that)\s+)?(?:(?!(?:that|which|to|who|and)\s)[\w-]+\s+){0,3}?(?:video|podcast|film|movie|speech|toast|presentation|episode|ad|advert|commercial|play|show|reel|skit|trailer|interview|radio|intro|outro|training|workout|wedding|party)s?(?=\s*$|\s*[.,:;!?]|\s+(?:about|on|that|which|where|with|in|of)\b)`, 'iu');
 const EN_WEAK = new RegExp(String.raw`^${ART}(?:[\w.+#-]+\s+){0,2}?${LANG}\s+${WEAK}e?s?${NEXT}`, 'iu');
 const IN_LANG = new RegExp(String.raw`\b(?:in|using|with)\s+(?:${LANG}|go|c|r)(?![\w+#])`, 'iu');
 
@@ -55,7 +57,7 @@ export function isCodeRequest(text) {
   const en = EN_START.exec(t);
   if (en) {
     const rest = t.slice(en[0].length);
-    if (EN_TEXT.test(rest)) return false;
+    if (EN_TEXT.test(rest) || (EN_SCRIPT_FOR.test(rest) && !IN_LANG.test(rest))) return false;
     return (ASK_VERB.test(en[1]) ? EN_CODE_ONLY : EN_STRONG).test(rest) || EN_WEAK.test(rest) || IN_LANG.test(rest);
   }
   const folded = fold(t);

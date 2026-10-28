@@ -95,6 +95,9 @@ export function applyClusters(data, ideas, prior = []) {
     if (ids.length) themes.push({ theme: text(t.theme) || '—', ids });
   }
   const kept = ideas.filter(i => !dropped.has(i.id)).map(i => byId.get(i.id));
+  // ideas the answer left out stay in the answer, under no heading
+  const loose = kept.filter(i => !placed.has(i.id)).map(i => i.id);
+  if (themes.length && loose.length) themes.push({ theme: '', ids: loose });
   return { themes, ideas: kept, unscored: kept.filter(i => i.score == null).length };
 }
 

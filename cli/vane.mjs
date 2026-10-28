@@ -17,7 +17,7 @@ import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
 import { isCodeRequest } from './core/intent-code.mjs';
 import { isBrainstormRequest } from './core/intent-brainstorm.mjs';
 import { DEFAULTS, UsageError, VALID_MODES, VALID_SOURCES, addOpenRouterModel, findOpenRouterProvider, getProviders, getProvidersStartingVane, listOpenRouter, openRouterBaseUrlWarning, resolveModel, search, vaneModelRequest } from './client.mjs';
-import { listArticleModels, listCodeModels, listImageModels, runArticle, runArticleEdit, runBrainstorm, runCode, runImage } from './runners.mjs';
+import { MODE_FOR_TIER, listArticleModels, listCodeModels, listImageModels, runArticle, runArticleEdit, runBrainstorm, runCode, runImage } from './runners.mjs';
 export { DEFAULTS, findOpenRouterProvider, resolveModel } from './client.mjs';
 
 const USAGE = `Usage: vane "<question>" [options]
@@ -189,7 +189,7 @@ export function parseCli(argv) {
   const bad = sources.filter(s => !VALID_SOURCES.includes(s));
   if (bad.length) throw new UsageError(`Invalid source(s): ${bad.join(', ')}. Use: ${VALID_SOURCES.join(', ')}`);
   if (!VALID_MODES.includes(values.mode)) throw new UsageError(`Invalid mode "${values.mode}". Use: ${VALID_MODES.join(', ')}`);
-  values.timeout ??= values.mode === 'quality' ? '600' : '180';
+  values.timeout ??= (MODE_FOR_TIER[values.tier] ?? values.mode) === 'quality' ? '600' : '180'; // --tier premium researches in quality mode
   const timeoutSec = Number(values.timeout);
   if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) throw new UsageError(`Invalid timeout "${values.timeout}"`);
   if (values.stream && values.json) throw new UsageError('--stream cannot be combined with --json');
@@ -279,9 +279,10 @@ export function splitSentences(md) {
     line = line.replace(/^([-*+]|\d+\.)\s+/, '').replace(/\*\*|__|`/g, '');
     if (line.startsWith('|')) { units.push(line); continue; }
     // split after . ! ? (a citation may sit before or after the stop) when a new sentence starts,
-    // then re-join pieces that ended in an abbreviation ("Chen et al. (2025) ...")
+    // then re-join pieces that ended in an abbreviation ("Chen et al. (2025) ...");
+    // the Greek question mark is a `;`, so it ends a sentence only before a Greek capital
     const pieces = [];
-    for (const piece of line.split(/(?<=[.!?](?:\[\d+(?:\s*,\s*\d+)*\])*)\s+(?=[A-Z0-9"“(\[])/)) {
+    for (const piece of line.split(/(?<=[.!?](?:\[\d+(?:\s*,\s*\d+)*\])*)\s+(?=[\p{Lu}0-9"“«(\[])|(?<=[;;](?:\[\d+(?:\s*,\s*\d+)*\])*)\s+(?=\p{Script=Greek})(?=\p{Lu})/u)) {
       if (pieces.length && ABBREV_END.test(pieces[pieces.length - 1])) pieces[pieces.length - 1] += ` ${piece}`;
       else pieces.push(piece);
     }

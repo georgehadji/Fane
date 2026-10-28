@@ -59,7 +59,8 @@ const TELLS = {
   ],
 };
 
-export const wordCount = (text) => (String(text || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || []).length;
+// Citation markers ([1], [1, 4], [2–4]) are not words: counted, they made cited articles look longer than they are.
+export const wordCount = (text) => (String(text || '').replace(/\[\d+(?:\s*[,–-]\s*\d+)*\]/g, ' ').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || []).length;
 
 // -> { total, perThousand, hits: [{ label, count }] }, most frequent first. Counts, never fixes:
 // the pipeline reports it and the editing passes are told which kinds to remove.
@@ -113,9 +114,10 @@ export function repairHomoglyphs(text) {
 }
 
 // The final ν that models drop: «την», «στην», «μην» keep it before a vowel and before κ, π, τ, ξ, ψ, γκ, μπ,
-// ντ, τσ, τζ (a live Greek article had «στη ξηρά»). Safe in code because «τη», «στη» and «μη» are never
-// neuter; «το(ν)» is left alone, since the neuter «το» never takes it.
-const NU_BEFORE = /(?<!\p{L})(στη|τη|μη)(\s+)(?=[αεηιουωάέήίόύώϊϋΐΰκπτξψ]|γκ|μπ|ντ|τσ|τζ)/giu;
+// ντ, τσ, τζ (a live Greek article had «στη ξηρά»). Safe in code because «τη» and «στη» are never neuter;
+// «το(ν)» is left alone, since the neuter «το» never takes it. «μη» is left alone too: before a noun or an
+// adjective it never takes ν («μη κυβερνητικές οργανώσεις»), and only a verb follows «μην».
+const NU_BEFORE = /(?<!\p{L})(στη|τη)(\s+)(?=[αεηιουωάέήίόύώϊϋΐΰκπτξψ]|γκ|μπ|ντ|τσ|τζ)/giu;
 export function repairFinalNu(text) {
   const fixed = [];
   const out = String(text || '').replace(NU_BEFORE, (m, w, space, at, all) => {

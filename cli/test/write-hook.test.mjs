@@ -259,6 +259,9 @@ test('edit requests are recognised in English and Greek; questions and new topic
   // praise, thanks and questions after an article are for Vane to answer, not paid rewrites
   for (const q of ['Πολύ καλό, ευχαριστώ!', 'Πολύ ενδιαφέρον. Ποιος το χρηματοδοτεί;', 'Πολύ ενδιαφέρον. Ποιος το χρηματοδοτεί;', 'a bit confusing, why did costs fall?', 'less is more?', 'too good, thanks']) assert.equal(isArticleEdit(q), false, q);
   for (const q of ['shorten it; keep the title', 'too long', 'πολύ μεγάλο, κόψ\' το']) assert.equal(isArticleEdit(q), true, q);
+  // a post made from the article is not an edit of it
+  for (const q of ['make a LinkedIn post from it', 'κάνε το ανάρτηση για το LinkedIn', 'turn it into a Facebook post']) assert.equal(isArticleEdit(q), false, q);
+  assert.equal(isArticleEdit('add a paragraph about LinkedIn'), true);
 });
 
 test('the language of an edit follows a translation request only when the language ends the sentence', () => {

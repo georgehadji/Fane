@@ -194,3 +194,17 @@ test('the image hook still asks for OpenRouter when Vane has only freellmapi; th
   assert.doesNotMatch(blocks.get('b1'), /freellmapi/);
   assert.match(openRouterNeeded('Code writing', { free: true }), /freellmapi provider works too .*freellmapi-…/);
 });
+
+test('listingClient: a plain OpenRouter client without a key, the run client (freellmapi included) with --key-from-vane', async () => {
+  const { listingClient } = await import('../runners.mjs');
+  const keep = { key: process.env.OPENROUTER_API_KEY, fetch: globalThis.fetch };
+  delete process.env.OPENROUTER_API_KEY;
+  try {
+    assert.equal((await listingClient({ url: 'http://x' })).freeLlm, undefined);
+    globalThis.fetch = async (url) => ({ ok: true, json: async () => (String(url).endsWith('/api/config') ? { values: { modelProviders: [FREE] } } : { providers: [] }) });
+    assert.equal((await listingClient({ url: 'http://x', 'key-from-vane': true })).freeLlm, 'only');
+  } finally {
+    globalThis.fetch = keep.fetch;
+    if (keep.key !== undefined) process.env.OPENROUTER_API_KEY = keep.key;
+  }
+});

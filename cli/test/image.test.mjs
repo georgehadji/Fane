@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { pricePerImage, toModelInfo, buildCatalogue, capability, selectModels, emitsSvg, TIER_FOR_MODE } from '../image/catalogue.mjs';
 import { classifyByRules, classifyIntent, parseClassification, isImageRequest, imageSubject, parseImageOptions, isImageEdit, pickReferenceIndex } from '../image/intent.mjs';
-import { heuristicRewrite, shouldRetry, isPolicyError } from '../image/policy.mjs';
+import { explainFailure, heuristicRewrite, shouldRetry, isPolicyError } from '../image/policy.mjs';
 import { sniffMime, toDataUrl, collectImageCandidates, decodeDataUrl } from '../image/extract.mjs';
 import { isPrivateAddress, safeDownload } from '../image/download.mjs';
 import { slugify, fileNameFor, saveImages } from '../image/save.mjs';
@@ -152,6 +152,11 @@ test('retry on refusals or repeated text-only replies, not on billing errors', (
   assert.ok(shouldRetry(['a: content policy violation']));
   assert.ok(shouldRetry(['a: no image in response', 'b: no image in response']));
   assert.ok(!shouldRetry(['a: 402 Insufficient credits']));
+  // OpenRouter's moderation answers 403: a refused prompt, retried with a rewrite, not a key problem
+  const flagged = ['a: 403 Your input was flagged for "violence/graphic"'];
+  assert.ok(shouldRetry(flagged));
+  assert.equal(explainFailure(flagged).summary, 'The image models refused this prompt.');
+  assert.equal(explainFailure(['a: 401 No auth credentials found']).summary, 'OpenRouter did not accept the API key.');
 });
 
 // ---- extract ------------------------------------------------------------
@@ -538,6 +543,40 @@ test('isImageEdit reads edits, not questions; pickReferenceIndex finds "the seco
   assert.equal(pickReferenceIndex('make #4 bigger', 4), 3);
   assert.equal(pickReferenceIndex('make the fourth one red', 2), 0); // not there: the first
   assert.equal(pickReferenceIndex('constructor toString', 4), 0);
+});
+
+test('isImageEdit: questions behind a lead-in word are not edits; an ordinal about the scene picks no image', () => {
+  for (const q of ['during which century was it built', 'under which king was it built', 'again, who built it', 'same question for Rome', 'keep it short: who built this castle', 'as which character is he dressed']) assert.ok(!isImageEdit(q), q);
+  for (const q of ['again, but at sunset', 'keep the colours, add a moon', 'during the night']) assert.ok(isImageEdit(q), q);
+  assert.equal(pickReferenceIndex('add a second moon to the sky', 4), 0);
+  assert.equal(pickReferenceIndex('give it a third eye', 4), 0);
+  assert.equal(pickReferenceIndex('add a second person next to her', 4), 0);
+  assert.equal(pickReferenceIndex('use the second image, add snow', 4), 1);
+  assert.equal(pickReferenceIndex('edit the third.', 4), 2);
+});
+
+test('hook: an edit keeps the earlier shape, refuses an SVG, and a stopped run says so and is logged as stopped', async () => {
+  const link = (c, ext = 'jpg') => `/api/uploads?fane-image=${c.repeat(64)}.${ext}`;
+  const calls = [];
+  const shown = [];
+  const lines = [];
+  let errors = [];
+  const generator = async (args) => { calls.push(args); return { images: errors.length ? [] : [{ dataUrl: PNG_URL, model: 'a/one' }], requested: 1, complete: !errors.length, errors }; };
+  const store = { get: async () => PNG_URL, put: async () => link('c') };
+  const io = { emit: () => 'b', update: (id, md) => shown.push(md), log: (m) => lines.push(m), generator, store };
+  const wide = `<img src="${link('a')}" style="display:block;aspect-ratio:auto 16/9">`;
+  await handleImageRequest('make it a watercolour', { ...io, lastAnswer: async () => wide });
+  assert.equal(calls[0].aspect, '16:9');
+  await handleImageRequest('make it a square image', { ...io, lastAnswer: async () => wide });
+  assert.equal(calls[1].aspect, '1:1'); // the new message wins
+  calls.length = 0;
+  assert.equal(await handleImageRequest('make it blue', { ...io, lastAnswer: async () => `<img src="${link('a', 'svg')}">` }), true);
+  assert.equal(calls.length, 0);
+  assert.match(shown.at(-1), /Vector images \(SVG\) cannot be edited/);
+  errors = ['a/one: stopped: the run reached its time limit'];
+  await handleImageRequest('create an image of a fox', io);
+  assert.match(shown.at(-1), /The run was stopped/);
+  assert.match(lines.at(-1), /"stopped":true/);
 });
 
 test('hook: a follow-up edit after Fane images uses the earlier image as the reference', async () => {
