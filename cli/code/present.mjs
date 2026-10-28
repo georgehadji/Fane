@@ -7,7 +7,7 @@
 //  - inline `code` shows its backticks literally, and a path in a Markdown heading can turn "__init__" into bold,
 //    so paths are HTML headings with escaped text;
 //  - everything from a model or a web page outside a code block is escaped (Vane renders raw HTML).
-import { escapeHtml, formatDuration, quiet, tagged } from '../image/present.mjs';
+import { escapeHtml, failed, failureReason, formatDuration, quiet, stepsDone, tagged } from '../image/present.mjs';
 import { isWebUrl, safeUrl } from '../write/checks.mjs';
 import { fenceFor, languageOf } from './files.mjs';
 
@@ -39,7 +39,7 @@ export function renderCodeProgress(state) {
   const L = LABELS[lang] || LABELS.en, W = words(lang);
   const done = [...new Set((state.phases || []).filter(p => p.status !== 'running' && L[p.phase]).map(p => L[p.phase]))];
   const current = state.files ? W.draft : state.running ? `${L[state.running] || state.running}…` : '';
-  const status = quiet([escapeHtml(current), done.length ? escapeHtml(done.join(' · ')) : '']);
+  const status = quiet([escapeHtml(current), stepsDone(done.length, lang)]);
   return state.files?.length ? `${files(state.files)}\n\n${status}` : status;
 }
 
@@ -81,8 +81,5 @@ export function renderCodeResult(r) {
 }
 
 export function renderCodeFailure(result, lang = 'en') {
-  const why = result.status === 402 ? 'OpenRouter has no credits left (402). Add credits at openrouter.ai and ask again.'
-    : result.status === 401 ? "OpenRouter refused the API key (401). Check the key of the OpenRouter provider in Vane's Settings."
-      : result.error;
-  return quiet([escapeHtml(words(lang).failed), escapeHtml(why)]);
+  return failed(escapeHtml(words(lang).failed), escapeHtml(failureReason(result)));
 }

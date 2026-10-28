@@ -446,7 +446,7 @@ test('hook ignores questions and answers image requests with markdown images', a
   assert.equal('count' in seen[0] || 'aspect' in seen[0], false);
   const md = blocks.get('b1');
   assert.match(md, /<img src="data:image\/png;base64,[^"]+" alt="Image 1 of 1: donald duck in a playground"/);
-  assert.match(md, /<span style="font-weight:500;margin-right:0\.4em">FLUX\.2 Pro<\/span><span style="opacity:0\.7">· ≈ \$0\.002<\/span>/);
+  assert.match(md, /<span style="font-weight:500;margin-right:0\.4em">FLUX\.2 Pro<\/span><span style="opacity:0\.7">≈ \$0\.002<\/span>/);
   assert.match(md, /Made 1 of 2 images\./);
 });
 

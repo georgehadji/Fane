@@ -17,6 +17,8 @@ export const tagged = (markdown) => `${markdown}\n\n${ANSWER_MARKER}`;
 
 const NBSP = ' ';
 const DIM = 'opacity:0.7';
+const PLACEHOLDER = 'rgba(127,127,127,0.12)'; // a grey that shows on both themes
+const ratio = (aspect) => (/^\d+:\d+$/.test(aspect || '') ? aspect.replace(':', '/') : '1/1');
 
 // The text of the previous answer: from Vane's database when the patch provides lastAnswer(), else
 // from the chat history the browser sent (which can hold an older, partial version of it). The image and
@@ -30,6 +32,19 @@ export async function previousAnswer(history, lastAnswer) {
 // Status, summary and notes: one small dimmed block, one line each. Lines are already escaped.
 // role="status": a screen reader announces progress and the final summary politely.
 export const quiet = (lines) => `<p role="status" style="font-size:14px;${DIM}">${lines.filter(Boolean).join('<br>')}</p>`;
+
+// A run that produced nothing: the whole answer, so body size with a bold lead, not a dimmed quiet() line.
+// HTML, not Markdown, so an error message's * or _ stays text. Both arguments are already escaped.
+export const failed = (head, why) => `<p role="status"><strong>${head}</strong> ${why}</p>`;
+
+// Why a text run (article, post, code, brainstorm) stopped: the two OpenRouter answers that need the user, else
+// the error as it came.
+export const failureReason = (result) => (result.status === 402 ? 'OpenRouter has no credits left (402). Add credits at openrouter.ai and ask again.'
+  : result.status === 401 ? "OpenRouter refused the API key (401). Check the key of the OpenRouter provider in Vane's Settings."
+    : result.error);
+
+// Under the running step while a text run works: how many are done, not their names, so the line stays one line.
+export const stepsDone = (n, lang = 'en') => (!n ? '' : lang === 'el' ? `${n} ${n === 1 ? 'βήμα έγινε' : 'βήματα έγιναν'}` : `${n} ${n === 1 ? 'step' : 'steps'} done`);
 
 // & < > " are escaped. An apostrophe needs no escape (Vane shows &#39; literally), and one inside a
 // word is the curly one: don't -> don’t.
@@ -61,9 +76,11 @@ export function formatDuration(ms) {
 // belongs to the image above it.
 const figure = (img, subject, i, n) => {
   // Vane's HTML parser trims the space at the edge of a span, so the gap after the name is a margin.
-  const price = img.pricePerImage ? `· ≈${NBSP}$${img.pricePerImage.toFixed(3)}` : '';
+  // No "·" before the price: weight, opacity and the margin separate them, and a dot left at a line end dangles.
+  const price = img.pricePerImage ? `≈${NBSP}$${img.pricePerImage.toFixed(3)}` : '';
   const words = img.text ? `<br><span style="${DIM}">${escapeHtml(img.text)}</span>` : '';
-  return `<figure style="margin:0"><a href="${src(img)}" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="${src(img)}" alt="${attr(altText(subject, i, n))}" width="100%" loading="lazy" style="display:block;margin:0;height:auto;border-radius:8px"></a><figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0.4em">${escapeHtml(modelLabel(img))}</span><span style="${DIM}">${price}</span>${words}</figcaption></figure>`;
+  // The tile keeps its place (the asked ratio, then the picture's own) while a large original loads.
+  return `<figure style="margin:0"><a href="${src(img)}" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="${src(img)}" alt="${attr(altText(subject, i, n))}" width="100%" loading="lazy" style="display:block;margin:0;height:auto;aspect-ratio:auto ${ratio(img.aspect)};background:${PLACEHOLDER};border-radius:8px"></a><figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0.4em">${escapeHtml(modelLabel(img))}</span><span style="${DIM}">${price}</span>${words}</figcaption></figure>`;
 };
 
 // The raw provider errors are code-like: small and in code type.

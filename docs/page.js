@@ -1,4 +1,4 @@
-// Fane page: the live receipt, the switches, copy buttons, entrances and the scroll-linked wordmark.
+// Fane page: the live receipt, copy buttons, entrances and the scroll-linked wordmark.
 // Nothing here is needed to read the page: without script every picture, receipt and answer is already in the HTML.
 (() => {
   'use strict';
@@ -53,7 +53,7 @@
     const shown = tier.pics.slice(0, n);
     const total = shown.reduce((s, p) => s + p[1], 0);
     pics.innerHTML = shown.map(([name, price], i) =>
-      `<figure><img src="img/${tier.file}-${i + 1}.jpg" width="1200" height="1200" alt="Image ${i + 1} of ${n}: ${PROMPT_ALT}" loading="lazy"><figcaption><b>${name}</b><span>· ≈${NB}${money(price)}</span></figcaption></figure>`).join('');
+      `<figure><img src="img/${tier.file}-${i + 1}.jpg" width="1200" height="1200" alt="Image ${i + 1} of ${n}: ${PROMPT_ALT}" loading="lazy"><figcaption><b>${name}</b><span>≈${NB}${money(price)}</span></figcaption></figure>`).join('');
     receipt.textContent = `${n}${NB}image${n > 1 ? 's' : ''} · ≈${NB}${money(total)} · ${tier.label}`;
     note.textContent = tier.note;
     if (reprint && !reduce) {
@@ -72,19 +72,13 @@
     render(false);
   }
 
-  // Sentences with switches: click, Space and Enter (native button), and the consequence line follows.
-  document.querySelectorAll('.band').forEach((band) => {
-    const sw = band.querySelector('.switch');
-    sw.addEventListener('click', () => {
-      const on = band.classList.toggle('on');
-      sw.setAttribute('aria-checked', String(on));
-    });
-  });
-
-  // Copy buttons.
+  // Copy buttons. A button's new label is not reliably read out, so the outcome also goes to a polite live region.
+  const said = Object.assign(document.createElement('p'), { className: 'sr' });
+  said.setAttribute('aria-live', 'polite');
+  document.body.append(said);
   document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copied'; } catch { b.textContent = 'Select it'; }
-    setTimeout(() => { b.textContent = 'Copy'; }, 1600);
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copied'; said.textContent = 'Copied to the clipboard.'; } catch { b.textContent = 'Select it'; said.textContent = 'Could not copy. Select the text instead.'; }
+    setTimeout(() => { b.textContent = 'Copy'; said.textContent = ''; }, 1600);
   }));
 
   // Entrances: heading, then text, then picture, staggered, once, as each part comes into view.
@@ -95,6 +89,13 @@
       if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
     }), { rootMargin: '0px 0px 60% 0px', threshold: 0 });
     rise.forEach((el) => io.observe(el));
+    // An anchor jump shows its section at once instead of fading it in from blank.
+    const show = () => {
+      const target = location.hash && document.getElementById(location.hash.slice(1));
+      if (target) [target, ...target.querySelectorAll('[data-rise]')].forEach((el) => { if (el.matches('[data-rise]')) { el.classList.add('in'); io.unobserve(el); } });
+    };
+    addEventListener('hashchange', show);
+    show();
   } else {
     rise.forEach((el) => el.classList.add('in'));
   }

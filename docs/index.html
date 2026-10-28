@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fane: a command line, fixes and pictures for Vane</title>
-<meta name="description" content="Fane is an open source toolkit for a local Vane: a command line for agents, eleven patches, and pictures in Vane's chat from four different models, with a receipt under every answer.">
+<title>Fane: a command line, fixes and new answers for Vane</title>
+<meta name="description" content="Fane is an open source toolkit for a local Vane: a command line for agents, sixteen patches, and pictures, articles, posts, code and ideas in Vane's chat, with a receipt under every answer.">
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,7 +18,7 @@
 <header class="hero" id="top">
   <div class="hero-top">
     <div>
-      <p class="hero-lead">A command line and fixes for local Vane, and pictures in its chat.</p>
+      <p class="hero-lead">A command line and fixes for local Vane, and pictures, articles, posts, code and ideas in its chat.</p>
       <a class="button" href="#install">Get Fane</a>
     </div>
     <nav class="nav" aria-label="Page">
@@ -27,7 +27,7 @@
       <a href="#questions">Questions</a>
     </nav>
   </div>
-  <h1 class="hero-name" id="wordmark" aria-label="Fane: a command line, fixes and pictures for Vane">Fane</h1>
+  <h1 class="hero-name" id="wordmark" aria-label="Fane: a command line, fixes and new answers for Vane">Fane</h1>
   <div class="hero-bottom">
     <p>An open source toolkit for Vane 1.12.2</p>
     <nav aria-label="Project">
@@ -53,52 +53,63 @@
       <label><input type="radio" name="mode" value="quality"><span>Quality</span></label>
     </fieldset>
     <p class="mode-note" id="mode-note" aria-live="polite">Speed draws from the cheapest third of the image models. Four images cost 1.8 cents.</p>
+    <p class="fine">These pictures were all drawn from one prompt, a copper weathervane rooster on a stone barn roof under a stormy sky. What you type here sets how many you see.</p>
   </form>
   <div class="examples" aria-label="Examples">
-    <button type="button" data-example="2 pictures of a rooster">2 pictures of a rooster</button>
+    <button type="button" data-example="One picture of a barn">One picture of a barn</button>
     <button type="button" data-example="Three pictures of a barn">Three pictures of a barn</button>
     <button type="button" data-example="Draw a weathervane">Draw a weathervane</button>
   </div>
 
   <div class="answer" id="answer" data-rise>
     <div class="pics" id="pics">
-      <figure><img src="img/budget-1.jpg" width="1200" height="1200" alt="Image 1 of 4: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Seedream 5.0 Pro</b><span>· ≈&nbsp;$0.003</span></figcaption></figure>
-      <figure><img src="img/budget-2.jpg" width="1200" height="1200" alt="Image 2 of 4: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Qwen Image 3 Pro</b><span>· ≈&nbsp;$0.003</span></figcaption></figure>
-      <figure><img src="img/budget-3.jpg" width="1200" height="1200" alt="Image 3 of 4: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Muse Image</b><span>· ≈&nbsp;$0.003</span></figcaption></figure>
-      <figure><img src="img/budget-4.jpg" width="1200" height="1200" alt="Image 4 of 4: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Krea 2 Medium</b><span>· ≈&nbsp;$0.009</span></figcaption></figure>
+      <figure><img src="img/budget-1.jpg" width="1200" height="1200" alt="Image 1 of 4: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Seedream 5.0 Pro</b><span>≈&nbsp;$0.003</span></figcaption></figure>
+      <figure><img src="img/budget-2.jpg" width="1200" height="1200" alt="Image 2 of 4: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Qwen Image 3 Pro</b><span>≈&nbsp;$0.003</span></figcaption></figure>
+      <figure><img src="img/budget-3.jpg" width="1200" height="1200" alt="Image 3 of 4: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Muse Image</b><span>≈&nbsp;$0.003</span></figcaption></figure>
+      <figure><img src="img/budget-4.jpg" width="1200" height="1200" alt="Image 4 of 4: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Krea 2 Medium</b><span>≈&nbsp;$0.009</span></figcaption></figure>
     </div>
     <p class="receipt" id="receipt" role="status">4&nbsp;images · ≈&nbsp;$0.018 · Speed</p>
-    <p class="fine">These pictures were all drawn from one prompt, a copper weathervane rooster on a stone barn roof under a stormy sky. What you type here sets how many you see.</p>
   </div>
 </section>
 
-<!-- features: sentences with switches -->
+<!-- features: one sentence and its reason per band -->
 <section class="features" id="features" aria-labelledby="features-h">
   <h2 class="section-head" id="features-h" data-rise>What Fane does</h2>
 
-  <div class="band on" data-field="navy" data-rise>
+  <div class="band" data-field="navy" data-rise>
     <p class="sentence">Ask Vane from any shell.</p>
-    <button class="switch" type="button" role="switch" aria-checked="true" aria-label="Ask Vane from any shell"><span class="track"><span class="knob"></span></span></button>
     <p class="why"><code>vane "question"</code> prints a cited answer. <code>--json</code> gives an agent the answer and its sources, and the exit code says what happened: 0 answered, 1 error, 2 usage.</p>
   </div>
   <div class="band" data-field="grey" data-rise>
     <p class="sentence">Every picture comes from a different model.</p>
-    <button class="switch" type="button" role="switch" aria-checked="false" aria-label="Every picture comes from a different model"><span class="track"><span class="knob"></span></span></button>
     <p class="why">Four images, four models, and four fallbacks behind each one, so a model that fails never leaves a gap. In the Quality run on this page, the fourth model timed out and its fallback drew that picture.</p>
   </div>
-  <div class="band on" data-field="black" data-rise>
+  <div class="band" data-field="black" data-rise>
     <p class="sentence">Say what to change, and it changes.</p>
-    <button class="switch" type="button" role="switch" aria-checked="true" aria-label="Say what to change, and it changes"><span class="track"><span class="knob"></span></span></button>
     <p class="why">“Make the third one a pencil sketch” edits that picture and leaves the others alone. The earlier picture goes to the image models as the reference.</p>
   </div>
   <div class="band" data-field="navy" data-rise>
-    <p class="sentence">Eleven patches fix what Vane gets wrong.</p>
-    <button class="switch" type="button" role="switch" aria-checked="false" aria-label="Eleven patches fix what Vane gets wrong"><span class="track"><span class="knob"></span></span></button>
-    <p class="why">Each one is pinned to Vane 1.12.2. On any other build a patch changes nothing and exits with an error. CI applies every patch twice, to a fresh copy of the image.</p>
+    <p class="sentence">Articles with sources a model cannot invent.</p>
+    <p class="why">“Write an article about …” researches, outlines, drafts, checks the facts and edits, in English or Greek. The sources list is written by code from the pages Vane read.</p>
   </div>
   <div class="band" data-field="grey" data-rise>
+    <p class="sentence">A post for LinkedIn or Facebook.</p>
+    <p class="why">The same research and fact check as an article, held to the platform’s length and to what shows before “see more”. The sources come as a first comment to paste under the post.</p>
+  </div>
+  <div class="band" data-field="black" data-rise>
+    <p class="sentence">Code with a review and tests.</p>
+    <p class="why">“Write a Python script that …” gives the files, a review, fixes for what it found, tests and a README. Every file is syntax checked. Nothing generated is run.</p>
+  </div>
+  <div class="band" data-field="navy" data-rise>
+    <p class="sentence">Ideas past the obvious ones.</p>
+    <p class="why">“Brainstorm …” asks for unlikely ideas on purpose, groups and scores them, works out the best and ends with one recommendation and a plan.</p>
+  </div>
+  <div class="band" data-field="grey" data-rise>
+    <p class="sentence">Sixteen patches fix and extend Vane.</p>
+    <p class="why">Each one is pinned to Vane 1.12.2. On any other build a patch changes nothing and exits with an error. CI applies every patch twice, to a fresh copy of the image.</p>
+  </div>
+  <div class="band" data-field="black" data-rise>
     <p class="sentence">Light or dark in one click.</p>
-    <button class="switch" type="button" role="switch" aria-checked="false" aria-label="Light or dark in one click"><span class="track"><span class="knob"></span></span></button>
     <p class="why">A button in Vane’s sidebar, and the Settings gear now opens with Enter or Space. Home starts a new chat instead of keeping the old one on screen.</p>
   </div>
 </section>
@@ -114,23 +125,37 @@
   <h2 id="install-h" data-rise>Install and ask</h2>
 
   <div class="exchange" data-rise>
-    <p>First, apply Fane to your Vane.</p>
+    <p>First, get Fane and start Vane with it.</p>
+    <div class="call"><pre><code>git clone https://github.com/georgehadji/Fane
+cd Fane
+docker compose up -d</code></pre><button class="copy" type="button" data-copy="git clone https://github.com/georgehadji/Fane &amp;&amp; cd Fane &amp;&amp; docker compose up -d" aria-label="Copy the commands">Copy</button></div>
+    <div class="response">
+      <p class="src">Compose runs Vane from the image the patches were checked against, applies every patch at each start, and opens Vane on 127.0.0.1:3000 only.</p>
+    </div>
+  </div>
+
+  <div class="exchange" data-rise>
+    <p>Already run Vane in Docker? Apply Fane to it instead.</p>
     <div class="call"><pre><code>node scripts/apply.mjs</code></pre><button class="copy" type="button" data-copy="node scripts/apply.mjs" aria-label="Copy the command">Copy</button></div>
     <div class="response">
 <pre>ok    container "vane" running
 ok    OpenRouter provider "Openrouter" found
 ok    patch-always-search applied (2/2 targets)
+ok    patch-article-chat applied (2/2 targets)
+ok    patch-brainstorm-chat applied (1/1 targets)
+ok    patch-code-chat applied (2/2 targets)
 ok    patch-image-chat applied (4/4 targets)
 ok    patch-image-serve applied (1/1 targets)
 ok    patch-image-ui applied (1/1 targets)
 ok    patch-new-chat applied (1/1 targets)
+ok    patch-pipeline-abort applied (5/5 targets)
 ok    patch-quality-mode applied (7/7 targets)
-ok    patch-scholarly-sources applied (7/7 targets)
+ok    patch-scholarly-sources applied (8/8 targets)
 ok    patch-social-sources applied (6/6 targets)
 ok    patch-theme-toggle applied (3/3 targets)
 ok    patch-toolcall-empty-args applied (1/1 targets)
+ok    patch-ui-fane-link applied (4/4 targets)
 ok    patch-web-search applied (4/4 targets)</pre>
-      <p class="src">Or run <code>docker compose up -d</code>: the same patches are applied at every start.</p>
     </div>
   </div>
 
@@ -157,8 +182,8 @@ Sources:
     <div class="response">
       <div class="answer">
         <div class="pics">
-          <figure><img class="drift" src="img/budget-1.jpg" width="1200" height="1200" alt="Image 1 of 2: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Seedream 5.0 Pro</b><span>· ≈&nbsp;$0.003</span></figcaption></figure>
-          <figure><img src="img/budget-2.jpg" width="1200" height="1200" alt="Image 2 of 2: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Qwen Image 3 Pro</b><span>· ≈&nbsp;$0.003</span></figcaption></figure>
+          <figure><img src="img/budget-1.jpg" width="1200" height="1200" alt="Image 1 of 2: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Seedream 5.0 Pro</b><span>≈&nbsp;$0.003</span></figcaption></figure>
+          <figure><img src="img/budget-2.jpg" width="1200" height="1200" alt="Image 2 of 2: a copper weathervane rooster on a stone barn roof under a stormy sky" loading="lazy"><figcaption><b>Qwen Image 3 Pro</b><span>≈&nbsp;$0.003</span></figcaption></figure>
         </div>
         <p class="receipt" role="status">2&nbsp;images · ≈&nbsp;$0.006 · Speed</p>
       </div>
@@ -182,7 +207,7 @@ Sources:
     <p data-rise>Four images cost 1.8 cents in Speed, 6.5 cents in Balanced and 38 cents in Quality, as the runs on this page did at OpenRouter’s prices. The price is printed under every answer.</p>
 
     <h3 data-rise>Do I need OpenRouter?</h3>
-    <p data-rise>For pictures, yes: an OpenRouter key, added as a provider in Vane’s settings. Your prompt goes to OpenRouter and the models behind it. The pictures are saved on your own machine, in Vane’s data volume.</p>
+    <p data-rise>For pictures, articles, posts, code and ideas, yes: an OpenRouter key, added as a provider in Vane’s settings. Your prompt goes to OpenRouter and the models behind it. The pictures are saved on your own machine, in Vane’s data volume.</p>
 
     <h3 data-rise>What if a model fails?</h3>
     <p data-rise>Each picture has four fallback models. If a model fails, the next one draws that picture. If one refuses a prompt, Fane rewrites it and retries only the missing pictures. When credits run out, it says so.</p>
@@ -194,7 +219,6 @@ Sources:
 </main>
 
 <footer class="footer">
-  <p class="footer-name" aria-hidden="true">Fane</p>
   <h2 class="footer-invite" data-rise>Get Fane from GitHub.</h2>
   <div class="footer-cols">
     <nav class="places" aria-label="Fane on GitHub">
@@ -203,9 +227,8 @@ Sources:
       <a href="https://github.com/georgehadji/Fane/issues">Issues</a>
     </nav>
     <div class="links">
-      <div><a href="#install">Install</a><a href="https://github.com/georgehadji/Fane/tree/main/patches">Patches</a><a href="https://github.com/georgehadji/Fane/tree/main/cli">Command line</a></div>
-      <div><a href="https://github.com/ItzCrazyKns/Vane">Vane</a><a href="https://github.com/ItzCrazyKns/Vane/issues">Vane issues</a></div>
-      <div><a href="https://openrouter.ai">OpenRouter</a><a href="#top">Back to top</a></div>
+      <div><a href="https://github.com/georgehadji/Fane/tree/main/patches">Patches</a><a href="https://github.com/georgehadji/Fane/tree/main/cli">Command line</a><a href="#top">Back to top</a></div>
+      <div><a href="https://github.com/ItzCrazyKns/Vane">Vane</a><a href="https://github.com/ItzCrazyKns/Vane/issues">Vane issues</a><a href="https://openrouter.ai">OpenRouter</a></div>
     </div>
   </div>
   <div class="legal">

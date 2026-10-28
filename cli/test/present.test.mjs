@@ -10,6 +10,8 @@ test('grid, captions, summary line, escaped text', () => {
   const md = renderResult({ images: [img(1, 0.01), img(2, 0.02, '<b>hi</b>')], requested: 2, complete: true, errors: [], elapsedMs: 105000 }, 'draw a "fox" <script>');
   assert.match(md, /^<div style="display:grid;grid-template-columns:repeat\(2,1fr\);gap:20px 12px"/);
   assert.equal(md.match(/<figure /g).length, 2);
+  assert.equal(md.match(/aspect-ratio:auto 1\/1;/g).length, 2); // the tile keeps its place while the image loads
+  assert.match(renderResult({ images: [{ ...img(1, 0.01), aspect: '16:9' }], requested: 1, complete: true, errors: [] }, 'x'), /aspect-ratio:auto 16\/9;/);
   assert.match(md, /alt="Image 2 of 2: a “fox” ‹script›"/); // the model is in the caption, not read twice; no entities in an attribute
   assert.doesNotMatch(md, /alt="[^"]*&/);
   assert.match(md, /&lt;b&gt;hi&lt;\/b&gt;/);
@@ -20,7 +22,7 @@ test('grid, captions, summary line, escaped text', () => {
 test('typography: captions, notes and summary are quiet, never italic, quoted or spaced-dash', () => {
   const md = renderResult({ images: [img(1, 0.01, 'A lighthouse at dawn.'), img(2, 0.02)], requested: 4, complete: false, errors: ['a: 503 upstream'], rewrittenPrompt: 'a fox', editedImage: 1, elapsedMs: 9000 }, 'draw a fox');
   assert.doesNotMatch(md, /<em>|<i>|font-style|^> |\n> | — |~\$/); // no italics, no blockquotes, no spaced em dash, no tilde
-  assert.match(md, /<figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0\.4em">Model 1<\/span><span style="opacity:0\.7">· ≈ \$0\.010<\/span><br><span style="opacity:0\.7">A lighthouse at dawn\.<\/span><\/figcaption>/);
+  assert.match(md, /<figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0\.4em">Model 1<\/span><span style="opacity:0\.7">≈ \$0\.010<\/span><br><span style="opacity:0\.7">A lighthouse at dawn\.<\/span><\/figcaption>/);
   const quiet = md.slice(md.lastIndexOf('<p role='));
   assert.match(quiet, /^<p role="status" style="font-size:14px;opacity:0\.7">2 images · ≈ \$0\.030 · 9s<br>Edited image 1 of the previous answer\.<br>Rewritten after a refusal: “a fox”<br>Made 2 of 4 images\./);
   assert.equal(quiet.split('<p ').length - 1, 1); // one quiet block, not one paragraph per line

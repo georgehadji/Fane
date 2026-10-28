@@ -32,7 +32,7 @@ test('progress without a draft is one status paragraph, in the language of the a
   const en = renderArticleProgress({ lang: 'en', phases: [{ phase: 'sources', status: 'done' }, { phase: 'outline', status: 'ok' }], running: 'draft', draft: null });
   assert.match(en, /^<p role="status"/);
   assert.match(en, /Writing the draft…/);
-  assert.match(en, /Researching sources · Planning the outline/);
+  assert.match(en, /Writing the draft…<br>2 steps done<\/p>$/); // a count, not a growing list of names
   const el = renderArticleProgress({ lang: 'el', phases: [], running: 'sources', draft: null });
   assert.match(el, /Αναζήτηση πηγών…/);
 });
@@ -92,6 +92,8 @@ test('failures explain credits, keys and other errors', () => {
   assert.match(renderArticleFailure({ status: 401, error: 'x' }), /refused the API key/);
   assert.match(renderArticleFailure({ error: 'no sources found <b>' }), /no sources found &lt;b&gt;/);
   assert.match(renderArticleFailure({ error: 'x' }, 'el'), /Δεν μπόρεσα να γράψω το άρθρο/);
+  // a failed run is the whole answer: body size with a bold lead, never the dimmed status line
+  assert.match(renderArticleFailure({ error: 'x' }), /^<p role="status"><strong>The article could not be written\.<\/strong> x<\/p>$/);
 });
 
 // ---- the chat hook ----

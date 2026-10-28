@@ -3,7 +3,7 @@
 // Pure functions. Status words are in the language of the article, so a Greek request gets
 // Greek status lines. Everything that comes from a model or a web page is escaped or cleaned:
 // Vane renders raw HTML in answers.
-import { escapeHtml, formatDuration, quiet } from '../image/present.mjs';
+import { escapeHtml, failed, failureReason, formatDuration, quiet, stepsDone } from '../image/present.mjs';
 import { linkCitations, renumber, sourcesSection } from './checks.mjs';
 import { POSTS } from '../core/formats.mjs';
 
@@ -36,7 +36,7 @@ export function renderArticleProgress(state) {
   const L = labels(lang);
   const done = (state.phases || []).filter(p => p.status !== 'running' && L[p.phase]).map(p => L[p.phase]);
   const current = state.draft ? words(lang).draft : state.running ? `${L[state.running] || state.running}…` : '';
-  const status = quiet([escapeHtml(current), done.length ? escapeHtml(done.join(' · ')) : '']);
+  const status = quiet([escapeHtml(current), stepsDone(new Set(done).size, lang)]);
   if (!state.draft) return status;
   const { text, used } = renumber(cleanMarkdown(state.draft.text), state.draft.sources);
   return `${linkCitations(text, used).trimEnd()}${sourcesSection(used, lang, { html: true }).trimEnd()}\n\n${status}`;
@@ -93,10 +93,7 @@ export function renderPostResult(r) {
 
 // A run that produced no article.
 export function renderArticleFailure(result, lang = 'en') {
-  const why = result.status === 402 ? 'OpenRouter has no credits left (402). Add credits at openrouter.ai and ask again.'
-    : result.status === 401 ? "OpenRouter refused the API key (401). Check the key of the OpenRouter provider in Vane's Settings."
-      : result.error;
   const head = result.post ? (lang === 'el' ? 'Δεν μπόρεσα να γράψω την ανάρτηση.' : 'The post could not be written.')
     : lang === 'el' ? (result.edit ? 'Δεν μπόρεσα να αλλάξω το άρθρο.' : 'Δεν μπόρεσα να γράψω το άρθρο.') : result.edit ? 'The article could not be changed.' : 'The article could not be written.';
-  return quiet([escapeHtml(head), escapeHtml(why)]);
+  return failed(escapeHtml(head), escapeHtml(failureReason(result)));
 }

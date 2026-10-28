@@ -3,7 +3,7 @@
 //  - model and web text is escaped (Vane renders raw HTML) and its square brackets become parentheses, because
 //    Vane's browser code rewrites every "[x]" of an answer (citation chips, or nothing);
 //  - links to existing work are <a> tags, and the status is one dimmed quiet() paragraph (image/present.mjs).
-import { escapeHtml, formatDuration, quiet } from '../image/present.mjs';
+import { escapeHtml, failed, failureReason, formatDuration, quiet, stepsDone } from '../image/present.mjs';
 import { isWebUrl, safeUrl } from '../write/checks.mjs';
 import { TAIL } from './pipeline.mjs';
 
@@ -62,7 +62,8 @@ export function renderBrainstorm(r, { web = false } = {}) {
     if (theme.theme) out.push('', `### ${t(theme.theme)}`);
     out.push('');
     for (const i of [...theme.ids.map(id => byId.get(id)).filter(Boolean)].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))) {
-      const tags = [i.score != null ? `${i.score}` : '', i.probability != null && i.probability < TAIL ? W.rare : '', i.exists ? `${W.exists}: ${i.exists.title}` : ''].filter(Boolean);
+      // no bare score: the order already ranks them, and "(5.4)" has no scale a reader knows
+      const tags = [i.probability != null && i.probability < TAIL ? W.rare : '', i.exists ? `${W.exists}: ${i.exists.title}` : ''].filter(Boolean);
       out.push(`- **${t(i.title)}**${tags.length ? ` (${tags.map(t).join(', ')})` : ''}: ${t(i.description)}`);
     }
   }
@@ -90,12 +91,9 @@ export function renderBrainstormProgress(state) {
   const L = LABELS[state.lang] || LABELS.en;
   const done = [...new Set(state.done.map(p => L[p]).filter(Boolean))];
   const titles = (state.ideas || []).map(i => `- ${escapeHtml(i.title.replace(/[[\]]/g, ''))}`).join('\n');
-  return `${titles ? `${titles}\n\n` : ''}${quiet([escapeHtml(`${L[state.running] || state.running || ''}…`), done.length ? escapeHtml(done.join(' · ')) : ''])}`;
+  return `${titles ? `${titles}\n\n` : ''}${quiet([escapeHtml(`${L[state.running] || state.running || ''}…`), stepsDone(done.length, state.lang)])}`;
 }
 
 export function renderBrainstormFailure(result, lang = 'en') {
-  const why = result.status === 402 ? 'OpenRouter has no credits left (402). Add credits at openrouter.ai and ask again.'
-    : result.status === 401 ? "OpenRouter refused the API key (401). Check the key of the OpenRouter provider in Vane's Settings."
-      : result.error;
-  return quiet([escapeHtml(words(lang).failed), escapeHtml(why)]);
+  return failed(escapeHtml(words(lang).failed), escapeHtml(failureReason(result)));
 }

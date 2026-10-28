@@ -190,6 +190,7 @@ test('the answer: recommendation first, developed ideas, plan; on the web escape
   assert.match(md, /1\. s1\n2\. s2/); // "Step 1:" is not repeated
   assert.match(md, /Do the first one \[1\]\./);
   assert.match(md, /\[Refill <shops>\]\(https:\/\/example\.org\/refill\)/);
+  assert.doesNotMatch(md.slice(md.indexOf('## All ideas')), /\*\* \(\d/); // the list is ranked, not scored
   const web = renderBrainstormResult(r);
   assert.match(web, /Do the first one \(1\)\./);
   assert.doesNotMatch(web, /\[\d+\]/);
