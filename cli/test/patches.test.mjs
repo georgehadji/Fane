@@ -86,16 +86,16 @@ test('patch-type: intact Commissioner WOFF2s for Latin and Greek on Vane\'s font
   }
 });
 
-test('patch-type: a stylesheet patched with the first version is upgraded in place, wherever patch-colors put it', () => {
+test('patch-type: a stylesheet patched with an earlier version is upgraded in place, wherever patch-colors put it', () => {
   const colors = require('../../patches/patch-colors.js');
   const type = require('../../patches/patch-type.js');
   const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
-  for (const old of [`x{}${end}\n${type.TYPE_V1}\n\n${colors.COLORS}\n`, `x{}${end}\n${colors.COLORS}\n\n${type.TYPE_V1}\n`]) {
+  for (const old of [type.TYPE_V1, type.TYPE_V2].flatMap(v => [`x{}${end}\n${v}\n\n${colors.COLORS}\n`, `x{}${end}\n${colors.COLORS}\n\n${v}\n`])) {
     const r = planPatch({ [FILES.appCss]: old }, type.TARGETS);
     assert.deepEqual(r.errors, []);
     const css = r.next[FILES.appCss];
     assert.ok(css.includes(type.TYPE) && css.includes(colors.COLORS));
-    assert.ok(!css.includes('/*fane:type*/')); // the old block is gone, not left above the new one
+    assert.ok(!css.includes('/*fane:type*/') && !css.includes('/*fane:type-2*/')); // the old block is gone, not left above the new one
     assert.deepEqual(planPatch(r.next, type.TARGETS).applied, []);
   }
 });
@@ -109,6 +109,31 @@ test('patch-discover-ellipsis: three periods at the end of a summary become a no
   const route = 'async function GET(){let e=[];return Response.json({blogs:e},{status:200})}';
   const r = planPatch({ [FILES.discoverRoute]: route }, TARGETS);
   assert.deepEqual(r.errors, []);
+});
+
+test('patch-editorial-greek: a static Greek-only face under PP Editorial\'s name, stacked with patch-colors and patch-type', () => {
+  const ed = require('../../patches/patch-editorial-greek.js');
+  const colors = require('../../patches/patch-colors.js');
+  const type = require('../../patches/patch-type.js');
+  const font = Buffer.from(ed.EDITORIAL_GREEK.match(/base64,([A-Za-z0-9+/=]+)\)/)[1], 'base64');
+  assert.equal(font.toString('latin1', 0, 4), 'wOF2');
+  assert.equal(font.readUInt32BE(8), font.length);
+  assert.ok(!font.includes('fvar')); // static: a stretch descriptor would keep the face from ever matching
+  assert.match(ed.EDITORIAL_GREEK, /font-family:PP Editorial;font-style:normal;font-weight:300;font-display/);
+  assert.match(ed.EDITORIAL_GREEK, /unicode-range:U\+0370-0377,[^}]*U\+03A3-03FF\}$/);
+  const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
+  let css = { [FILES.appCss]: `x{}${end}` };
+  for (const p of [colors, ed, type]) { const r = planPatch(css, p.TARGETS); assert.deepEqual(r.errors, []); css = r.next; }
+  for (const p of [colors, ed, type]) assert.deepEqual(planPatch(css, p.TARGETS).applied, []);
+});
+
+test('patch-greek-lang: mostly Greek text is marked "el", anything else keeps the page language', () => {
+  const { LANG } = require('../../patches/patch-greek-lang.js');
+  assert.equal(LANG('γράψε ένα άρθρο για το iPhone 17'), 'el');
+  assert.equal(LANG('ἀρχή'), 'el'); // polytonic
+  assert.equal(LANG('write about the Ελλάδα islands'), undefined);
+  assert.equal(LANG('2024'), undefined);
+  assert.equal(LANG(undefined), undefined);
 });
 
 test('every patch declares well-formed targets on known Vane files', () => {

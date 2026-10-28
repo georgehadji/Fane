@@ -12,7 +12,8 @@
 //  - answer headings outranked the question (title 36px/800, sections 24px/800, question 30px/500);
 //  - answer paragraphs had 162% line spacing and 1.25em between paragraphs; sidebar labels were 10px;
 //  - Discover: card summaries were 12px at 162% line spacing, the large story's summary 16px at 162%;
-//  - Library: chat titles ran the full 946px row (about 110 characters a line), and a URL title could not wrap.
+//  - Library: chat titles ran the full 946px row (about 110 characters a line), and a URL title could not wrap;
+//  - links used the browser's default underline, its thickness and offset left to the font.
 // One block appended to the end of Vane's stylesheet, like patch-colors (either order works: both anchor on its last rule).
 const fs = require('fs');
 const path = require('path');
@@ -46,21 +47,22 @@ ${SUBSETS.map(face).join('\n')}
 .text-\[10px\]{font-size:.75rem;line-height:1rem}`;
 // The first version of the block, as a stylesheet patched before the Discover and Library rules holds it.
 const TYPE_V1 = `/*fane:type*/\n${BASE}`;
-const TYPE = String.raw`/*fane:type-2*/
-${BASE}
-.text-xs.leading-relaxed.line-clamp-2{font-size:.8125rem;line-height:1.45}
+const PAGES = String.raw`.text-xs.leading-relaxed.line-clamp-2{font-size:.8125rem;line-height:1.45}
 .text-base.leading-relaxed.line-clamp-4{line-height:1.5}
 a[href^="/c/"].line-clamp-2{max-width:60ch;overflow-wrap:anywhere}`;
+// The second version, with the Discover and Library rules.
+const TYPE_V2 = `/*fane:type-2*/\n${BASE}\n${PAGES}`;
+const TYPE = `/*fane:type-3*/\n${BASE}\n${PAGES}\n.prose a{text-decoration-thickness:1px;text-underline-offset:.18em}`;
 
 const TARGETS = [
   {
     name: 'Commissioner, answer, Discover and Library type',
     file: FILES.appCss,
     // an older block is replaced where it stands (patch-colors may sit between it and the stylesheet's last rule)
-    alts: [{ from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
-    marker: '/*fane:type-2*/',
+    alts: [{ from: TYPE_V2, to: TYPE }, { from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
+    marker: '/*fane:type-3*/',
   },
 ];
 
-module.exports = { TARGETS, TYPE, TYPE_V1 };
+module.exports = { TARGETS, TYPE, TYPE_V1, TYPE_V2 };
 if (require.main === module) run('patch-type', TARGETS);
