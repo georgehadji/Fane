@@ -19,6 +19,8 @@ export const MIN_CONTEXT = 64_000; // 16 sources of 700 characters plus the arti
 
 // Not for writing: routers, embedding/vision/code/translation specialists, preview aliases.
 const NOT_FOR_ARTICLES = /(?:^|[/-])(?:router|switchyard|embed\w*|moderation|guard\w*|ocr|vl|vision|omni|coder?|codex|math|summari[sz]e|extract|translate\w*|moondream|image|audio|tts|whisper)(?:$|[/-])/i;
+// The coding pipeline (cli/code) takes the code specialists too.
+const NOT_FOR_CODE = /(?:^|[/-])(?:router|switchyard|embed\w*|moderation|guard\w*|ocr|vl|vision|omni|math|summari[sz]e|extract|translate\w*|moondream|image|audio|tts|whisper)(?:$|[/-])/i;
 const VARIANT = /:(?:free|batch|extended|nitro|floor|online|exacto)$|^~/;
 
 // OpenRouter prices are USD per token strings; the blend weighs output 3:1 over input
@@ -26,9 +28,9 @@ const VARIANT = /:(?:free|batch|extended|nitro|floor|online|exacto)$|^~/;
 const perMillion = (x) => Math.round(Number(x) * 1e8) / 100;
 export const blend = (m) => (m.priceIn + 3 * m.priceOut) / 4;
 
-export function toTextModel(entry, { now = Date.now() } = {}) {
+export function toTextModel(entry, { now = Date.now(), code = false } = {}) {
   const id = String(entry?.id || '');
-  if (!id.includes('/') || VARIANT.test(id) || NOT_FOR_ARTICLES.test(id)) return null;
+  if (!id.includes('/') || VARIANT.test(id) || (code ? NOT_FOR_CODE : NOT_FOR_ARTICLES).test(id)) return null;
   if ((entry.architecture?.output_modalities || []).join() !== 'text') return null;
   const priceIn = perMillion(entry.pricing?.prompt), priceOut = perMillion(entry.pricing?.completion);
   if (!(priceIn > 0 && priceOut > 0)) return null; // free, unpriced and router entries
@@ -80,7 +82,8 @@ const BANDS = { speed: [0, 1 / 3], balanced: [1 / 3, 2 / 3], quality: [2 / 3, 1]
 
 // trial: { [modelId]: { en: { ok, tellsPerThousand }, el: { ok, tellsPerThousand }, json: { ok } } }
 // -> { chains: { role: [id...] }, pool: n, band: [id...], prices: { id: { in, out } } } | null when no model passed for `lang`.
-export function selectChains(catalogue, trial, { mode = 'balanced', lang = 'en' } = {}) {
+// The coding pipeline passes its own roles and its trial's key ('code' for `lang`, cli/code/trial.json).
+export function selectChains(catalogue, trial, { mode = 'balanced', lang = 'en', roles = ROLE_ORDER, jsonRoles = JSON_ROLES } = {}) {
   const pool = catalogue.filter(m => trial?.[m.id]?.[lang]?.ok);
   if (!pool.length) return null;
   // the trial's combined score; a trial.json written before it existed has stock phrases only
@@ -95,18 +98,20 @@ export function selectChains(catalogue, trial, { mode = 'balanced', lang = 'en' 
   const others = byPrice.map((m, i) => ({ m, d: Math.abs(i - centre) })).filter(({ m }) => !band.includes(m)).sort((a, b) => a.d - b.d).map(({ m }) => m);
 
   const chain = (role) => {
-    const ok = (m) => !JSON_ROLES.has(role) || trial[m.id]?.json?.ok;
+    const ok = (m) => !jsonRoles.has(role) || trial[m.id]?.json?.ok;
     const inBand = diverse(band.filter(ok), better);
     // from this role's start, around the band (so fallbacks cost about what the primary does), then neighbouring bands
-    const start = inBand.length ? ROLE_ORDER.indexOf(role) % inBand.length : 0;
+    const start = inBand.length ? roles.indexOf(role) % inBand.length : 0;
     const around = inBand.map((_, i) => inBand[(start + i) % inBand.length]);
     return [...around, ...diverse(others.filter(ok), better)].slice(0, 1 + FALLBACKS_PER_ROLE).map(m => m.id);
   };
-  const chains = Object.fromEntries(ROLE_ORDER.map(r => [r, chain(r)]));
-  for (const r of JSON_ROLES) if (chains[r] && !chains[r].length) chains[r] = chains.draft; // nobody verified for JSON: try, and let the pipeline report it
-  // the query-writing call is cheap whatever the mode: the cheapest verified models that answer JSON
-  chains.queries = byPrice.filter(m => trial[m.id]?.json?.ok).slice(0, 2).map(m => m.id);
-  if (!chains.queries.length) chains.queries = chains.outline;
+  const chains = Object.fromEntries(roles.map(r => [r, chain(r)]));
+  for (const r of jsonRoles) if (chains[r] && !chains[r].length) chains[r] = chains[roles[0]]; // nobody verified for JSON: try, and let the pipeline report it
+  if (jsonRoles.has('queries')) {
+    // the query-writing call is cheap whatever the mode: the cheapest verified models that answer JSON
+    chains.queries = byPrice.filter(m => trial[m.id]?.json?.ok).slice(0, 2).map(m => m.id);
+    if (!chains.queries.length) chains.queries = chains.outline;
+  }
   // USD per million tokens, for the models that report no usage.cost (llm.mjs estimates their cost)
   const prices = Object.fromEntries(pool.map(m => [m.id, { in: m.priceIn, out: m.priceOut }]));
   return { chains, pool: n, band: band.map(m => m.id), prices };

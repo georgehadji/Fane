@@ -30,6 +30,10 @@ module.exports = {
   FANE_IMAGE_DIR: '/fane/image',
   // Where Fane's article modules (cli/write, with trial.json) live in the container, mounted or copied like FANE_IMAGE_DIR.
   FANE_WRITE_DIR: '/fane/write',
+  // Where Fane's coding modules (cli/code, with trial.json) live in the container, mounted or copied like FANE_IMAGE_DIR.
+  FANE_CODE_DIR: '/fane/code',
+  // Ends every answer of the code hook (cli/code/present.mjs CODE_ANSWER_MARKER; a test keeps them equal).
+  CODE_ANSWER_MARKER: '<!--fane:code-answer-->',
   // The Fane project page (docs/ served by GitHub Pages), linked from Vane's menu by patch-fane-link.
   FANE_PAGE_URL: 'https://georgehadji.github.io/Fane/',
 };

@@ -1,0 +1,952 @@
+{
+ "models": {
+  "openai/gpt-6.1-terra": {
+   "price": {
+    "in": 1,
+    "out": 5
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.22,
+    "ms": 6580
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 5048
+   },
+   "cost": 0.00545
+  },
+  "openai/gpt-6.1-terra-pro": {
+   "price": {
+    "in": 1,
+    "out": 5
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.34,
+    "ms": 10114
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 8202
+   },
+   "cost": 0.01702
+  },
+  "minimax/minimax-m3.1-flash": {
+   "price": {
+    "in": 0.15,
+    "out": 0.6
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "passed 16 of 18 cases"
+    ],
+    "passed": 16,
+    "total": 18,
+    "score": 10.24,
+    "ms": 7308
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 12708
+   },
+   "cost": 0
+  },
+  "deepseek/deepseek-v4.1-flash-1017": {
+   "price": {
+    "in": 0.15,
+    "out": 0.6
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "finish_reason length",
+     "no code",
+     "passed 0 of 18 cases"
+    ],
+    "passed": 0,
+    "total": 18,
+    "score": 90.84,
+    "ms": 25155
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 1821
+   },
+   "cost": 0.01538
+  },
+  "inception/mercury-3": {
+   "price": {
+    "in": 0.1,
+    "out": 0.35
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.21,
+    "ms": 6402
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 1742
+   },
+   "cost": 0.00142
+  },
+  "meta/muse-spark-open": {
+   "price": {
+    "in": 1.25,
+    "out": 4.25
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.13,
+    "ms": 3951
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 2247
+   },
+   "cost": 0.007
+  },
+  "moonshotai/kimi-k3.1-pro": {
+   "price": {
+    "in": 2,
+    "out": 10
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.56,
+    "ms": 16879
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 19830
+   },
+   "cost": 0.01351
+  },
+  "elorian/glimpse": {
+   "price": {
+    "in": 0.6,
+    "out": 3
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "finish_reason length",
+     "no code",
+     "passed 0 of 18 cases"
+    ],
+    "passed": 0,
+    "total": 18,
+    "score": 91.23,
+    "ms": 36827
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4559
+   },
+   "cost": 0.03943
+  },
+  "unbiased/pareto-26.9": {
+   "price": {
+    "in": 2.5,
+    "out": 7.5
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.61,
+    "ms": 18180
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 5867
+   },
+   "cost": 0.03931
+  },
+  "reflection/beam-1.0-501b-a23b": {
+   "price": {
+    "in": 0.25,
+    "out": 1
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 1.34,
+    "ms": 40271
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 13898
+   },
+   "cost": 0.00419
+  },
+  "google/gemini-4-argon": {
+   "price": {
+    "in": 2,
+    "out": 10
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.38,
+    "ms": 11458
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 6498
+   },
+   "cost": 0.01241
+  },
+  "liquid/lfm-2.5-24b-a2b": {
+   "price": {
+    "in": 0.05,
+    "out": 0.7
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "finish_reason length",
+     "no code",
+     "passed 0 of 18 cases"
+    ],
+    "passed": 0,
+    "total": 18,
+    "score": 90.59,
+    "ms": 17826
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 8874
+   },
+   "cost": 0.00885
+  },
+  "unbiased/pareto-26.10": {
+   "price": {
+    "in": 0.8,
+    "out": 3.2
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 1.33,
+    "ms": 39811
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 5650
+   },
+   "cost": 0.00465
+  },
+  "anthropic/claude-haiku-5.5": {
+   "price": {
+    "in": 0.1,
+    "out": 0.5
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.09,
+    "ms": 2701
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4061
+   },
+   "cost": 0.00076
+  },
+  "meta/muse-wonder": {
+   "price": {
+    "in": 4,
+    "out": 20
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.64,
+    "ms": 19124
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 8398
+   },
+   "cost": 0.08092
+  },
+  "anthropic/claude-sonnet-5.5": {
+   "price": {
+    "in": 2,
+    "out": 10
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.19,
+    "ms": 5842
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 6244
+   },
+   "cost": 0.02033
+  },
+  "mistralai/mistral-large-4-0": {
+   "price": {
+    "in": 1.36,
+    "out": 4.18
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.34,
+    "ms": 10243
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 24448
+   },
+   "cost": 0.0178
+  },
+  "prism-ml/ternary-bonsai-2-9b": {
+   "price": {
+    "in": 0.08,
+    "out": 0.13
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "passed 16 of 18 cases"
+    ],
+    "passed": 16,
+    "total": 18,
+    "score": 12.22,
+    "ms": 66677
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 22955
+   },
+   "cost": 0.00057
+  },
+  "fireworks/ember-1": {
+   "price": {
+    "in": 3,
+    "out": 15
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "passed 16 of 18 cases"
+    ],
+    "passed": 16,
+    "total": 18,
+    "score": 10.21,
+    "ms": 6208
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4408
+   },
+   "cost": 0.0156
+  },
+  "z-ai/glm-5.3-prime": {
+   "price": {
+    "in": 2.8,
+    "out": 8.8
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "passed 16 of 18 cases"
+    ],
+    "passed": 16,
+    "total": 18,
+    "score": 10.22,
+    "ms": 6724
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 3965
+   },
+   "cost": 0.01145
+  },
+  "stepfun/step-5-preview": {
+   "price": {
+    "in": 1,
+    "out": 2.7
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "finish_reason length",
+     "no code",
+     "passed 0 of 18 cases"
+    ],
+    "passed": 0,
+    "total": 18,
+    "score": 91.72,
+    "ms": 51507
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 9745
+   },
+   "cost": 0.03795
+  },
+  "qwen/qwen3.8-max-prime": {
+   "price": {
+    "in": 4,
+    "out": 12
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 1.38,
+    "ms": 41318
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 7760
+   },
+   "cost": 0.06285
+  },
+  "cohere/command-a-plus": {
+   "price": {
+    "in": 0.3,
+    "out": 1.5
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "finish_reason error",
+     "no code",
+     "passed 0 of 18 cases"
+    ],
+    "passed": 0,
+    "total": 18,
+    "score": 90.68,
+    "ms": 20517
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 14846
+   },
+   "cost": 0.00271
+  },
+  "upstage/solar-mini4": {
+   "price": {
+    "in": 0.05,
+    "out": 0.2
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "no code",
+     "does not load: no parseDuration export"
+    ],
+    "passed": 0,
+    "total": 18,
+    "score": 90.96,
+    "ms": 28811
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 40424
+   },
+   "cost": 0.00144
+  },
+  "xiaomi/mimo-v2.6-pro-ultraspeed": {
+   "price": {
+    "in": 4.35,
+    "out": 8.7
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 1.14,
+    "ms": 34291
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4146
+   },
+   "cost": 0.0689
+  },
+  "xiaomi/mimo-v2.6-flash": {
+   "price": {
+    "in": 0.14,
+    "out": 0.28
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 1.45,
+    "ms": 43352
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4050
+   },
+   "cost": 0.00241
+  },
+  "x-ai/grok-4.7": {
+   "price": {
+    "in": 2,
+    "out": 6
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 1.23,
+    "ms": 36831
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 8155
+   },
+   "cost": 0
+  },
+  "z-ai/glm-5.3-flashx": {
+   "price": {
+    "in": 0.37,
+    "out": 1.25
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "passed 16 of 18 cases"
+    ],
+    "passed": 16,
+    "total": 18,
+    "score": 10.16,
+    "ms": 4894
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4598
+   },
+   "cost": 0.00141
+  },
+  "inclusionai/ling-3.1-flash": {
+   "price": {
+    "in": 0.08,
+    "out": 0.23
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "The operation was aborted due to timeout"
+    ],
+    "ms": 150005
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 61409
+   },
+   "cost": 0.00036
+  },
+  "inference-net/schematron-v2-turbo": {
+   "price": {
+    "in": 0.03,
+    "out": 0.15
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "does not load: Unexpected token ':'"
+    ],
+    "passed": 0,
+    "total": 18,
+    "score": 90.03,
+    "ms": 886
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4383
+   },
+   "cost": 0.00009
+  },
+  "inference-net/schematron-v2-small": {
+   "price": {
+    "in": 0.05,
+    "out": 0.23
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "does not load: Unexpected token ':'"
+    ],
+    "passed": 0,
+    "total": 18,
+    "score": 90.05,
+    "ms": 1350
+   },
+   "json": {
+    "ok": false,
+    "problems": [
+     "not the requested JSON"
+    ],
+    "ms": 746
+   },
+   "cost": 0.00016
+  },
+  "sakana/fugu-ultra-v2": {
+   "price": {
+    "in": 5,
+    "out": 30
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "403 Provider returned error"
+    ],
+    "ms": 618
+   },
+   "json": {
+    "ok": false,
+    "problems": [
+     "403 Provider returned error"
+    ],
+    "ms": 340
+   },
+   "cost": 0
+  },
+  "sakana/fugu-max": {
+   "price": {
+    "in": 2,
+    "out": 6
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "403 Provider returned error"
+    ],
+    "ms": 490
+   },
+   "json": {
+    "ok": false,
+    "problems": [
+     "403 Provider returned error"
+    ],
+    "ms": 341
+   },
+   "cost": 0
+  },
+  "inception/mercury-2.5": {
+   "price": {
+    "in": 0.04,
+    "out": 0.15
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "passed 14 of 18 cases"
+    ],
+    "passed": 14,
+    "total": 18,
+    "score": 20.06,
+    "ms": 1706
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 1364
+   },
+   "cost": 0.00025
+  },
+  "aion-labs/aion-3.5-mini": {
+   "price": {
+    "in": 0.7,
+    "out": 1.4
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "The operation was aborted due to timeout"
+    ],
+    "ms": 150003
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 41910
+   },
+   "cost": 0.00388
+  },
+  "deepseek/deepseek-v4.1-flash": {
+   "price": {
+    "in": 0.14,
+    "out": 0.42
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.7,
+    "ms": 21029
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 2655
+   },
+   "cost": 0.00846
+  },
+  "aion-labs/aion-3.5": {
+   "price": {
+    "in": 3,
+    "out": 6
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "The operation was aborted due to timeout"
+    ],
+    "ms": 150006
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 66849
+   },
+   "cost": 0.02507
+  },
+  "nex-agi/nex-n2.5-mini": {
+   "price": {
+    "in": 0.03,
+    "out": 0.1
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 17,
+    "total": 18,
+    "score": 6.07,
+    "ms": 32116
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 12854
+   },
+   "cost": 0.00094
+  },
+  "openai/gpt-5.3-codex": {
+   "price": {
+    "in": 1.75,
+    "out": 14
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.55,
+    "ms": 16407
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 6411
+   },
+   "cost": 0.02513
+  },
+  "qwen/qwen3-coder-next": {
+   "price": {
+    "in": 0.12,
+    "out": 0.8
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "passed 14 of 18 cases"
+    ],
+    "passed": 14,
+    "total": 18,
+    "score": 20.35,
+    "ms": 10569
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4649
+   },
+   "cost": 0.00091
+  },
+  "mistralai/devstral-2512": {
+   "price": {
+    "in": 0.4,
+    "out": 2
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 17,
+    "total": 18,
+    "score": 5.13,
+    "ms": 3962
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 1994
+   },
+   "cost": 0.00228
+  },
+  "moonshotai/kimi-k2.7-code": {
+   "price": {
+    "in": 0.56,
+    "out": 3.1
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "finish_reason length",
+     "no code",
+     "passed 0 of 18 cases"
+    ],
+    "passed": 0,
+    "total": 18,
+    "score": 93.42,
+    "ms": 102636
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 5505
+   },
+   "cost": 0.03963
+  },
+  "bytedance-seed/seed-2.0-code": {
+   "price": {
+    "in": 0.5,
+    "out": 3
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 4.3,
+    "ms": 129130
+   },
+   "json": {
+    "ok": false,
+    "problems": [
+     "400 Provider returned error"
+    ],
+    "ms": 989
+   },
+   "cost": 0.02611
+  },
+  "nex-agi/nex-n2.5-pro": {
+   "price": {
+    "in": 0.08,
+    "out": 0.25
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 4.14,
+    "ms": 124326
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 22893
+   },
+   "cost": 0.00242
+  },
+  "prism-ml/ternary-bonsai-2-27b": {
+   "price": {
+    "in": 0.08,
+    "out": 0.5
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "The operation was aborted due to timeout"
+    ],
+    "ms": 150011
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 62863
+   },
+   "cost": 0.00101
+  }
+ },
+ "updated": "2026-10-28"
+}

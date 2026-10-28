@@ -19,6 +19,8 @@ services:
       - ./cli/image:/fane/image:ro
       # FANE_WRITE_DIR in patches/lib/vane.js; used by patch-article-chat (articles in the web UI)
       - ./cli/write:/fane/write:ro
+      # FANE_CODE_DIR in patches/lib/vane.js; used by patch-code-chat (code in the web UI)
+      - ./cli/code:/fane/code:ro
     environment:
       # Switches on the CORE academic engine (searxng/settings.yml); empty leaves it off.
       CORE_API_KEY: ${CORE_API_KEY:-}

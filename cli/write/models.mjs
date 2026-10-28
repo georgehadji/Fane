@@ -50,7 +50,7 @@ const JSON_TOKENS = { queries: 800, outline: 3000, factcheck: 4000, critique: 35
 // Room for thinking on top of the answer, even at low effort: the first live run in Vane's web UI had an
 // outline cut off at 3880 tokens by three models in a row, and a Quality copy edit cut off at 4975 tokens
 // (qwen3.8-max-prime; its fallback took 79 s). A cap is not a spend: only generated tokens are paid.
-const THINKING_HEADROOM = 8000;
+export const THINKING_HEADROOM = 8000;
 
 export function tokensFor(role, words, lang) {
   const k = TOKENS_PER_WORD[lang] || TOKENS_PER_WORD.en;

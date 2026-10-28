@@ -16,6 +16,7 @@ import { POSTS, POST_PLATFORMS } from './write/formats.mjs';
 import { buildTextCatalogue, selectChains } from './write/catalogue.mjs';
 import { LANGUAGES, detectLanguage } from './write/language.mjs';
 import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
+import { isCodeRequest } from './code/intent.mjs';
 import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient, findOpenRouterKey } from './image/openrouter.mjs';
 
 // The defaults for every Fane tool (scripts/ import this object).
@@ -50,6 +51,7 @@ const USAGE = `Usage: vane "<question>" [options]
        vane --edit-article article.md "<change>" [-o speed|balanced|quality] [--out new.md]
        vane --post ${POST_PLATFORMS.join('|')} "<topic>" [-o speed|balanced|quality] [--lang el|en] [--words n] [--out post.txt]
        vane --image "<prompt>" [-n ${DEFAULT_IMAGES}] [--tier ${TIERS.join('|')}] [--family <f>] [--aspect 1:1] [--out-dir dir]
+       vane --code "<request>" [-o speed|balanced|quality] [--out-dir dir]
 
 Options:
   -m, --model <id>       Chat model key or name (default: ${DEFAULTS.model}).
@@ -118,6 +120,18 @@ Articles (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; sources come 
                          "write a LinkedIn post about ..." or «γράψε μια ανάρτηση για ...» do this automatically.
                          --words: ${POST_PLATFORMS.map(p => `${POSTS[p].name} ${POSTS[p].minWords}-${POSTS[p].maxWords}, default ${POSTS[p].words}`).join('; ')}
 
+Code (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; documentation comes from Vane's own research):
+      --code             Write code for the request: a spec, one file at a time, a hostile review, fixes and tests.
+                         Requests like "write a Python script that ..." or «γράψε ένα πρόγραμμα που ...» do this
+                         automatically. Files are parsed (node --check, Python's ast.parse), never run
+      --no-auto-code     Search even when the question asks for code
+  -o, --mode <m>         speed (spec, files) | balanced (+ documentation, review, fixes, tests) |
+                         quality (+ known vulnerabilities of the stack for the review)
+      --code-model <id>  Models for every phase, first one primary and the rest its fallbacks (comma list).
+                         Default: models that passed scripts/code-trial.mjs, in the price band of the mode
+      --list-code-models Show the models each phase would use for -o <mode>
+      --out-dir <dir>    Where to write the files (default: ./vane-code/<request>); must be new or empty
+
 Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURCES, VANE_MODE,
      OPENROUTER_API_KEY, VANE_IMAGE_TEXT_MODEL (prompt enhancement/intent, default ${IMAGE_TEXT_MODEL})
 Exit codes: 0 ok, 1 runtime error (or no sources with --require-sources, or support below --min-support), 2 usage error`;
@@ -158,7 +172,7 @@ export function parseCli(argv) {
       aspect: { type: 'string' },
       size: { type: 'string' },
       ref: { type: 'string', multiple: true, default: [] },
-      'out-dir': { type: 'string', default: 'vane-images' },
+      'out-dir': { type: 'string' }, // default: vane-images for --image, vane-code/<request> for --code
       'no-enhance': { type: 'boolean', default: false },
       'key-from-vane': { type: 'boolean', default: false },
       'no-auto-image': { type: 'boolean', default: false },
@@ -171,6 +185,10 @@ export function parseCli(argv) {
       out: { type: 'string' },
       'edit-article': { type: 'string' },
       post: { type: 'string' },
+      code: { type: 'boolean', default: false },
+      'code-model': { type: 'string', multiple: true, default: [] },
+      'list-code-models': { type: 'boolean', default: false },
+      'no-auto-code': { type: 'boolean', default: false },
       url: { type: 'string', default: DEFAULTS.url },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -216,6 +234,11 @@ export function parseCli(argv) {
     }
     if (values.stream) throw new UsageError('--stream does not apply to --article');
   }
+  if (values.code || values['list-code-models']) {
+    values['code-model'] = values['code-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
+    if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
+    if (values.stream) throw new UsageError('--stream does not apply to --code');
+  }
   if (values['min-support'] !== undefined) {
     const r = Number(values['min-support']);
     if (!(r >= 0 && r <= 1)) throw new UsageError(`Invalid --min-support "${values['min-support']}" (use 0-1)`);
@@ -226,12 +249,13 @@ export function parseCli(argv) {
   return { ...values, model: values.model ?? DEFAULTS.model, modelExplicit, sources, timeoutMs: timeoutSec * 1000, query: positionals.join(' ').trim() };
 }
 
-// A query that asks for an image or an article goes there without --image/--article. The arguments are parsed
-// again with that flag, so the image or article options are checked as when it is typed (-n abc, --tier bogus).
-// -> the options for runImage / runArticle, or null for a search.
+// A query that asks for an image, code or an article goes there without --image/--code/--article. The arguments
+// are parsed again with that flag, so its options are checked as when it is typed (-n abc, --tier bogus).
+// -> the options for runImage / runCode / runArticle, or null for a search.
 export function autoRoute(opts, argv) {
   if (opts['list-models']) return null;
   if (!opts['no-auto-image'] && isImageRequest(opts.query)) return parseCli(['--image', ...argv]);
+  if (!opts['no-auto-code'] && isCodeRequest(opts.query)) return parseCli(['--code', ...argv]);
   // a post before an article: «ανάρτηση» matches both
   const platform = opts['no-auto-article'] ? null : postPlatform(opts.query);
   if (platform) return parseCli(['--post', platform, ...argv]);
@@ -656,12 +680,18 @@ async function doctor(opts) {
       report('ok', `image modules present in ${FANE_IMAGE_DIR} (web UI image requests work)`);
     } catch { report('warn', `image modules missing in ${FANE_IMAGE_DIR}; web UI image requests fall back to text (run node scripts/apply.mjs)`); }
     // patch-article-chat imports the article modules (and trial.json, the models that passed the trial) the same way.
-    const { FANE_WRITE_DIR } = createRequire(import.meta.url)(join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches', 'lib', 'vane.js'));
+    const { FANE_WRITE_DIR, FANE_CODE_DIR } = createRequire(import.meta.url)(join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches', 'lib', 'vane.js'));
     try {
       dockerOut(['exec', container, 'test', '-f', `${FANE_WRITE_DIR}/vane-hook.mjs`]);
       dockerOut(['exec', container, 'test', '-f', `${FANE_WRITE_DIR}/trial.json`]);
       report('ok', `article modules present in ${FANE_WRITE_DIR} (web UI article requests work)`);
     } catch { report('warn', `article modules missing in ${FANE_WRITE_DIR}; web UI article requests fall back to a normal answer (run node scripts/apply.mjs)`); }
+    // patch-code-chat: the coding modules and their trial.json (scripts/code-trial.mjs).
+    try {
+      dockerOut(['exec', container, 'test', '-f', `${FANE_CODE_DIR}/vane-hook.mjs`]);
+      dockerOut(['exec', container, 'test', '-f', `${FANE_CODE_DIR}/trial.json`]);
+      report('ok', `code modules present in ${FANE_CODE_DIR} (web UI coding requests work)`);
+    } catch { report('warn', `code modules or their trial.json missing in ${FANE_CODE_DIR}; web UI coding requests say so (run node scripts/code-trial.mjs, then node scripts/apply.mjs)`); }
   }
 
   try {
@@ -819,6 +849,109 @@ async function runArticleEdit(opts) {
   await writeArticleResult(r, opts);
 }
 
+// ---- code ----------------------------------------------------------------
+
+// Models that passed scripts/code-trial.mjs, in the mode's price band.
+async function defaultCodeChains({ mode, client }) {
+  const { readFile } = await import('node:fs/promises');
+  const { buildCodeCatalogue, selectCodeChains } = await import('./code/catalogue.mjs');
+  let trial = {};
+  try { trial = JSON.parse(await readFile(new URL('./code/trial.json', import.meta.url), 'utf8')); } catch { /* none yet */ }
+  const chosen = selectCodeChains(buildCodeCatalogue(await client.models()), trial.models || {}, { mode });
+  if (!chosen) throw new UsageError('No model has passed the coding trial. Pass --code-model <id>[,<fallback>...], or run node scripts/code-trial.mjs.');
+  return { ...chosen, trialDate: trial.updated };
+}
+
+async function listCodeModels(opts) {
+  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const client = createOpenRouterClient();
+  const chosen = await defaultCodeChains({ mode, client });
+  const { buildCodeCatalogue } = await import('./code/catalogue.mjs');
+  const price = new Map(buildCodeCatalogue(await client.models()).map(m => [m.id, m]));
+  const show = (id) => `${id} ($${price.get(id)?.priceIn}/${price.get(id)?.priceOut})`;
+  if (opts.json) return console.log(JSON.stringify({ mode, trialDate: chosen.trialDate, pool: chosen.pool, band: chosen.band, chains: chosen.chains }, null, 2));
+  console.log(`${mode}: ${chosen.pool} models passed the coding trial (${chosen.trialDate || 'undated'}); this mode's price band: ${chosen.band.join(', ')}`);
+  for (const [role, chain] of Object.entries(chosen.chains)) console.log(`  ${role.padEnd(10)}${chain.map(show).join('  >  ')}`);
+}
+
+// The files go to a new or empty folder only, so nothing of the user's is ever overwritten.
+async function codeDir(opts) {
+  const { readdir } = await import('node:fs/promises');
+  const empty = async (d) => { try { return (await readdir(d)).length === 0; } catch (err) { if (err.code === 'ENOENT') return true; throw err; } };
+  if (opts['out-dir'] !== undefined) {
+    if (!(await empty(opts['out-dir']))) throw new UsageError(`--out-dir ${opts['out-dir']} is not empty: pick a new folder.`);
+    return opts['out-dir'];
+  }
+  const slug = opts.query.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '') || 'code';
+  for (let n = 1; ; n++) {
+    const d = join('vane-code', n === 1 ? slug : `${slug}-${n}`);
+    if (await empty(d)) return d;
+  }
+}
+
+async function writeCodeFiles(dir, r) {
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  const { resolve, sep } = await import('node:path');
+  const root = resolve(dir);
+  const all = [...r.files, ...r.tests];
+  if (!all.some(f => /^readme\.md$/i.test(f.path))) all.push({ path: 'README.md', content: r.readme });
+  for (const f of all) {
+    const target = resolve(root, f.path);
+    if (!target.startsWith(root + sep)) throw new Error(`refused to write outside ${dir}: ${f.path}`); // safePath already refuses these
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, f.content, { flag: 'wx' });
+  }
+  return all.map(f => f.path);
+}
+
+function printCodeReport(r, dir) {
+  const say = (s) => process.stderr.write(`${s}\n`);
+  const cost = r.cost ? ` · ≈ $${r.cost.toFixed(4)}` : '';
+  say(`\nvane: ${r.files.length} files, ${r.tests.length} test files in ${dir} (${r.spec.language}${r.spec.framework ? `, ${r.spec.framework}` : ''}), ${r.mode} · ${r.calls} model calls${cost} · ${Math.round(r.ms / 1000)} s`);
+  for (const p of r.phases) say(`  ${p.status.padEnd(9)}${p.phase.padEnd(9)}${p.file ? `${p.file}  ` : ''}${p.model || ''}${p.note && p.status !== 'ok' ? `  (${p.note})` : ''}`);
+  for (const f of [...r.files, ...r.tests]) say(`  ${(f.syntax?.status || 'unchecked').padEnd(9)}syntax   ${f.path}${f.syntax?.detail ? `  (${f.syntax.detail})` : ''}`);
+  if (r.review) say(`  review: ${r.review.verdict}, ${r.fixes.reduce((n, f) => n + f.issues.length, 0)} issues fixed, ${r.open.length} open${r.review.posture ? ` · ${r.review.posture}` : ''}`);
+  for (const i of r.open) say(`  open    ${i.file || i.named || '?'} (${i.severity}): ${i.issue}`);
+  for (const c of r.checks) if (c.level === 'warn') say(`  warn    ${c.name}: ${c.detail}`);
+  for (const d of r.degraded) say(`  degraded: ${d}`);
+}
+
+async function runCode(opts) {
+  if (!opts.query) throw new UsageError('Missing request. Example: vane --code "a Python script that renames photos by the date they were taken"');
+  const dir = await codeDir(opts); // before any paid call
+  const apiKey = await resolveOpenRouterKey(opts);
+  const [{ createCodePipeline }, { createSyntaxChecker }, { codeChainsFor }] = await Promise.all([import('./code/pipeline.mjs'), import('./code/syntax.mjs'), import('./code/models.mjs')]);
+  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const client = createOpenRouterClient({ apiKey });
+  const chosen = opts['code-model'].length ? { chains: codeChainsFor(opts['code-model']) } : await defaultCodeChains({ mode, client });
+  // Documentation is Vane's own research (Balanced, Quality); Vane is started only then.
+  let providers;
+  const retrieve = async (query) => {
+    providers ??= await getProvidersStartingVane(opts.url, DEFAULTS.container);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { sources } = await search({ ...opts, query, stream: false, mode }, providers);
+      if (sources.length) return sources;
+    }
+    return [];
+  };
+  const log = (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); };
+  const write = createCodePipeline({ client, retrieve, checkSyntax: createSyntaxChecker(), log });
+  const r = await write({
+    request: opts.query,
+    mode,
+    lang: opts.lang,
+    chains: chosen.chains,
+    prices: chosen.prices,
+    onProgress: (e) => { if (!opts.json && e.status !== 'running' && e.status !== 'preview' && e.phase !== 'done') log(`${e.phase} ${e.status}${e.file ? ` ${e.file}` : ''}${e.model ? ` (${e.model}, ${(e.ms / 1000).toFixed(0)} s)` : ''}${e.note && e.status === 'done' ? `: ${e.note}` : ''}`); },
+  });
+  if (!r.ok) throw new Error(r.error);
+  const written = await writeCodeFiles(dir, r);
+  if (opts.json) return console.log(JSON.stringify({ ...r, dir, written }, null, 2));
+  console.log(written.map(p => join(dir, p)).join('\n'));
+  printCodeReport(r, dir);
+  if (r.checks.some(c => c.level === 'fail')) process.exitCode = 1;
+}
+
 async function readReference(file) {
   const { readFile } = await import('node:fs/promises');
   const { sniffMime } = await import('./image/extract.mjs');
@@ -845,7 +978,7 @@ async function runImage(opts) {
   const words = parseImageOptions(opts.query);
   const aspect = opts.aspect ?? words.aspect ?? '1:1';
   const r = await generate({ prompt: opts.query, count: opts.count ?? words.count, tier: opts.tier, family: opts.family, aspect, size: opts.size, references, enhance: !opts['no-enhance'], models: opts['image-model'], via: opts.via });
-  const saved = r.images.length ? await saveImages(r.images, opts['out-dir'], imageSubject(opts.query)) : [];
+  const saved = r.images.length ? await saveImages(r.images, opts['out-dir'] ?? 'vane-images', imageSubject(opts.query)) : [];
   if (opts.json) {
     console.log(JSON.stringify({ prompt: opts.query, intent: r.intent, models: r.models, enhancedPrompt: r.enhancedPrompt, rewrittenPrompt: r.rewrittenPrompt, requested: r.requested, images: saved, errors: r.errors }, null, 2));
   } else {
@@ -881,6 +1014,8 @@ async function main() {
   if (opts.help) return console.log(USAGE);
   if (opts.doctor) { if (await doctor(opts)) process.exitCode = 1; return; }
   if (opts.image) return runImage(opts);
+  if (opts.code) return runCode(opts);
+  if (opts['list-code-models']) return listCodeModels(opts);
   if (opts['edit-article'] !== undefined) return runArticleEdit(opts);
   if (opts.article) return runArticle(opts);
   if (opts['list-article-models']) return listArticleModels(opts);
@@ -903,6 +1038,10 @@ async function main() {
   if (routed?.image) {
     process.stderr.write('vane: this asks for an image, so it goes to image generation (same as --image; --no-auto-image to search instead).\n');
     return runImage(routed);
+  }
+  if (routed?.code) {
+    process.stderr.write('vane: this asks for code, so it goes to code writing (same as --code; --no-auto-code to search instead).\n');
+    return runCode(routed);
   }
   if (routed) {
     process.stderr.write(routed.post

@@ -2,6 +2,7 @@
 // Like the image intent, it needs a writing verb at the start ("write an article about ...",
 // "γράψε ένα άρθρο για ..."): "article about X" on its own is a search question and stays one.
 // A bare "κείμενο" (text) is not enough either: it would catch ordinary questions.
+import { isCodeRequest } from '../code/intent.mjs';
 import { DEFAULT_PLATFORM } from './formats.mjs';
 import { detectLanguage, fold } from './language.mjs';
 
@@ -16,9 +17,10 @@ const EL_VERB = String.raw`(?:γραψε|γραψτε|γραψου|συνταξ�
 const EL_NOUN = String.raw`(?:αρθρο\p{L}*|δοκιμι\p{L}*|εκθεσ\p{L}*|αναρτησ\p{L}*|ποστ|blogpost|blog post|blog)`;
 const EL = new RegExp(String.raw`^\s*${POLITE}${EL_VERB}\s+(?:μου\s+|μασ\s+)?(?:(?:ενα|μια|μιασ|το|τον|την|εναν)\s+)?(?:\p{L}+\s+){0,2}?${EL_NOUN}(?![\p{L}])`, 'iu');
 
+// A code request is never an article: "write a report generator in Python" has "report" after the verb.
 export const isArticleRequest = (text) => {
   const t = String(text || '');
-  return EN.test(t) || EL.test(fold(t));
+  return (EN.test(t) || EL.test(fold(t))) && !isCodeRequest(t);
 };
 
 // Over folded text, after the request words: "about", "για", "σχετικά με" ...
@@ -62,6 +64,7 @@ const platformIn = (folded) => {
 export function postPlatform(text) {
   const folded = fold(text);
   if (!EN_POST.test(folded) && !EL_POST.test(folded)) return null;
+  if (isCodeRequest(text)) return null; // "write a LinkedIn post scheduler in Python"
   const platform = platformIn(folded);
   if (!platform && /(?<![\p{L}])blog/iu.test(folded)) return null;
   return platform || DEFAULT_PLATFORM;

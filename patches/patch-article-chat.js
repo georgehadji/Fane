@@ -37,5 +37,5 @@ const TARGETS = [
   },
 ];
 
-module.exports = { TARGETS };
+module.exports = { TARGETS, CLASSIFY, RESEARCH };
 if (require.main === module) run('patch-article-chat', TARGETS);

@@ -34,8 +34,8 @@ export const NETWORK_WAIT_MS = 10_000;
 const isNetworkError = (err) => !err.status && err.name !== 'TimeoutError' && err.name !== 'AbortError';
 
 export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new Promise(r => setTimeout(r, ms)) }) {
-  return async function call(role, { system, user }, { chain, maxTokens, temperature, prices }) {
-    const json = isJsonRole(role);
+  // `json`: whether the role answers JSON; the coding roles (code/models.mjs) say so here, the article roles by name.
+  return async function call(role, { system, user }, { chain, maxTokens, temperature, prices, json = isJsonRole(role) }) {
     const attempts = [];
     let cost = 0, offline = 0;
     for (const [i, model] of chain.entries()) {

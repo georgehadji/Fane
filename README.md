@@ -155,7 +155,7 @@ Count and shape can be written in the prompt, in the CLI and in the web UI: "mak
 3. **Prompt enhancement** by the cheap text model (`--no-enhance` skips it).
 4. **Generation:** the 4 chains run in parallel; a chain moves to its next model only when the previous one failed. Pure generators (Flux, Recraft, Seedream, …) go to OpenRouter's Image API. Chat models that draw (Gemini, GPT) go to chat completions with `modalities: ["image","text"]` and `image_config`, and their text reply is kept. For a non-square `--aspect`, chat models are sent to the Image API first, because chat completions silently drops the ratio for GPT (a 16:9 request came back 1024×1024). If a provider lists the ratios it accepts ("Accepted: 1:1, 3:2, 2:3"), the nearest one is used: GPT gets 3:2 for 16:9.
 5. **Retries:** if a chain runs out after refusals, a policy-safe rewrite (by the model, then local rules for protected characters and studios) is tried for the missing images only; images already made are kept. A `401` or `402` stops every chain immediately, since it affects every model alike.
-6. Images are saved to `--out-dir` (default `./vane-images`) and never overwrite existing files.
+6. Images are saved to `--out-dir` (default `./vane-images` for images) and never overwrite existing files.
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...           # or pass --key-from-vane to use Vane's OpenRouter provider key
@@ -244,6 +244,81 @@ There is no outline, structural critique or audit, because a post has no section
 vane "write a LinkedIn post about heat pumps in cold climates" -o balanced
 vane --post facebook "tidal power in Orkney" --words 90 --out post.txt
 ```
+
+### Code (`--code`)
+
+`vane --code "<request>"` writes code: the files, a review, tests and a README. Requests that start like these do it automatically, in the CLI and in Vane's chat (`--no-auto-code` searches instead):
+
+- "write a Python script that …", "create a CLI tool for …", "make a React component called …";
+- "implement quicksort in Rust" (any request that names its language);
+- «γράψε ένα πρόγραμμα που …», «φτιάξε μια συνάρτηση σε Python …».
+
+"Write an article on machine learning in Python" stays an article, and "write a LinkedIn post about my library" stays a post.
+
+The method is reasoner's coding flow ([`coding.py`](https://github.com/georgehadji/reasoner/blob/main/src/reasoner/application/flows/coding.py)):
+
+1. **Documentation:** one Vane research on the request.
+2. **Spec:** the language, the smallest set of files, each file's exports and imports, the error strategy, the security notes and the test command.
+3. **Files:** one call per file, four at a time, at most 12 files, against a "production code contract" (types, specific errors, input validation, no secrets, nothing unfinished).
+4. **Known vulnerabilities** of the stack (Quality only).
+5. **Review:** a hostile review for security and quality, with findings rated critical, high or medium.
+6. **Fixes:** one call per file with a critical or high finding, or that does not parse.
+7. **Tests:** a regression test for each finding.
+8. **README:** written by code from the spec and the review, with no model call.
+
+| Mode | Phases |
+|---|---|
+| `speed` | spec, files |
+| `balanced` | + documentation, review, fixes, tests |
+| `quality` | + known vulnerabilities for the review |
+
+Where Fane differs from reasoner:
+
+- The files, the fixes and the tests come back as fenced code, not JSON. Code inside a JSON string broke on escaping, and reasoner kept the raw text as a fallback.
+- The review and the fixes see whole files. Reasoner's review saw the first 800 characters of each file, and its final step was asked to return files whose content it was never given.
+
+**Nothing generated is run.** Each file is only parsed: `node --check` for JavaScript, Python's `ast.parse` for Python, `JSON.parse` for JSON. Other languages show as "not checked", never as passing. A file that does not parse goes to the fix step. A fix that breaks the parse of a file that parsed is refused, and so is one that drops half the file; the earlier file is kept and the finding stays listed as not fixed.
+
+Other checks warn about a TODO or stub, or about something that looks like a hard-coded key or password.
+
+The paths a model proposes are checked before anything is written: no absolute path, `..`, `.git` or Windows device name. The files go to `--out-dir`, which must be new or empty. Without it they go to `./vane-code/<request>`, and a folder that already exists gets a number. Nothing is overwritten.
+
+```bash
+vane "write a Python script that renames photos by the date they were taken" -o balanced
+vane --code "a CLI in Node.js that converts CSV to JSON" -o quality --out-dir csv2json
+vane --list-code-models -o balanced
+```
+
+**Which models.** Default chains come from a coding trial (`node scripts/code-trial.mjs --key-from-vane`, results in `cli/code/trial.json`).
+
+- Each candidate writes `duration.mjs` with the real prompt, and the function must pass 17 of 18 fixed cases.
+- The candidates also answer the spec prompt as JSON.
+- The candidates are each lab's newest models plus the newest code specialist of each lab (Codex, Qwen Coder, Devstral, and so on). The article trial leaves those out.
+- The generated function runs in its own Node process with Node's permission model on (no file writes, no child processes) and a 10 s limit.
+
+The mode picks the price band as for articles. `--code-model a/x,b/y` sets the models.
+
+The trial of 2026-10-28 tried 45 models for $0.63:
+
+- 23 passed the code task, and 22 of those also answered the spec as JSON.
+- Six thinking models used their whole 12,000-token budget and returned no code, among them Kimi K2.7 Code.
+- Qwen3 Coder Next passed 14 of 18 cases.
+
+**Measured live:**
+
+- **CLI, Balanced:** "write a Python script that renames the photos in a folder by the date they were taken, read from EXIF" made 5 model calls, cost $0.06 and took 263 s, giving one 222-line script and 518 lines of tests.
+  - The review caught an import of a Pillow module that does not exist (the script would not have started), and the fix step repaired it.
+  - Three medium findings stayed listed as not fixed.
+- **Web UI, Balanced:** a JavaScript function took 1 m 25 s and cost $0.008. `arr[i]` and `[1, 3, 2]` showed intact, although the answer had sources.
+
+**In Vane's web UI** (`patches/patch-code-chat.js`), the same request is answered in the chat:
+
+- Each file is shown in Vane's code view, followed by the tests, the README, the review (what was fixed, what was not) and the documentation pages used.
+- A status line gives files, tests, the parse results, cost, time and mode.
+- Vane's chat page rewrites every `[x]` in an answer: into citation chips when the answer has sources, and `[1]` into nothing when it has none. That breaks `a[0]` and `[a, b]`, so the patch's second target leaves answers carrying the code marker alone.
+- The modules are mounted from `cli/code` at `/fane/code`, or copied there by `node scripts/apply.mjs`.
+
+Follow-up edits of code ("make it async") are not supported yet: the request goes to Vane as usual.
 
 ### Citation check (`--verify`)
 
