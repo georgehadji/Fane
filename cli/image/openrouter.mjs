@@ -72,6 +72,8 @@ export function modelClientFor(modelProviders, { apiKey = findOpenRouterKey(mode
   const pick = (model) => (isFreeModel(model) ? [free, model.slice(FREE_PREFIX.length)] : openRouter ? [openRouter, model] : none(model));
   return {
     freeLlm: openRouter ? 'fallback' : 'only',
+    // the models freellmapi can serve right now (a key, inside its limits), as free: ids
+    freeReady: async () => (await free.models('?execution_status=ready')).map(m => `${FREE_PREFIX}${m.id}`),
     models: async () => (openRouter ? openRouter.models() : []),
     imageModels: async () => (openRouter ? openRouter.imageModels() : []),
     images: async (body, timeoutMs) => (openRouter ? openRouter.images(body, timeoutMs) : none(body.model)),
@@ -88,16 +90,25 @@ export function modelClientFor(modelProviders, { apiKey = findOpenRouterKey(mode
   };
 }
 
-// The chains a text feature runs on. `select()` is its own choice of OpenRouter models (null when none passed its
-// trial), `only(models)` its chains of just these models. freellmapi alone serves every role on the mode's router
-// entry; next to OpenRouter it ends every chain, and serves alone when no OpenRouter model passed the trial.
-export async function withFreeLlm(client, mode, select, only) {
-  const free = FREE_MODEL[mode] || FREE_MODEL.balanced;
+// The chains a text feature runs on, from three choices of the feature's own:
+//   select()          its OpenRouter models (null when none passed its trial)
+//   free(ready, last) the free models that passed its trial (selectFreeChains), each chain ending in `last`, the mode's
+//                     router entry; `ready` is what freellmapi can serve now (null when it would not say); null when none passed
+//   only(models)      its chains of just these models
+// freellmapi alone serves every role on its ranked free models (else on `last`); next to OpenRouter its chains follow
+// every OpenRouter chain, and serve alone when no OpenRouter model passed the trial.
+export async function withFreeLlm(client, mode, { select, free, only }) {
+  if (!client.freeLlm) return select();
+  const last = FREE_MODEL[mode] || FREE_MODEL.balanced;
+  const ready = await client.freeReady().catch(() => null);
+  const freeChosen = free(ready, last) || { chains: only([last]), prices: {} };
   const chosen = client.freeLlm === 'only' ? null : await select();
-  if (!client.freeLlm) return chosen;
-  if (!chosen) return { chains: only([free]), prices: {} };
-  return { ...chosen, chains: Object.fromEntries(Object.entries(chosen.chains).map(([role, chain]) => [role, [...chain, free]])) };
+  if (!chosen) return freeChosen;
+  return { ...chosen, chains: Object.fromEntries(Object.entries(chosen.chains).map(([role, chain]) => [role, [...chain, ...(freeChosen.chains[role] || [last])]])) };
 }
+
+// freellmapi as Vane's container knows it (host.docker.internal), reached from the host, where it listens on 127.0.0.1.
+export const fromHost = (url) => url.replace('//host.docker.internal', '//127.0.0.1');
 
 // The client for the providers in Vane's own settings, for the hooks that run inside Vane: config.json is read from
 // `configPath` (or `readConfig()`, injected for tests). null when the file cannot be read or has neither provider.
@@ -144,7 +155,7 @@ export function createOpenRouterClient({ apiKey, baseUrl = OPENROUTER_BASE_URL, 
 
   return {
     // Public catalogue (no key needed). The plain list omits pure image generators.
-    models: async () => (await call('/models', { timeoutMs: 15_000 })).data || [],
+    models: async (query = '') => (await call(`/models${query}`, { timeoutMs: 15_000 })).data || [],
     // Image-output models, including Flux, Recraft, Seedream and the chat models that draw.
     imageModels: async () => (await call('/models?output_modalities=image', { timeoutMs: 15_000 })).data || [],
     chat: (body, timeoutMs = 120_000) => call('/chat/completions', { method: 'POST', body, timeoutMs }),

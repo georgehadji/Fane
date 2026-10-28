@@ -154,11 +154,18 @@ This needs a Vane provider whose name contains "openrouter" (override with `--pr
 
 [freellmapi](https://github.com/tashfeenahmed/freellmapi) is a self-hosted gateway over the free tiers of many providers (Gemini, Groq, Cerebras, OpenRouter `:free` and others), with its own failover between them. Add it to Vane (Settings → Models) as an OpenAI-compatible provider with Base URL `http://host.docker.internal:3001/v1` and its `freellmapi-…` key; Fane finds it by that key.
 
-- **Without an OpenRouter provider**, articles, posts, code and brainstorming (in the web UI, and the CLI with `--key-from-vane`) run on freellmapi: every phase on `auto:fast` (Speed), `auto` (Balanced, freellmapi's active chain) or `auto:smart` (Quality). Images still need OpenRouter.
-- **Next to OpenRouter**, freellmapi is the last model of every chain, and the whole run moves to it when OpenRouter answers 401 or 402 (bad key, no credits).
-- **A chain entry `free:<model>`** goes to freellmapi: `vane --article "..." --article-model free:auto:smart`, or one of its model ids.
+- **Without an OpenRouter provider**, articles, posts, code and brainstorming (in the web UI, and the CLI with `--key-from-vane`) run on freellmapi's free models that passed Fane's trials, best score first, among those freellmapi can serve at that moment. Every chain ends in freellmapi's own router: `auto:fast` (Speed), `auto` (Balanced, its active chain) or `auto:smart` (Quality). With no trial results, every phase runs on that router entry. Images still need OpenRouter.
+- **Next to OpenRouter**, those free chains follow every OpenRouter chain, and the whole run moves to them when OpenRouter answers 401 or 402 (bad key, no credits).
+- **A chain entry `free:<model>`** goes to freellmapi: `vane --article "..." --article-model free:auto:smart`, or one of its model ids (`free:gemini-3.8-flash`).
 
-The answer names the model freellmapi chose (`free:groq/llama-3.3-70b`). Free calls cost $0, and the trial has not checked these models: expect weaker writing, above all in Greek, and quality that drops late in the day as the best free tiers run out.
+Put freellmapi's models through the trials (no cost; results saved as `free:<id>` next to the OpenRouter ones, and a model that only failed to answer, a rate limit or a timeout, is not saved, so the next run tries it again):
+
+```bash
+node scripts/article-trial.mjs --free --concurrency 3
+node scripts/code-trial.mjs --free --concurrency 3
+```
+
+Run them again after adding provider keys to freellmapi. The answer names the model that wrote it (`free:gemini-3.8-flash`, or for a router entry the model freellmapi chose, `free:groq/llama-3.3-70b`). Free calls cost $0. Quality drops late in the day as the best free tiers run out; freellmapi gives up a call after 45 s of failover (`FALLBACK_TIME_BUDGET_MS`), so raise that for long Quality or Greek articles.
 
 ### Image generation (`--image`)
 

@@ -7,10 +7,10 @@ import { IMAGE_TEXT_MODEL } from './image/generate.mjs';
 import { parseImageOptions } from './image/intent.mjs';
 import { articleTopic, parseArticleOptions, postTopic } from './core/intent-article.mjs';
 import { POSTS } from './core/formats.mjs';
-import { buildTextCatalogue, selectChains } from './write/catalogue.mjs';
+import { buildTextCatalogue, selectChains, selectFreeChains } from './write/catalogue.mjs';
 import { detectLanguage } from './core/language.mjs';
 import { chainsFor } from './write/models.mjs';
-import { OPENROUTER_BASE_URL, createOpenRouterClient, modelClientFor, withFreeLlm } from './image/openrouter.mjs';
+import { OPENROUTER_BASE_URL, createOpenRouterClient, fromHost, modelClientFor, withFreeLlm } from './image/openrouter.mjs';
 import { DEFAULTS, UsageError, getProviders, getProvidersStartingVane, search } from './client.mjs';
 
 // ---- image generation ----------------------------------------------------
@@ -27,8 +27,7 @@ async function resolveClient(opts, { images = false } = {}) {
       providers = (await res.json()).values?.modelProviders || [];
     } catch (err) { if (!apiKey) throw err; }
   } else if (!apiKey) throw new UsageError('This needs an OpenRouter key: set OPENROUTER_API_KEY, or pass --key-from-vane to use the one configured in Vane.');
-  // Vane's container calls the host host.docker.internal; this runs on the host, where freellmapi listens on 127.0.0.1
-  const client = modelClientFor(providers, { apiKey, freeBaseUrl: (u) => u.replace('//host.docker.internal', '//127.0.0.1') });
+  const client = modelClientFor(providers, { apiKey, freeBaseUrl: fromHost });
   if (!client || (images && client.freeLlm === 'only')) throw new UsageError(`No Vane provider with Base URL ${OPENROUTER_BASE_URL} and an API key at ${opts.url}${images ? '' : ', nor a freellmapi one'}.`);
   return client;
 }
@@ -59,7 +58,11 @@ async function loadTrial() {
 // Chains of the mode's price band, from the models that passed the trial for this language (and freellmapi's, withFreeLlm).
 async function defaultChains({ mode, lang, client }) {
   const trial = await loadTrial();
-  const chosen = await withFreeLlm(client, mode, async () => selectChains(buildTextCatalogue(await client.models()), trial.models || {}, { mode, lang }), chainsFor);
+  const chosen = await withFreeLlm(client, mode, {
+    select: async () => selectChains(buildTextCatalogue(await client.models()), trial.models || {}, { mode, lang }),
+    free: (ready, last) => selectFreeChains(trial.models || {}, ready, { lang, last }),
+    only: chainsFor,
+  });
   if (!chosen) throw new UsageError(`No text model has passed the trial for ${lang === 'el' ? 'Greek' : 'English'}. Pass --article-model <id>[,<fallback>...], or run node scripts/article-trial.mjs.`);
   return { ...chosen, trialDate: trial.updated };
 }
@@ -160,10 +163,14 @@ export async function runArticleEdit(opts) {
 // Models that passed scripts/code-trial.mjs, in the mode's price band.
 async function defaultCodeChains({ mode, client }) {
   const { readFile } = await import('node:fs/promises');
-  const [{ buildCodeCatalogue, selectCodeChains }, { codeChainsFor }] = await Promise.all([import('./code/catalogue.mjs'), import('./code/models.mjs')]);
+  const [{ buildCodeCatalogue, selectCodeChains, selectFreeCodeChains }, { codeChainsFor }] = await Promise.all([import('./code/catalogue.mjs'), import('./code/models.mjs')]);
   let trial = {};
   try { trial = JSON.parse(await readFile(new URL('./code/trial.json', import.meta.url), 'utf8')); } catch { /* none yet */ }
-  const chosen = await withFreeLlm(client, mode, async () => selectCodeChains(buildCodeCatalogue(await client.models()), trial.models || {}, { mode }), codeChainsFor);
+  const chosen = await withFreeLlm(client, mode, {
+    select: async () => selectCodeChains(buildCodeCatalogue(await client.models()), trial.models || {}, { mode }),
+    free: (ready, last) => selectFreeCodeChains(trial.models || {}, ready, last),
+    only: codeChainsFor,
+  });
   if (!chosen) throw new UsageError('No model has passed the coding trial. Pass --code-model <id>[,<fallback>...], or run node scripts/code-trial.mjs.');
   return { ...chosen, trialDate: trial.updated };
 }
@@ -260,14 +267,18 @@ export async function runCode(opts) {
 export async function runBrainstorm(opts) {
   if (!opts.query) throw new UsageError('Missing problem. Example: vane --brainstorm "ways a small bookshop can win back readers"');
   const client = await resolveClient(opts);
-  const { createBrainstormPipeline, chainsFor: brainstormChainsFor, selectBrainstormChains } = await import('./brainstorm/pipeline.mjs');
+  const { createBrainstormPipeline, chainsFor: brainstormChainsFor, selectBrainstormChains, selectFreeBrainstormChains } = await import('./brainstorm/pipeline.mjs');
   const { renderBrainstorm } = await import('./brainstorm/present.mjs');
   const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
   const lang = opts.lang ?? detectLanguage(opts.query);
   let chosen = { chains: brainstormChainsFor(opts['brainstorm-model']) };
   if (!opts['brainstorm-model'].length) {
     const trial = (await loadTrial()).models || {};
-    chosen = await withFreeLlm(client, mode, async () => selectBrainstormChains(buildTextCatalogue(await client.models()), trial, { mode, lang }), brainstormChainsFor);
+    chosen = await withFreeLlm(client, mode, {
+      select: async () => selectBrainstormChains(buildTextCatalogue(await client.models()), trial, { mode, lang }),
+      free: (ready, last) => selectFreeBrainstormChains(trial, ready, { lang, last }),
+      only: brainstormChainsFor,
+    });
     if (!chosen) throw new UsageError('No text model has passed the article trial. Pass --brainstorm-model <id>[,<fallback>...], or run node scripts/article-trial.mjs.');
   }
   // Existing work is Vane's own research (Balanced, Quality); Vane is started only then.

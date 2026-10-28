@@ -3,7 +3,7 @@
 // results in trial.json): one function written with the real generate prompt that must parse and pass a fixed
 // test, and a spec answered as JSON. Code specialists (coder, codex) are candidates here; the article trial leaves
 // them out. Chains are price bands per mode, like the article chains. Untried models: --code-model.
-import { buildTextCatalogue, selectChains } from '../write/catalogue.mjs';
+import { buildTextCatalogue, selectChains, selectFreeChains } from '../write/catalogue.mjs';
 import { extractJson } from '../write/llm.mjs';
 import { extractCode, safePath } from './files.mjs';
 import { CODE_JSON_ROLES } from './models.mjs';
@@ -16,6 +16,8 @@ export const buildCodeCatalogue = (entries, opts) => buildTextCatalogue(entries,
 
 export const selectCodeChains = (catalogue, trial, { mode = 'balanced' } = {}) =>
   selectChains(catalogue, trial, { mode, lang: TRIAL_KEY, roles: CODE_ROLE_ORDER, jsonRoles: CODE_JSON_ROLES });
+export const selectFreeCodeChains = (trial, ready, last) =>
+  selectFreeChains(trial, ready, { lang: TRIAL_KEY, roles: CODE_ROLE_ORDER, jsonRoles: CODE_JSON_ROLES, last });
 
 // ---- the live trial: a task with one right answer ----
 

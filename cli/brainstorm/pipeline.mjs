@@ -9,7 +9,7 @@
 //  - ids are given by code; answers that name an unknown id are ignored, so nothing invented reaches the result.
 // Failures are values: a round, the development or the synthesis that fails is listed in `degraded`.
 import { createRoleCaller, statusOf } from '../write/llm.mjs';
-import { selectChains } from '../write/catalogue.mjs';
+import { selectChains, selectFreeChains } from '../write/catalogue.mjs';
 import { LANGUAGE_NAMES, detectLanguage, fold, repairFinalNu, repairHomoglyphs } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES, THINKING_HEADROOM } from '../write/models.mjs';
 import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
@@ -39,6 +39,10 @@ const TEMPERATURE = { generate: 1, cluster: 0.2, develop: 0.5, synthesis: 0.5 };
 export const selectBrainstormChains = (catalogue, trial, { mode = DEFAULT_MODE, lang = 'en' } = {}) =>
   selectChains(catalogue, trial, { mode, lang, roles: ROLES, jsonRoles: new Set(ROLES) })
   || (lang !== 'en' ? selectChains(catalogue, trial, { mode, lang: 'en', roles: ROLES, jsonRoles: new Set(ROLES) }) : null);
+// The same over the free models of the article trial (freellmapi; see withFreeLlm).
+export const selectFreeBrainstormChains = (trial, ready, { lang = 'en', last } = {}) =>
+  selectFreeChains(trial, ready, { lang, roles: ROLES, jsonRoles: new Set(ROLES), last })
+  || (lang !== 'en' ? selectFreeChains(trial, ready, { lang: 'en', roles: ROLES, jsonRoles: new Set(ROLES), last }) : null);
 
 export const chainsFor = (models) => Object.fromEntries(ROLES.map(r => [r, models?.length ? models : [DEFAULT_TEXT_MODEL]]));
 

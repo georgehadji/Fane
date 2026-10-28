@@ -13,6 +13,7 @@
 import { THINKING_LEAK, checkCitations, rhythm } from './checks.mjs';
 import { countTells, findHomoglyphs, greekShare, greekTypography, wordCount } from '../core/language.mjs';
 import { extractJson } from './llm.mjs';
+import { FREE_PREFIX, isFreeModel } from '../image/openrouter.mjs';
 
 export const FALLBACKS_PER_ROLE = 3;
 export const MIN_CONTEXT = 64_000; // 16 sources of 700 characters plus the article fit with room to spare
@@ -115,6 +116,35 @@ export function selectChains(catalogue, trial, { mode = 'balanced', lang = 'en',
   // USD per million tokens, for the models that report no usage.cost (llm.mjs estimates their cost)
   const prices = Object.fromEntries(pool.map(m => [m.id, { in: m.priceIn, out: m.priceOut }]));
   return { chains, pool: n, band: band.map(m => m.id), prices };
+}
+
+// ---- free models (freellmapi) ----
+
+// Not for a trial: freellmapi's router entries (auto, fusion, the claude-* slots it routes to a free model) and models
+// that do not write text (fill-in-the-middle, safety classifiers, speech, robotics).
+const FREE_SKIP = /^free:(?:auto|fusion|iterative-critique|claude-(?:opus|sonnet|haiku)-)|fim|content-safety|voxtral|robotics|embed|whisper|tts/i;
+
+// The free: ids freellmapi can serve now that a trial should try: the article trial (`code` false) leaves out the
+// models it leaves out on OpenRouter, the coding trial takes the code specialists too.
+export const freeTrialCandidates = (ready, { code = false } = {}) =>
+  (ready || []).filter(id => !FREE_SKIP.test(id) && !(code ? NOT_FOR_CODE : NOT_FOR_ARTICLES).test(id.slice(FREE_PREFIX.length)));
+
+// The free models that passed `lang` in `trial` (its free: ids, scripts/*-trial.mjs --free) and are `ready` (all of
+// them when null), best score first, as chains for `roles`: each role starts at its own place in the list, so
+// neighbouring roles get different models, and every chain ends in `last` (freellmapi's router entry for the mode).
+// There are no price bands: every one of them is free. -> { chains, prices: {}, pool } | null when none passed.
+export function selectFreeChains(trial, ready, { lang = 'en', roles = ROLE_ORDER, jsonRoles = JSON_ROLES, last }) {
+  const live = ready && new Set(ready);
+  const score = (id) => trial[id][lang].score ?? trial[id][lang].tellsPerThousand ?? 99;
+  const pass = Object.keys(trial || {}).filter(id => isFreeModel(id) && trial[id]?.[lang]?.ok && (!live || live.has(id))).sort((a, b) => score(a) - score(b));
+  if (!pass.length) return null;
+  const chain = (role, i) => {
+    const ok = pass.filter(id => !jsonRoles.has(role) || trial[id].json?.ok);
+    const list = ok.length ? ok : pass; // nobody verified for JSON: try, and let the pipeline report it
+    return [...list.map((_, k) => list[(i + k) % list.length]).slice(0, 1 + FALLBACKS_PER_ROLE), last];
+  };
+  const all = jsonRoles.has('queries') ? [...roles, 'queries'] : roles;
+  return { chains: Object.fromEntries(all.map((role, i) => [role, chain(role, i)])), prices: {}, pool: pass.length };
 }
 
 // ---- the live trial: what counts as a pass ----

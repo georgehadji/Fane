@@ -15,7 +15,7 @@ import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { retryEmpty } from '../write/research.mjs';
 import { isBrainstormRequest } from '../core/intent-brainstorm.mjs';
 import { beginRun } from '../core/runlog.mjs';
-import { chainsFor, createBrainstormPipeline, selectBrainstormChains } from './pipeline.mjs';
+import { chainsFor, createBrainstormPipeline, selectBrainstormChains, selectFreeBrainstormChains } from './pipeline.mjs';
 import { brainstormPrompts } from './prompts.mjs';
 import { renderBrainstormFailure, renderBrainstormProgress, renderBrainstormResult } from './present.mjs';
 
@@ -41,7 +41,11 @@ export async function handleBrainstormRequest(query, { emit, update, configPath,
     }
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
-    const chosen = await withFreeLlm(client, useMode, async () => selectBrainstormChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang }), chainsFor);
+    const chosen = await withFreeLlm(client, useMode, {
+      select: async () => selectBrainstormChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang }),
+      free: (ready, last) => selectFreeBrainstormChains(trial, ready, { lang, last }),
+      only: chainsFor,
+    });
     if (!chosen) {
       say(quiet([escapeHtml('No text model has passed the article trial: run node scripts/article-trial.mjs.')]));
       return true;

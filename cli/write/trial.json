@@ -1125,7 +1125,307 @@
     "ms": 5456
    },
    "cost": 0.00978
+  },
+  "free:gemini-3.5-flash": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "en": {
+    "ok": true,
+    "problems": [],
+    "words": 189,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 6.45,
+    "ms": 2293
+   },
+   "el": {
+    "ok": true,
+    "problems": [],
+    "words": 204,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 4.77,
+    "ms": 7869
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 1562
+   },
+   "cost": 0
+  },
+  "free:gemini-3.5-flash-lite": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "en": {
+    "ok": true,
+    "problems": [],
+    "words": 250,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 5.42,
+    "ms": 7313
+   },
+   "el": {
+    "ok": true,
+    "problems": [],
+    "words": 218,
+    "tellsPerThousand": 4.6,
+    "invented": 0,
+    "score": 10.77,
+    "ms": 9270
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 2805
+   },
+   "cost": 0
+  },
+  "free:gemini-3-flash-preview": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "en": {
+    "ok": true,
+    "problems": [],
+    "words": 301,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 2.36,
+    "ms": 3215
+   },
+   "el": {
+    "ok": true,
+    "problems": [],
+    "words": 301,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 3.65,
+    "ms": 4095
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4098
+   },
+   "cost": 0
+  },
+  "free:gemini-flash-lite": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "en": {
+    "ok": true,
+    "problems": [],
+    "words": 183,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 7.37,
+    "ms": 7398
+   },
+   "el": {
+    "ok": true,
+    "problems": [],
+    "words": 184,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 5.41,
+    "ms": 11742
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4432
+   },
+   "cost": 0
+  },
+  "free:gemini-3.1-flash-lite": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "en": {
+    "ok": true,
+    "problems": [],
+    "words": 206,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 5.3,
+    "ms": 5773
+   },
+   "el": {
+    "ok": true,
+    "problems": [],
+    "words": 303,
+    "tellsPerThousand": 3.3,
+    "invented": 0,
+    "score": 6.16,
+    "ms": 8871
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 3788
+   },
+   "cost": 0
+  },
+  "free:gemini-3.1-flash-lite-preview": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "en": {
+    "ok": true,
+    "problems": [],
+    "words": 317,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 3.25,
+    "ms": 8461
+   },
+   "el": {
+    "ok": true,
+    "problems": [],
+    "words": 214,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 4.89,
+    "ms": 8415
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 3242
+   },
+   "cost": 0
+  },
+  "free:gemini-2.5-flash": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "en": {
+    "ok": true,
+    "problems": [],
+    "words": 186,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 5.89,
+    "ms": 8143
+   },
+   "el": {
+    "ok": true,
+    "problems": [],
+    "words": 213,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 3.91,
+    "ms": 10805
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 2885
+   },
+   "cost": 0
+  },
+  "free:gemini-2.5-flash-lite": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "en": {
+    "ok": true,
+    "problems": [],
+    "words": 208,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 4.77,
+    "ms": 7285
+   },
+   "el": {
+    "ok": true,
+    "problems": [],
+    "words": 188,
+    "tellsPerThousand": 5.3,
+    "invented": 0,
+    "score": 13.26,
+    "ms": 6781
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 3732
+   },
+   "cost": 0
+  },
+  "free:ministral-14b": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "en": {
+    "ok": true,
+    "problems": [],
+    "words": 245,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 6.57,
+    "ms": 5535
+   },
+   "el": {
+    "ok": true,
+    "problems": [],
+    "words": 221,
+    "tellsPerThousand": 4.5,
+    "invented": 2,
+    "score": 18.5,
+    "ms": 8411
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 1912
+   },
+   "cost": 0
+  },
+  "free:ministral-3b": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "en": {
+    "ok": true,
+    "problems": [],
+    "words": 184,
+    "tellsPerThousand": 0,
+    "invented": 0,
+    "score": 10.74,
+    "ms": 1894
+   },
+   "el": {
+    "ok": true,
+    "problems": [],
+    "words": 179,
+    "tellsPerThousand": 5.6,
+    "invented": 1,
+    "score": 17.12,
+    "ms": 3065
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 785
+   },
+   "cost": 0
   }
  },
- "updated": "2026-10-27"
+ "updated": "2026-10-28"
 }

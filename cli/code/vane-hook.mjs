@@ -12,7 +12,7 @@ import { escapeHtml, providerMissing, quiet } from '../image/present.mjs';
 import { detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { retryEmpty } from '../write/research.mjs';
-import { buildCodeCatalogue, selectCodeChains } from './catalogue.mjs';
+import { buildCodeCatalogue, selectCodeChains, selectFreeCodeChains } from './catalogue.mjs';
 import { isCodeRequest } from '../core/intent-code.mjs';
 import { beginRun } from '../core/runlog.mjs';
 import { codeChainsFor } from './models.mjs';
@@ -43,7 +43,11 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
     }
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
-    const chosen = await withFreeLlm(client, useMode, async () => selectCodeChains(buildCodeCatalogue(await client.models()), trial, { mode: useMode }), codeChainsFor);
+    const chosen = await withFreeLlm(client, useMode, {
+      select: async () => selectCodeChains(buildCodeCatalogue(await client.models()), trial, { mode: useMode }),
+      free: (ready, last) => selectFreeCodeChains(trial, ready, last),
+      only: codeChainsFor,
+    });
     if (!chosen) {
       say(quiet([escapeHtml('No model has passed the coding trial: run node scripts/code-trial.mjs.')]));
       return true;

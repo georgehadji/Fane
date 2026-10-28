@@ -12,7 +12,7 @@ import { readFile } from 'node:fs/promises';
 import { openRouterClientFromVane, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, previousAnswer, providerMissing, quiet, tagged } from '../image/present.mjs';
-import { buildTextCatalogue, selectChains } from './catalogue.mjs';
+import { buildTextCatalogue, selectChains, selectFreeChains } from './catalogue.mjs';
 import { createArticleEditor, isArticleEdit, parseArticleAnswer, targetLanguage } from './edit.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from '../core/intent-article.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
@@ -57,7 +57,11 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
     }
     trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {};
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
-    const chosen = await withFreeLlm(client, useMode, async () => selectChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang }), chainsFor);
+    const chosen = await withFreeLlm(client, useMode, {
+      select: async () => selectChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang }),
+      free: (ready, last) => selectFreeChains(trial, ready, { lang, last }),
+      only: chainsFor,
+    });
     if (!chosen) {
       say(quiet([escapeHtml(`No text model has passed the trial for ${LANGUAGE_NAMES[lang]}: run node scripts/article-trial.mjs, or ask in English.`)]));
       return true;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { FREE_MODEL, OpenRouterError, findFreeLlm, modelClientFor, openRouterClientFromVane, openRouterNeeded, withFreeLlm } from '../image/openrouter.mjs';
 import { createRoleCaller } from '../write/llm.mjs';
+import { freeTrialCandidates, selectFreeChains } from '../write/catalogue.mjs';
 import { handleArticleRequest } from '../write/vane-hook.mjs';
 import { handleImageRequest } from '../image/vane-hook.mjs';
 
@@ -10,11 +11,13 @@ const OPENROUTER = { name: 'OpenRouter', config: { baseURL: 'https://openrouter.
 const FREE = { name: 'Free', config: { baseURL: 'http://host.docker.internal:3001/v1/', apiKey: 'freellmapi-abc' } };
 const reply = (content) => ({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
 
-// A fetch that records each call and answers with `answer(url, body)`; freellmapi names the model it routed to.
-function fakeFetch(answer) {
+// A fetch that records each chat call and answers with `answer(url, body)`; freellmapi names the model it routed
+// to, and lists `ready` as the models it can serve now.
+function fakeFetch(answer, ready = []) {
   const calls = [];
   const fetchImpl = async (url, init) => {
     const body = init.body ? JSON.parse(init.body) : null;
+    if (!body) return { ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify({ data: ready.map(id => ({ id })) }) };
     calls.push({ url, body, auth: init.headers.Authorization });
     const out = await answer(url, body);
     return { ok: true, status: 200, statusText: 'OK', headers: new Headers({ 'x-routed-via': 'groq/llama-3.3-70b' }), text: async () => JSON.stringify(out) };
@@ -65,15 +68,51 @@ test('openRouterClientFromVane finds freellmapi in Vane\'s config.json', async (
   assert.equal(await openRouterClientFromVane({ readConfig: cfg([]) }), null);
 });
 
-test('withFreeLlm: freellmapi alone serves every role, next to OpenRouter it ends every chain, and stands in when nothing passed the trial', async () => {
+test('withFreeLlm: freellmapi alone serves every role, next to OpenRouter its chains follow, and stand in when nothing passed the trial', async () => {
   const only = (models) => ({ draft: models, outline: models });
+  const none = () => null;
+  const ranked = (ready, last) => ({ chains: { draft: ['free:g', last], outline: ['free:h', last] }, prices: {} });
+  const client = (freeLlm, ready = []) => ({ freeLlm, freeReady: async () => ready });
   const chosen = { chains: { draft: ['a/1', 'b/2'], outline: ['b/2'] }, prices: { 'a/1': { in: 1, out: 2 } } };
-  assert.deepEqual(await withFreeLlm({ freeLlm: 'only' }, 'quality', () => { throw new Error('never asked'); }, only), { chains: { draft: ['free:auto:smart'], outline: ['free:auto:smart'] }, prices: {} });
-  assert.deepEqual((await withFreeLlm({ freeLlm: 'fallback' }, 'speed', async () => chosen, only)).chains, { draft: ['a/1', 'b/2', 'free:auto:fast'], outline: ['b/2', 'free:auto:fast'] });
-  assert.deepEqual((await withFreeLlm({ freeLlm: 'fallback' }, 'balanced', async () => null, only)).chains.draft, [FREE_MODEL.balanced]);
-  assert.equal(await withFreeLlm({}, 'balanced', async () => chosen, only), chosen); // OpenRouter alone: unchanged
-  assert.equal(await withFreeLlm({}, 'balanced', async () => null, only), null);
-  assert.equal((await withFreeLlm({ freeLlm: 'only' }, 'turbo', null, only)).chains.draft[0], 'free:auto'); // an unknown mode is Balanced
+  const never = () => { throw new Error('never asked'); };
+  assert.deepEqual(await withFreeLlm(client('only'), 'quality', { select: never, free: none, only }), { chains: { draft: ['free:auto:smart'], outline: ['free:auto:smart'] }, prices: {} });
+  assert.deepEqual((await withFreeLlm(client('only'), 'quality', { select: never, free: ranked, only })).chains.draft, ['free:g', 'free:auto:smart']);
+  assert.deepEqual((await withFreeLlm(client('fallback'), 'speed', { select: async () => chosen, free: none, only })).chains, { draft: ['a/1', 'b/2', 'free:auto:fast'], outline: ['b/2', 'free:auto:fast'] });
+  assert.deepEqual((await withFreeLlm(client('fallback'), 'speed', { select: async () => chosen, free: ranked, only })).chains.outline, ['b/2', 'free:h', 'free:auto:fast']);
+  assert.deepEqual((await withFreeLlm(client('fallback'), 'balanced', { select: async () => null, free: none, only })).chains.draft, [FREE_MODEL.balanced]);
+  assert.equal(await withFreeLlm({}, 'balanced', { select: async () => chosen, free: never, only }), chosen); // OpenRouter alone: unchanged
+  assert.equal(await withFreeLlm({}, 'balanced', { select: async () => null, free: never, only }), null);
+  assert.equal((await withFreeLlm(client('only'), 'turbo', { select: never, free: none, only })).chains.draft[0], 'free:auto'); // an unknown mode is Balanced
+  // what freellmapi can serve reaches the free choice; a failing list is null (no filter)
+  const seen = [];
+  await withFreeLlm(client('only', ['free:g']), 'speed', { select: never, free: (ready) => { seen.push(ready); return null; }, only });
+  await withFreeLlm({ freeLlm: 'only', freeReady: async () => { throw new Error('down'); } }, 'speed', { select: never, free: (ready) => { seen.push(ready); return null; }, only });
+  assert.deepEqual(seen, [['free:g'], null]);
+});
+
+test('selectFreeChains: the free models that passed, best score first, each role from its own place, ending in the router entry', () => {
+  const pass = (score, json = true) => ({ en: { ok: true, score }, el: { ok: false }, json: { ok: json } });
+  const trial = {
+    'free:a': pass(3), 'free:b': pass(1), 'free:c': pass(2, false), 'free:gone': pass(0),
+    'free:bad': { en: { ok: false, score: 0 }, json: { ok: true } },
+    'alpha/m1': pass(0), // an OpenRouter model of the same trial: not free
+  };
+  const ready = ['free:a', 'free:b', 'free:c', 'free:bad'];
+  const r = selectFreeChains(trial, ready, { lang: 'en', roles: ['draft', 'critique'], jsonRoles: new Set(['critique', 'queries']), last: 'free:auto' });
+  assert.equal(r.pool, 3); // free:gone is not ready now, free:bad failed, alpha/m1 is not free
+  assert.deepEqual(r.chains.draft, ['free:b', 'free:c', 'free:a', 'free:auto']);
+  assert.deepEqual(r.chains.critique, ['free:a', 'free:b', 'free:auto']); // JSON role: free:c failed the JSON check; second role starts one further
+  assert.deepEqual(r.chains.queries, ['free:b', 'free:a', 'free:auto']);
+  assert.deepEqual(r.prices, {});
+  assert.equal(selectFreeChains(trial, null, { lang: 'en', last: 'free:auto' }).pool, 4); // no ready list: every free model that passed
+  assert.equal(selectFreeChains(trial, ready, { lang: 'el', last: 'free:auto' }), null);
+  assert.equal(selectFreeChains({}, ready, { last: 'free:auto' }), null);
+});
+
+test('freeTrialCandidates: no router entries or non-text models; code specialists only for the coding trial', () => {
+  const ready = ['free:auto', 'free:fusion', 'free:iterative-critique', 'free:claude-opus-4-5', 'free:gemini-3.8-flash', 'free:mistral-code-fim', 'free:nemotron-3.5-content-safety', 'free:voxtral-small', 'free:north-mini-code', 'free:gemma-4-31b'];
+  assert.deepEqual(freeTrialCandidates(ready), ['free:gemini-3.8-flash', 'free:gemma-4-31b']);
+  assert.deepEqual(freeTrialCandidates(ready, { code: true }), ['free:gemini-3.8-flash', 'free:north-mini-code', 'free:gemma-4-31b']);
 });
 
 test('createRoleCaller: no OpenRouter credits move the run to the free: models, which report the model freellmapi chose', async () => {
@@ -129,6 +168,17 @@ test('the article hook writes on freellmapi when Vane has no OpenRouter provider
   assert.ok(blocks.get('b1').startsWith('# Tides at work'));
   assert.ok(calls.length >= 2);
   assert.ok(calls.every(c => c.url.startsWith('http://host.docker.internal:3001/v1/') && c.body.model === 'auto:fast' && !('usage' in c.body)));
+
+  // with free models that passed the trial and are ready, those write, best first, instead of the router entry
+  const ranked = fakeFetch((url, body) => (body.messages[0].content.includes('planning a researched article')
+    ? reply(JSON.stringify({ title: 'T', sections: [{ heading: 'h', points: [], sources: [1], words: 300 }] })) : reply(draft)), ['gemma-4-31b', 'gemini-3.8-flash']); // freellmapi's own ids
+  const pass = (score) => ({ en: { ok: true, score }, json: { ok: true } });
+  await handleArticleRequest('write an article about tidal power', {
+    emit: () => 'b1', update: () => {}, mode: 'speed', client: modelClientFor([FREE], { fetchImpl: ranked.fetchImpl }),
+    trial: { 'free:gemini-3.8-flash': pass(1), 'free:gemma-4-31b': pass(4), 'free:gone': pass(0) }, research: async () => SOURCES, log: () => {},
+  });
+  const draftCall = ranked.calls.find(c => c.body.messages[0].content.includes('senior journalist'));
+  assert.equal(draftCall.body.model, 'gemini-3.8-flash');
 });
 
 test('the image hook still asks for OpenRouter when Vane has only freellmapi; the text features name freellmapi', async () => {

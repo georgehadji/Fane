@@ -946,6 +946,234 @@
     "ms": 62863
    },
    "cost": 0.00101
+  },
+  "free:gemini-3.6-flash": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.11,
+    "ms": 3448
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 2570
+   },
+   "cost": 0
+  },
+  "free:gemini-3.5-flash-lite": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "passed 13 of 18 cases"
+    ],
+    "passed": 13,
+    "total": 18,
+    "score": 25.46,
+    "ms": 13941
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 1407
+   },
+   "cost": 0
+  },
+  "free:gemini-3-flash-preview": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.11,
+    "ms": 3159
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 2115
+   },
+   "cost": 0
+  },
+  "free:gemini-3.1-flash-lite-preview": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.27,
+    "ms": 8244
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 2227
+   },
+   "cost": 0
+  },
+  "free:gemini-flash-lite": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.38,
+    "ms": 11534
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 4768
+   },
+   "cost": 0
+  },
+  "free:gemini-3.1-flash-lite": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.25,
+    "ms": 7373
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 3042
+   },
+   "cost": 0
+  },
+  "free:gemini-2.5-flash": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.37,
+    "ms": 11113
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 8492
+   },
+   "cost": 0
+  },
+  "free:gemini-2.5-flash-lite": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": true,
+    "problems": [],
+    "passed": 18,
+    "total": 18,
+    "score": 0.29,
+    "ms": 8675
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 8410
+   },
+   "cost": 0
+  },
+  "free:mistral-code": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "passed 16 of 18 cases"
+    ],
+    "passed": 16,
+    "total": 18,
+    "score": 10.11,
+    "ms": 3277
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 1401
+   },
+   "cost": 0
+  },
+  "free:ministral-3b": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "does not load: Unexpected token ':'"
+    ],
+    "passed": 0,
+    "total": 18,
+    "score": 90.11,
+    "ms": 3422
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 2174
+   },
+   "cost": 0
+  },
+  "free:ministral-14b": {
+   "price": {
+    "in": 0,
+    "out": 0
+   },
+   "code": {
+    "ok": false,
+    "problems": [
+     "passed 12 of 18 cases"
+    ],
+    "passed": 12,
+    "total": 18,
+    "score": 30.33,
+    "ms": 9869
+   },
+   "json": {
+    "ok": true,
+    "problems": [],
+    "ms": 6198
+   },
+   "cost": 0
   }
  },
  "updated": "2026-10-28"
