@@ -24,7 +24,7 @@ import { DEFAULTS } from '../cli/vane.mjs';
 import { createOpenRouterClient, findOpenRouterKey } from '../cli/image/openrouter.mjs';
 import { sourcesSection } from '../cli/write/checks.mjs';
 import { auditResult, claimLedger, claimSupportRatio } from '../cli/write/gate.mjs';
-import { countTells } from '../cli/write/language.mjs';
+import { countTells } from '../cli/core/language.mjs';
 import { createRoleCaller } from '../cli/write/llm.mjs';
 import { MODES, tokensFor } from '../cli/write/models.mjs';
 import { prompts } from '../cli/write/prompts.mjs';

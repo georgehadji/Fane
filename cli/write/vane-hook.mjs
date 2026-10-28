@@ -14,10 +14,12 @@ import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, previousAnswer, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue, selectChains } from './catalogue.mjs';
 import { createArticleEditor, isArticleEdit, parseArticleAnswer, targetLanguage } from './edit.mjs';
-import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from './intent.mjs';
-import { LANGUAGE_NAMES, detectLanguage } from './language.mjs';
+import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from '../core/intent-article.mjs';
+import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from './models.mjs';
+import { beginRun } from '../core/runlog.mjs';
 import { createArticlePipeline } from './pipeline.mjs';
+import { prompts } from './prompts.mjs';
 import { renderArticleFailure, renderArticleProgress, renderArticleResult, renderPostResult } from './present.mjs';
 import { retryEmpty } from './research.mjs';
 
@@ -28,7 +30,7 @@ const TRIAL_FILE = new URL('./trial.json', import.meta.url);
 // lastAnswer() -> text of the previous answer, history -> the browser's chat history (see previousAnswer).
 // Returns false when the message is neither an article request nor an edit of the article the previous
 // answer was (Vane then answers as usual). client, trial, pipeline and editor are injectable for tests.
-export async function handleArticleRequest(query, { emit, update, configPath, mode, history, lastAnswer, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, client, trial, pipeline, editor } = {}) {
+export async function handleArticleRequest(query, { emit, update, configPath, mode, history, lastAnswer, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, signal, client, trial, pipeline, editor } = {}) {
   // A social post ("write a LinkedIn post about ...") before an article: «ανάρτηση» matches both.
   const platform = postPlatform(query);
   // A follow-up edit: the message reads like one ("shorter", "rewrite the intro") and the answer before it is an article of ours.
@@ -42,11 +44,13 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   const topic = earlier ? query : platform ? postTopic(query) : articleTopic(query);
   // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
   const lang = earlier ? targetLanguage(query, earlier.lang) : detectLanguage(query);
+  const track = beginRun(platform ? 'post' : earlier ? 'article-edit' : 'article', log, prompts);
+  log = track.log;
   const state = { lang, phases: [], running: earlier ? 'edit' : 'sources', draft: null };
   const id = emit(tagged(renderArticleProgress(state)));
   const say = (markdown) => { try { update(id, tagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
   try {
-    client ??= await openRouterClientFromVane({ configPath, readConfig, log });
+    client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
       say(quiet([escapeHtml(openRouterNeeded('Article writing'))]));
       return true;
@@ -67,6 +71,7 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
       };
       const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, mode: useMode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: onEdit });
       say(r.ok ? renderArticleResult(r) : renderArticleFailure({ ...r, edit: true }, lang));
+      track.finish(r);
       return true;
     }
     // Updates are applied in order, one at a time.
@@ -84,9 +89,11 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
     const r = await write({ topic, mode: useMode, lang, words: parseArticleOptions(query, { post: !!platform }).words, format: platform || 'article', chains: chosen.chains, prices: chosen.prices, onProgress });
     await queue;
     say(!r.ok ? renderArticleFailure({ ...r, post: !!platform }, lang) : platform ? renderPostResult(r) : renderArticleResult(r));
+    track.finish(r);
   } catch (err) {
     log(`${platform ? 'post' : 'article'} failed: ${err.message}`);
     say(renderArticleFailure({ error: err.message, post: !!platform }, lang));
+    track.finish({ ok: false });
   }
   return true;
 }

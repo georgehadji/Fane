@@ -4,7 +4,7 @@
 // citations renumbered, sources list written by code, checks run. Pure except for the injected client.
 import { ANSWER_MARKER } from '../image/present.mjs';
 import { checkCitations, renumber, runChecks, sourcesSection } from './checks.mjs';
-import { detectLanguage, fold, repairFinalNu, repairHomoglyphs, wordCount } from './language.mjs';
+import { detectLanguage, fold, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
 import { createRoleCaller } from './llm.mjs';
 import { DEFAULT_MODE, tokensFor } from './models.mjs';
 import { prompts } from './prompts.mjs';

@@ -1,10 +1,10 @@
-// Social posts (cli/write/formats.mjs): intent, checks, the pipeline's post format, the web answer and the CLI.
+// Social posts (cli/core/formats.mjs): intent, checks, the pipeline's post format, the web answer and the CLI.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 for (const k of ['VANE_URL', 'VANE_CHAT_MODEL', 'VANE_EMBEDDING_MODEL', 'VANE_CONTAINER', 'VANE_SOURCES', 'VANE_MODE']) delete process.env[k];
-const { POSTS, clampPostWords } = await import('../write/formats.mjs');
-const { isArticleRequest, parseArticleOptions, postPlatform, postTopic } = await import('../write/intent.mjs');
+const { POSTS, clampPostWords } = await import('../core/formats.mjs');
+const { isArticleRequest, parseArticleOptions, postPlatform, postTopic } = await import('../core/intent-article.mjs');
 const { firstComment, postChecks, runChecks, stripCitations } = await import('../write/checks.mjs');
 const { createArticlePipeline } = await import('../write/pipeline.mjs');
 const { renderPostResult } = await import('../write/present.mjs');

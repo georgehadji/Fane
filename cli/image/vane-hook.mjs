@@ -9,6 +9,7 @@ import { isImageEdit, isImageRequest, parseImageOptions, pickReferenceIndex } fr
 import { previousAnswer, quiet, renderProgress, renderResult, tagged } from './present.mjs';
 import { IMAGE_TEXT_MODEL, createImageGenerator } from './generate.mjs';
 import { createImageStore, storeDirFor, storedUrlsIn } from './store.mjs';
+import { beginRun } from '../core/runlog.mjs';
 import { openRouterClientFromVane, openRouterNeeded } from './openrouter.mjs';
 import { safeDownload } from './download.mjs';
 
@@ -27,11 +28,13 @@ async function earlierImages(query, { history, lastAnswer, store }) {
 // the price tier. emit(markdown) -> blockId, update(blockId, markdown). Returns false when the
 // query is neither an image request nor an edit of earlier images (Vane then answers as usual).
 // Dependencies are injectable for tests.
-export async function handleImageRequest(query, { emit, update, configPath, mode, history, lastAnswer, store = configPath ? createImageStore({ dir: storeDirFor(configPath) }) : null, log = (m) => console.log(`fane: ${m}`), readConfig, generator } = {}) {
+export async function handleImageRequest(query, { emit, update, configPath, mode, history, lastAnswer, store = configPath ? createImageStore({ dir: storeDirFor(configPath) }) : null, log = (m) => console.log(`fane: ${m}`), readConfig, signal, generator } = {}) {
   const earlier = await earlierImages(query, { history, lastAnswer, store });
   if (!earlier && !isImageRequest(query)) return false;
+  const track = beginRun(earlier ? 'image-edit' : 'image', log);
+  log = track.log;
   const id = emit(tagged(quiet([earlier ? 'Editing the image…' : 'Generating images…'])));
-  const client = generator ? null : await openRouterClientFromVane({ configPath, readConfig, log });
+  const client = generator ? null : await openRouterClientFromVane({ configPath, readConfig, log, signal });
   if (!client && !generator) {
     update(id, tagged(openRouterNeeded('Image generation')));
     return true;
@@ -70,5 +73,6 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
   // Stored images are linked, not embedded; one that could not be stored is embedded as before.
   const images = await Promise.all(result.images.map(async (i) => ({ ...i, url: done.find(d => d.model === i.model)?.url ?? await keep(i) })));
   update(id, tagged(renderResult({ ...result, images, editedImage }, query)));
+  track.finish({ ok: images.length > 0, cost: images.reduce((n, i) => n + (i.pricePerImage || 0), 0) });
   return true;
 }

@@ -7,7 +7,7 @@
 //  - the review and the fixes see whole files (reasoner's review saw the first 800 characters of each, and its
 //    assemble step was asked to return files whose content it was never given);
 //  - web pages (documentation, vulnerability notes) are untrusted data, and the request is the user's own words.
-import { LANGUAGE_NAMES } from '../write/language.mjs';
+import { LANGUAGE_NAMES } from '../core/language.mjs';
 import { MAX_FILE_CHARS, fenceFor } from './files.mjs';
 import { MAX_FILES } from './models.mjs';
 

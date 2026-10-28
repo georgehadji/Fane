@@ -7,9 +7,9 @@
 // Words that are also ordinary English (class, application, test, query, game, server) count only next to a
 // language ("a Python class"). After "give me"/"show me" only a noun that is code itself counts (script, regex ...),
 // and the Greek words for program, tool and library count only before "που" or a language. A text noun right after the verb (article, post, essay, poem ...) is never code:
-// "write an article on machine learning in Python" stays an article. write/intent.mjs asks this module first.
-import { isBrainstormRequest } from '../brainstorm/intent.mjs';
-import { fold } from '../write/language.mjs';
+// "write an article on machine learning in Python" stays an article. core/intent-article.mjs asks this module first.
+import { isBrainstormRequest } from './intent-brainstorm.mjs';
+import { fold } from './language.mjs';
 
 const POLITE = String.raw`(?:please\s+|can you\s+|could you\s+|i(?:'|’)d like you to\s+|i want you to\s+|i need you to\s+|παρακαλω\s+|μπορεισ να\s+|θα ηθελα να\s+|θελω να\s+)*`;
 const EN_VERB = String.raw`(write|create|build|make|generate|implement|code|develop|program|scaffold|give me|show me)`;

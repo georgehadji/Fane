@@ -9,12 +9,14 @@ import { readFile } from 'node:fs/promises';
 import { openRouterClientFromVane, openRouterNeeded } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, quiet } from '../image/present.mjs';
-import { detectLanguage } from '../write/language.mjs';
+import { detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { retryEmpty } from '../write/research.mjs';
 import { buildCodeCatalogue, selectCodeChains } from './catalogue.mjs';
-import { isCodeRequest } from './intent.mjs';
+import { isCodeRequest } from '../core/intent-code.mjs';
+import { beginRun } from '../core/runlog.mjs';
 import { createCodePipeline } from './pipeline.mjs';
+import { codePrompts } from './prompts.mjs';
 import { codeTagged, renderCodeFailure, renderCodeProgress, renderCodeResult } from './present.mjs';
 import { createSyntaxChecker } from './syntax.mjs';
 
@@ -24,14 +26,16 @@ const TRIAL_FILE = new URL('./trial.json', import.meta.url);
 // researchDone() closes Vane's research display. emit(markdown) -> blockId, update(blockId, markdown).
 // Returns false when the message is not a coding request (Vane then answers as usual).
 // client, trial, pipeline and checkSyntax are injectable for tests.
-export async function handleCodeRequest(query, { emit, update, configPath, mode, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, client, trial, pipeline, checkSyntax } = {}) {
+export async function handleCodeRequest(query, { emit, update, configPath, mode, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, signal, client, trial, pipeline, checkSyntax } = {}) {
   if (!isCodeRequest(query) || isImageRequest(query)) return false;
   const lang = detectLanguage(query);
+  const track = beginRun('code', log, codePrompts);
+  log = track.log;
   const state = { lang, phases: [], running: 'spec', files: null };
   const id = emit(codeTagged(renderCodeProgress(state)));
   const say = (markdown) => { try { update(id, codeTagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
   try {
-    client ??= await openRouterClientFromVane({ configPath, readConfig, log });
+    client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
       say(quiet([escapeHtml(openRouterNeeded('Code writing'))]));
       return true;
@@ -58,9 +62,11 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
     const r = await write({ request: query, mode: useMode, lang, chains: chosen.chains, prices: chosen.prices, onProgress });
     await queue;
     say(r.ok ? renderCodeResult(r) : renderCodeFailure(r, lang));
+    track.finish(r);
   } catch (err) {
     log(`code failed: ${err.message}`);
     say(renderCodeFailure({ error: err.message }, lang));
+    track.finish({ ok: false });
   }
   return true;
 }

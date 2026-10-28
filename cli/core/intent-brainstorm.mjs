@@ -5,7 +5,7 @@
 //  - "suggest ways <someone> can <do something>".
 // Questions ("what are good ideas for ...?") and bare topics ("ideas for dinner") stay searches. "Alternatives"
 // and "options" are left out: "suggest alternatives to Photoshop" asks for products that exist, which is a search.
-import { fold } from '../write/language.mjs';
+import { fold } from './language.mjs';
 
 const POLITE = String.raw`(?:please\s+|can you\s+|could you\s+|help me\s+|let(?:'|’)?s\s+|i need\s+|i want\s+)*`;
 const ASK = String.raw`(?:give me|give us|suggest|propose|come up with|think (?:of|up)|generate|list|pitch)`;

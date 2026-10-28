@@ -6,7 +6,7 @@
 // /api/uploads route that calls it, because Vane does not serve files added to public/
 // after it started. File system functions are injectable for tests.
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { decodeDataUrl } from './extract.mjs';
 
@@ -32,9 +32,36 @@ export function storedUrlsIn(text) {
   return [...new Set(found)];
 }
 
+// The folder may hold this much (FANE_IMAGE_STORE_MB, 1024 by default); put() then removes the oldest images.
+export const maxStoreBytesFromEnv = (env = process.env) => {
+  const mb = Number(env.FANE_IMAGE_STORE_MB);
+  return (mb > 0 ? mb : 1024) * 1024 * 1024;
+};
+
+// Removes the oldest images until the folder is within `maxBytes`; `keep` (the one just written) stays.
+// An old answer's link to a removed image is dead: that is the price of a limit. -> names removed.
+export async function pruneStore(dir, { maxBytes = maxStoreBytesFromEnv(), keep, fs = { readdir, stat, unlink } } = {}) {
+  const entries = [];
+  for (const name of await fs.readdir(dir)) {
+    if (!IMAGE_NAME.test(name)) continue;
+    const { size, mtimeMs } = await fs.stat(join(dir, name));
+    entries.push({ name, size, mtimeMs });
+  }
+  let total = entries.reduce((n, e) => n + e.size, 0);
+  const removed = [];
+  for (const e of entries.sort((a, b) => a.mtimeMs - b.mtimeMs)) {
+    if (total <= maxBytes) break;
+    if (e.name === keep) continue;
+    await fs.unlink(join(dir, e.name));
+    total -= e.size;
+    removed.push(e.name);
+  }
+  return removed;
+}
+
 // put(dataUrl) -> link to the stored image; get(link) -> data URL again (for an edit that uses
 // the image as a reference). put rejects what is not a storable image; get what is not a link.
-export function createImageStore({ dir, fs = { mkdir, writeFile }, read = readFile }) {
+export function createImageStore({ dir, fs = { mkdir, writeFile }, read = readFile, prune = (keep) => pruneStore(dir, { keep }) }) {
   return {
     async get(url) {
       if (!isStoredUrl(url)) throw new Error('not a stored image link');
@@ -50,6 +77,7 @@ export function createImageStore({ dir, fs = { mkdir, writeFile }, read = readFi
       const name = `${createHash('sha256').update(image.bytes).digest('hex')}.${ext}`;
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(join(dir, name), image.bytes);
+      await prune(name).catch(() => {}); // a failed clean-up must not fail the image that was just made
       return imageUrl(name);
     },
   };

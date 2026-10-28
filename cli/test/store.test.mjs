@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { createImageStore, serveImage, isStoredUrl, imageUrl, storeDirFor, IMAGE_NAME, MAX_STORED_BYTES } from '../image/store.mjs';
+import { basename } from 'node:path';
+import { createImageStore, serveImage, isStoredUrl, imageUrl, storeDirFor, IMAGE_NAME, MAX_STORED_BYTES, maxStoreBytesFromEnv, pruneStore } from '../image/store.mjs';
 import { renderResult } from '../image/present.mjs';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -80,4 +81,44 @@ test('get turns a stored link back into a data URL, and refuses anything else', 
   assert.equal(await store.get(imageUrl(name)), PNG_URL);
   await assert.rejects(store.get('/api/uploads?fane-image=../../etc/passwd'), /not a stored image link/);
   await assert.rejects(store.get(PNG_URL), /not a stored image link/);
+});
+
+const hex = (c) => c.repeat(64);
+const fakeDir = (files) => ({
+  readdir: async () => Object.keys(files),
+  stat: async (p) => files[basename(p)],
+  unlink: async (p) => { delete files[basename(p)]; },
+});
+
+test('pruneStore removes the oldest images until the folder fits, and keeps the one just written', async () => {
+  const files = {
+    [`${hex('a')}.png`]: { size: 40, mtimeMs: 1 },
+    [`${hex('b')}.png`]: { size: 40, mtimeMs: 2 },
+    [`${hex('c')}.png`]: { size: 40, mtimeMs: 3 },
+    'notes.txt': { size: 999, mtimeMs: 0 },
+  };
+  const removed = await pruneStore('/d', { maxBytes: 100, keep: `${hex('a')}.png`, fs: fakeDir(files) });
+  assert.deepEqual(removed, [`${hex('b')}.png`]); // a is kept although oldest; one removal brings 120 to 80
+  assert.ok(files[`${hex('a')}.png`] && files[`${hex('c')}.png`] && files['notes.txt'], 'other files are never touched');
+});
+
+test('pruneStore does nothing while the folder is within its limit', async () => {
+  const files = { [`${hex('a')}.png`]: { size: 10, mtimeMs: 1 } };
+  assert.deepEqual(await pruneStore('/d', { maxBytes: 10, fs: fakeDir(files) }), []);
+});
+
+test('FANE_IMAGE_STORE_MB: megabytes, 1024 by default', () => {
+  assert.equal(maxStoreBytesFromEnv({}), 1024 * 1024 * 1024);
+  assert.equal(maxStoreBytesFromEnv({ FANE_IMAGE_STORE_MB: '50' }), 50 * 1024 * 1024);
+  for (const v of ['', '0', '-5', 'abc']) assert.equal(maxStoreBytesFromEnv({ FANE_IMAGE_STORE_MB: v }), 1024 * 1024 * 1024, v);
+});
+
+test('put prunes after writing, and a failing clean-up does not fail the image', async () => {
+  const kept = [];
+  const ok = createImageStore({ dir: '/d', fs: { mkdir: async () => {}, writeFile: async () => {} }, prune: async (name) => { kept.push(name); } });
+  const png = 'data:image/png;base64,' + Buffer.from('png-bytes').toString('base64');
+  const url = await ok.put(png);
+  assert.deepEqual(kept, [url.split('=')[1]]);
+  const broken = createImageStore({ dir: '/d', fs: { mkdir: async () => {}, writeFile: async () => {} }, prune: async () => { throw new Error('disk'); } });
+  assert.equal(await broken.put(png), url);
 });

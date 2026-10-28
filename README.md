@@ -69,6 +69,16 @@ docker restart vane
 On Windows Git Bash, prefix with `export MSYS_NO_PATHCONV=1` and write the temp file somewhere `docker.exe` can see. `scripts/apply.mjs` avoids both problems.
 </details>
 
+**Limits for the web UI.** Vane has no login, so what its chat can spend is capped by environment variables of the container (set them in `docker-compose.yml`, or with `-e` on `docker run`; empty means the default):
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `FANE_MAX_COST` | USD one article, code or brainstorm run may spend; the next model call is refused once it is reached (images have their own count limit) | none |
+| `FANE_DEADLINE_MIN` | Minutes one chat request may run in total; `0` turns it off | 30 |
+| `FANE_IMAGE_STORE_MB` | Megabytes the stored images may take; the oldest are removed first, so an old answer's link to one can go dead | 1024 |
+
+Closing the tab stops the paid calls of a run: the next one is refused and the one in flight is aborted. Vane's own research that already started finishes.
+
 ## 2. SearXNG engines
 
 `searxng/settings.yml` enables Bing, Yandex and Bing News, plus OpenAlex and Crossref for academic search and Hacker News for social search. Reddit's own engine is blocked by Reddit, so the Social source reaches Reddit through `site:reddit.com` web searches; on this network only Yandex honours `site:`. Which engines work depends on your IP address. Check the whole set (one query per engine, so don't loop it):

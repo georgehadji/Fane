@@ -9,11 +9,13 @@ import { openRouterClientFromVane, openRouterNeeded } from '../image/openrouter.
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue } from '../write/catalogue.mjs';
-import { detectLanguage } from '../write/language.mjs';
+import { detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { retryEmpty } from '../write/research.mjs';
-import { isBrainstormRequest } from './intent.mjs';
+import { isBrainstormRequest } from '../core/intent-brainstorm.mjs';
+import { beginRun } from '../core/runlog.mjs';
 import { createBrainstormPipeline, selectBrainstormChains } from './pipeline.mjs';
+import { brainstormPrompts } from './prompts.mjs';
 import { renderBrainstormFailure, renderBrainstormProgress, renderBrainstormResult } from './present.mjs';
 
 const TRIAL_FILE = new URL('../write/trial.json', import.meta.url);
@@ -22,14 +24,16 @@ const TRIAL_FILE = new URL('../write/trial.json', import.meta.url);
 // researchDone() closes Vane's research display. emit(markdown) -> blockId, update(blockId, markdown).
 // Returns false when the message is not a brainstorm request (Vane then answers as usual).
 // client, trial and pipeline are injectable for tests.
-export async function handleBrainstormRequest(query, { emit, update, configPath, mode, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, client, trial, pipeline } = {}) {
+export async function handleBrainstormRequest(query, { emit, update, configPath, mode, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, signal, client, trial, pipeline } = {}) {
   if (!isBrainstormRequest(query) || isImageRequest(query)) return false;
   const lang = detectLanguage(query);
+  const track = beginRun('brainstorm', log, brainstormPrompts);
+  log = track.log;
   const state = { lang, running: mode === 'speed' ? 'generate' : 'prior', done: [], ideas: [] };
   const id = emit(tagged(renderBrainstormProgress(state)));
   const say = (markdown) => { try { update(id, tagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
   try {
-    client ??= await openRouterClientFromVane({ configPath, readConfig, log });
+    client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
       say(quiet([escapeHtml(openRouterNeeded('Brainstorming'))]));
       return true;
@@ -56,9 +60,11 @@ export async function handleBrainstormRequest(query, { emit, update, configPath,
     const r = await run({ request: query, mode: useMode, lang, chains: chosen.chains, prices: chosen.prices, onProgress });
     await queue;
     say(r.ok ? renderBrainstormResult(r) : renderBrainstormFailure(r, lang));
+    track.finish(r);
   } catch (err) {
     log(`brainstorm failed: ${err.message}`);
     say(renderBrainstormFailure({ error: err.message }, lang));
+    track.finish({ ok: false });
   }
   return true;
 }

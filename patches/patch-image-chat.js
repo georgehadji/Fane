@@ -49,8 +49,11 @@ const TARGETS = [
     file: FILES.chatRoute,
     from: 'handleImageRequest(b.followUp,{history:b.chatHistory,mode:b.config.mode,configPath:',
     to: `handleImageRequest(b.followUp,{lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:`,
+    marker: 'lastAnswer:async()=>', // patch-pipeline-abort puts `signal` in front of it
   },
 ];
 
 module.exports = { TARGETS, FINISH, LAST_ANSWER };
-if (require.main === module) run('patch-image-chat', TARGETS);
+// The hook stores images as links that only patch-image-serve's GET answers. Run together, the two apply or fail as
+// one, so a failing serve target cannot leave a hook whose links all 404 (patch-image-serve alone is still idempotent).
+if (require.main === module) run('patch-image-chat', [...TARGETS, ...require('./patch-image-serve').TARGETS]);

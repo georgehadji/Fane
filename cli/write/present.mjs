@@ -5,7 +5,7 @@
 // Vane renders raw HTML in answers.
 import { escapeHtml, formatDuration, quiet } from '../image/present.mjs';
 import { linkCitations, renumber, sourcesSection } from './checks.mjs';
-import { POSTS } from './formats.mjs';
+import { POSTS } from '../core/formats.mjs';
 
 const NBSP = ' ';
 

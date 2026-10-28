@@ -11,7 +11,7 @@
 // from different labs where the pool allows, and each chain ends in fallbacks from other labs.
 
 import { THINKING_LEAK, checkCitations, rhythm } from './checks.mjs';
-import { countTells, findHomoglyphs, greekShare, greekTypography, wordCount } from './language.mjs';
+import { countTells, findHomoglyphs, greekShare, greekTypography, wordCount } from '../core/language.mjs';
 import { extractJson } from './llm.mjs';
 
 export const FALLBACKS_PER_ROLE = 3;

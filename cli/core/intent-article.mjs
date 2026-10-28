@@ -2,8 +2,8 @@
 // Like the image intent, it needs a writing verb at the start ("write an article about ...",
 // "γράψε ένα άρθρο για ..."): "article about X" on its own is a search question and stays one.
 // A bare "κείμενο" (text) is not enough either: it would catch ordinary questions.
-import { isBrainstormRequest } from '../brainstorm/intent.mjs';
-import { isCodeRequest } from '../code/intent.mjs';
+import { isBrainstormRequest } from './intent-brainstorm.mjs';
+import { isCodeRequest } from './intent-code.mjs';
 import { DEFAULT_PLATFORM } from './formats.mjs';
 import { detectLanguage, fold } from './language.mjs';
 

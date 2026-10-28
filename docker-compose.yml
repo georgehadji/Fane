@@ -15,6 +15,8 @@ services:
       - ./patches:/fane/patches:ro
       - ./searxng:/fane/searxng:ro
       - ./docker:/fane/docker:ro
+      # FANE_CORE_DIR in patches/lib/vane.js; the hooks below import it as ../core
+      - ./cli/core:/fane/core:ro
       # FANE_IMAGE_DIR in patches/lib/vane.js; used by patch-image-chat (images in the web UI)
       - ./cli/image:/fane/image:ro
       # FANE_WRITE_DIR in patches/lib/vane.js; used by patch-article-chat (articles in the web UI)
@@ -28,6 +30,10 @@ services:
       CORE_API_KEY: ${CORE_API_KEY:-}
       # Spend limit in USD for one article, code or brainstorm run (cli/write/llm.mjs); empty is no limit.
       FANE_MAX_COST: ${FANE_MAX_COST:-}
+      # Minutes one web request may run in total (cli/image/openrouter.mjs); empty is 30, 0 is no limit.
+      FANE_DEADLINE_MIN: ${FANE_DEADLINE_MIN:-}
+      # Megabytes the stored images may take (cli/image/store.mjs); the oldest go first. Empty is 1024.
+      FANE_IMAGE_STORE_MB: ${FANE_IMAGE_STORE_MB:-}
     entrypoint: ["sh", "/fane/docker/fane-entrypoint.sh"]
     command: ["/home/vane/entrypoint.sh"]
 

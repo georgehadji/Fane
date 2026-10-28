@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
-import { isCodeRequest } from '../code/intent.mjs';
+import { isCodeRequest } from '../core/intent-code.mjs';
 import { MAX_FILE_CHARS, extractCode, fenceFor, fileChecks, languageOf, parseFiles, safePath } from '../code/files.mjs';
 import { codePrompts } from '../code/prompts.mjs';
 import { buildReadme, createCodePipeline, normalizeReview, normalizeSpec } from '../code/pipeline.mjs';
@@ -14,7 +14,7 @@ import { CODE_ANSWER_MARKER, codeTagged, renderCodeResult } from '../code/presen
 import { handleCodeRequest } from '../code/vane-hook.mjs';
 import { TRIAL_CASES, judgeTrialCode, judgeTrialSpec, selectCodeChains, buildCodeCatalogue } from '../code/catalogue.mjs';
 import { ANSWER_MARKER } from '../image/present.mjs';
-import { isArticleRequest, postPlatform } from '../write/intent.mjs';
+import { isArticleRequest, postPlatform } from '../core/intent-article.mjs';
 
 const { autoRoute, parseCli } = await import('../vane.mjs');
 const require = createRequire(import.meta.url);

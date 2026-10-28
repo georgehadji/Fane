@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { LANGUAGES, countTells, detectLanguage, findHomoglyphs, fold, greekTypography, repairFinalNu, repairHomoglyphs, wordCount } from '../write/language.mjs';
-import { articleTopic, isArticleRequest, parseArticleOptions } from '../write/intent.mjs';
+import { LANGUAGES, countTells, detectLanguage, findHomoglyphs, fold, greekTypography, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
+import { articleTopic, isArticleRequest, parseArticleOptions } from '../core/intent-article.mjs';
 import { checkCitations, renumber, rhythm, runChecks, sentences, sourcesSection } from '../write/checks.mjs';
 import { AUDIT_DIMENSIONS, auditResult, claimLedger, claimSupportRatio } from '../write/gate.mjs';
 import { DEFAULT_WORDS, PHASES, chainsFor, clampWords, tokensFor } from '../write/models.mjs';

@@ -3,13 +3,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isBrainstormRequest } from '../brainstorm/intent.mjs';
+import { isBrainstormRequest } from '../core/intent-brainstorm.mjs';
 import { applyClusters, createBrainstormPipeline, normalizeIdeas, pickIdeas, selectBrainstormChains } from '../brainstorm/pipeline.mjs';
 import { renderBrainstorm, renderBrainstormResult } from '../brainstorm/present.mjs';
 import { handleBrainstormRequest } from '../brainstorm/vane-hook.mjs';
-import { isCodeRequest } from '../code/intent.mjs';
+import { isCodeRequest } from '../core/intent-code.mjs';
 import { buildTextCatalogue } from '../write/catalogue.mjs';
-import { isArticleRequest, postPlatform } from '../write/intent.mjs';
+import { isArticleRequest, postPlatform } from '../core/intent-article.mjs';
 import { ANSWER_MARKER } from '../image/present.mjs';
 
 const { autoRoute, parseCli } = await import('../vane.mjs');

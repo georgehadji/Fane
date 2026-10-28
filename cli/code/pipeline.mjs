@@ -7,7 +7,7 @@
 // running them; nothing generated is ever executed. Failures are returned as values; a phase that fails after the
 // files exist is skipped and listed in `degraded`, so a weakened run is never presented as a clean one.
 import { createRoleCaller, noteOf, statusOf } from '../write/llm.mjs';
-import { LANGUAGE_NAMES, detectLanguage } from '../write/language.mjs';
+import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { MAX_FILE_CHARS, extractCode, fileChecks, parseFiles, safePath, sameFile } from './files.mjs';
 import { CODE_JSON_ROLES, CODE_PHASES, CONCURRENCY, MAX_FILES, codeChainsFor, codeTokensFor } from './models.mjs';

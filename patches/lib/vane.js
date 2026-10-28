@@ -28,6 +28,9 @@ module.exports = {
   // Where Fane's image modules (cli/image) live in the container: docker-compose.yml mounts
   // them here and scripts/apply.mjs copies them here.
   FANE_IMAGE_DIR: '/fane/image',
+  // Where Fane's shared modules (cli/core: language, formats, the request detectors) live in the container, mounted or
+  // copied like FANE_IMAGE_DIR. The hooks of image, write, code and brainstorm import them as ../core.
+  FANE_CORE_DIR: '/fane/core',
   // Where Fane's article modules (cli/write, with trial.json) live in the container, mounted or copied like FANE_IMAGE_DIR.
   FANE_WRITE_DIR: '/fane/write',
   // Where Fane's coding modules (cli/code, with trial.json) live in the container, mounted or copied like FANE_IMAGE_DIR.

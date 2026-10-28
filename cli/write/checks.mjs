@@ -4,8 +4,8 @@
 // letters in Greek words, a text far from the requested length, machine-sounding phrasing.
 // Citations are bracketed source numbers, [3] or [1, 4], as in Vane's own answers; the
 // "Sources" list is written by code (sourcesSection), so a model cannot invent a URL.
-import { POSTS, isPost } from './formats.mjs';
-import { LANGUAGE_NAMES, countTells, findHomoglyphs, greekTypography, wordCount } from './language.mjs';
+import { POSTS, isPost } from '../core/formats.mjs';
+import { LANGUAGE_NAMES, countTells, findHomoglyphs, greekTypography, wordCount } from '../core/language.mjs';
 
 // "[3]", "[1, 4]" and ranges "[2–4]" (models write them although the prompt asks for lists)
 const CITE = /\[(\d{1,2}(?:\s*[-–]\s*\d{1,2})?(?:\s*[,;]\s*\d{1,2}(?:\s*[-–]\s*\d{1,2})?)*)\]/g;

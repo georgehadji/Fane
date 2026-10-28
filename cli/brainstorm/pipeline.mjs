@@ -10,7 +10,7 @@
 // Failures are values: a round, the development or the synthesis that fails is listed in `degraded`.
 import { createRoleCaller, statusOf } from '../write/llm.mjs';
 import { selectChains } from '../write/catalogue.mjs';
-import { LANGUAGE_NAMES, detectLanguage, fold, repairFinalNu, repairHomoglyphs } from '../write/language.mjs';
+import { LANGUAGE_NAMES, detectLanguage, fold, repairFinalNu, repairHomoglyphs } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES, THINKING_HEADROOM } from '../write/models.mjs';
 import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
 import { brainstormPrompts } from './prompts.mjs';

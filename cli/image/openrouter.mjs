@@ -4,6 +4,7 @@
 // sent in the Authorization header, never logged or put in an error message.
 
 import { readFile } from 'node:fs/promises';
+import { STOPPED_STATUS } from '../core/runlog.mjs';
 
 export class OpenRouterError extends Error {
   constructor(message, status) {
@@ -15,8 +16,23 @@ export class OpenRouterError extends Error {
 export const OPENROUTER_HOST = 'openrouter.ai';
 export const OPENROUTER_BASE_URL = `https://${OPENROUTER_HOST}/api/v1`;
 
-// Bad key or no credits: every model fails the same way, so a chain stops at the first.
-export const FATAL_STATUS = new Set([401, 402]);
+// 499 (STOPPED_STATUS, core/runlog.mjs): the run was stopped (the browser closed, or the deadline passed), so nothing more is spent.
+export { STOPPED_STATUS };
+
+// Bad key or no credits: every model fails the same way, so a chain stops at the first. A stopped run does too.
+export const FATAL_STATUS = new Set([401, 402, STOPPED_STATUS]);
+
+// How long one web request may run in total, in minutes (FANE_DEADLINE_MIN; 0 turns the deadline off).
+export const deadlineFromEnv = (env = process.env) => {
+  const n = env.FANE_DEADLINE_MIN === undefined || env.FANE_DEADLINE_MIN === '' ? 30 : Number(env.FANE_DEADLINE_MIN);
+  return n >= 0 ? n * 60_000 : 30 * 60_000;
+};
+
+// The signal a hook's calls obey: the request's own (aborted when the browser disconnects) and the deadline.
+export function runSignal(signal, deadlineMs = deadlineFromEnv()) {
+  const parts = [signal, deadlineMs > 0 ? AbortSignal.timeout(deadlineMs) : null].filter(Boolean);
+  return parts.length ? AbortSignal.any(parts) : undefined;
+}
 
 // The text model used when no chain says otherwise (prompt enhancing, and the chain of a role with no models).
 export const DEFAULT_TEXT_MODEL = 'google/gemini-3.5-flash-lite';
@@ -31,26 +47,35 @@ export const openRouterNeeded = (what) => `${what} needs an OpenRouter provider:
 
 // The client for the key in Vane's own settings, for the hooks that run inside Vane: config.json is read from
 // `configPath` (or `readConfig()`, injected for tests). null when the file cannot be read or has no OpenRouter provider.
-export async function openRouterClientFromVane({ configPath, readConfig, log = () => {} }) {
+export async function openRouterClientFromVane({ configPath, readConfig, log = () => {}, signal }) {
   let apiKey = null;
   try { apiKey = findOpenRouterKey(JSON.parse(readConfig ? await readConfig() : await readFile(configPath, 'utf8')).modelProviders); } catch (err) { log(`could not read Vane config: ${err.message}`); }
-  return apiKey ? createOpenRouterClient({ apiKey }) : null;
+  return apiKey ? createOpenRouterClient({ apiKey, signal: runSignal(signal) }) : null;
 }
 
-export function createOpenRouterClient({ apiKey, baseUrl = OPENROUTER_BASE_URL, fetchImpl = fetch } = {}) {
+// `signal` stops every call of this client, in flight or not yet made (a pipeline then ends on the 499).
+export function createOpenRouterClient({ apiKey, baseUrl = OPENROUTER_BASE_URL, fetchImpl = fetch, signal } = {}) {
+  const stopped = () => new OpenRouterError(signal.reason?.name === 'TimeoutError' ? 'stopped: the run reached its time limit' : 'stopped: the request was closed', STOPPED_STATUS);
+
   async function call(path, { method = 'GET', body, timeoutMs = 90_000 } = {}) {
-    const res = await fetchImpl(`${baseUrl}${path}`, {
-      method,
-      headers: {
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/georgehadji/Fane',
-        'X-Title': 'Fane',
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const text = await res.text();
+    if (signal?.aborted) throw stopped();
+    let res, text;
+    try {
+      res = await fetchImpl(`${baseUrl}${path}`, {
+        method,
+        headers: {
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/georgehadji/Fane',
+          'X-Title': 'Fane',
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: signal ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]) : AbortSignal.timeout(timeoutMs),
+      });
+      text = await res.text();
+    } catch (err) {
+      throw signal?.aborted ? stopped() : err;
+    }
     let json = null;
     try { json = JSON.parse(text); } catch { /* non-JSON error page */ }
     if (!res.ok || json?.error) {

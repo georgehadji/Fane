@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const { planPatch, isApplied } = require('../../patches/lib/apply-targets.js');
@@ -121,4 +121,9 @@ test('the Fane link patch adds one nav item that opens the page in a new tab, in
   const tabs = TARGETS.filter(t => t.name.startsWith('fane link opens in a new tab'));
   assert.equal(tabs.length, 2); // desktop sidebar and phone bottom bar
   for (const t of tabs) assert.ok(t.to.includes('target:e.external?"_blank"') && t.to.includes('rel:e.external?"noopener"'));
+});
+
+test('patch-image-chat runs together with patch-image-serve, so a failing serve target leaves no hook with dead links', () => {
+  const src = readFileSync(new URL('../../patches/patch-image-chat.js', import.meta.url), 'utf8');
+  assert.match(src, /run\('patch-image-chat', \[\.\.\.TARGETS, \.\.\.require\('\.\/patch-image-serve'\)\.TARGETS\]\)/);
 });

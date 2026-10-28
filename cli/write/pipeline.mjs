@@ -8,9 +8,9 @@
 // values ({ ok: false, error }); a phase that fails after the draft is skipped and listed in
 // `degraded`, so a weakened run is never presented as a clean one.
 import { checkCitations, firstComment, renumber, runChecks, sourcesSection, stripCitations } from './checks.mjs';
-import { clampPostWords, isPost } from './formats.mjs';
+import { clampPostWords, isPost } from '../core/formats.mjs';
 import { AUDIT_DIMENSIONS, MIN_CLAIM_SUPPORT, auditResult, claimLedger, claimSupportRatio } from './gate.mjs';
-import { countTells, detectLanguage, repairFinalNu, repairHomoglyphs, wordCount } from './language.mjs';
+import { countTells, detectLanguage, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
 import { createRoleCaller, noteOf, statusOf } from './llm.mjs';
 import { DEFAULT_MODE, MODES, PHASES, POST_PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
 import { postEditRule, prompts } from './prompts.mjs';

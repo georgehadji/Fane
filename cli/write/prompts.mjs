@@ -5,8 +5,8 @@
 //  - Web pages are untrusted data: every source block says so, and no prompt acts on text inside it.
 //  - The draft is told the human-voice rules at write time (cheaper than undoing tells afterwards),
 //    with a rule set per language: the Greek one is native Greek, not a translation.
-import { POSTS, isPost } from './formats.mjs';
-import { LANGUAGE_NAMES, wordCount } from './language.mjs';
+import { POSTS, isPost } from '../core/formats.mjs';
+import { LANGUAGE_NAMES, wordCount } from '../core/language.mjs';
 
 const JSON_ONLY = 'Reply with one JSON object and nothing else: no prose before or after, no code fence, no reasoning.';
 const NO_THINKING = 'Do not show your reasoning; output only the requested result.';
