@@ -64,6 +64,37 @@ test('patch-colors: balanced rules after the last one of the stylesheet, every c
   assert.ok(COLORS.match(/#[0-9a-f]+\b/gi).every(c => c.length === 7));
 });
 
+test('patch-colors: the first version is replaced where it stands, and no GitHub grey or sky blue is left in the block', () => {
+  const { TARGETS, COLORS, COLORS_V1 } = require('../../patches/patch-colors.js');
+  const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
+  const r = planPatch({ [FILES.appCss]: `x{}${end}\n/*other*/\n\n${COLORS_V1}\n` }, TARGETS);
+  assert.deepEqual(r.errors, []);
+  assert.equal(r.next[FILES.appCss], `x{}${end}\n/*other*/\n\n${COLORS}\n`);
+  assert.doesNotMatch(COLORS, /rgb\((13 17 23|22 27 34|33 38 45|246 248 250|232 237 241)\b|#(e6edf3|8b949e|58a6ff|2563eb|0369a1)/i);
+  assert.match(COLORS, /\.bg-light-primary\{background-color:rgb\(247 242 234\//);
+});
+
+test('patch-icon-buttons: an icon-only button gets the name of its Lucide icon, a named or texted one is left alone', () => {
+  const { LABEL_ICONS } = require('../../patches/patch-icon-buttons.js');
+  const el = (cls, { text = '', label = null } = {}) => {
+    const attrs = new Map(label ? [['aria-label', label]] : []);
+    return {
+      textContent: text, title: '',
+      querySelector: () => (cls ? { getAttribute: () => cls } : null),
+      hasAttribute: (k) => attrs.has(k), getAttribute: (k) => attrs.get(k) ?? null, setAttribute: (k, v) => attrs.set(k, v),
+    };
+  };
+  const bin = el('lucide lucide-trash'), speak = el('lucide lucide-volume2 lucide-volume-2'), odd = el('lucide lucide-banana');
+  const named = el('lucide lucide-share', { label: 'Share chat' }), texted = el('lucide lucide-copy', { text: 'Copy' });
+  const all = [bin, speak, odd, named, texted];
+  globalThis.window = {};
+  globalThis.document = { documentElement: {}, querySelectorAll: () => all };
+  globalThis.MutationObserver = class { observe() {} };
+  try { LABEL_ICONS(); } finally { delete globalThis.window; delete globalThis.document; delete globalThis.MutationObserver; }
+  assert.deepEqual([bin, speak, odd, named, texted].map(b => [b.getAttribute('aria-label'), b.title, b.hasAttribute('data-fane-icon')]),
+    [['Delete', 'Delete', true], ['Read aloud', 'Read aloud', true], [null, '', true], ['Share chat', '', true], [null, '', false]]);
+});
+
 test('patch-type: intact Commissioner WOFF2s for Latin and Greek on Vane\'s font class, and it stacks with patch-colors in either order', () => {
   const colors = require('../../patches/patch-colors.js');
   const type = require('../../patches/patch-type.js');
@@ -128,7 +159,6 @@ test('patch-discover-greek: the Discover search adds every Greek site and query 
   assert.ok(calls.filter(([, l]) => l === 'el').every(([q]) => /^site:\S+\.(gr|com) /.test(q)));
   assert.equal((await run()).filter(u => u.startsWith('el:')).length, 6); // no topic: tech, as in Vane
 });
-
 
 test('patch-editorial-greek: a static Greek-only face under PP Editorial\'s name, stacked with patch-colors and patch-type', () => {
   const ed = require('../../patches/patch-editorial-greek.js');
