@@ -10,7 +10,9 @@
 //    Commissioner's lowercase is shorter than Montserrat's (x-height 45 against 53 units at 100px) and Vane's sizes were
 //    set for Montserrat, so size-adjust 108% keeps text from shrinking without making capitals tower.
 //  - answer headings outranked the question (title 36px/800, sections 24px/800, question 30px/500);
-//  - answer paragraphs had 162% line spacing and 1.25em between paragraphs; sidebar labels were 10px.
+//  - answer paragraphs had 162% line spacing and 1.25em between paragraphs; sidebar labels were 10px;
+//  - Discover: card summaries were 12px at 162% line spacing, the large story's summary 16px at 162%;
+//  - Library: chat titles ran the full 946px row (about 110 characters a line), and a URL title could not wrap.
 // One block appended to the end of Vane's stylesheet, like patch-colors (either order works: both anchor on its last rule).
 const fs = require('fs');
 const path = require('path');
@@ -33,8 +35,7 @@ const face = ([name, range]) => {
 
 // .__className_62a70d is Vane's next/font class on <body>; same selector, later in the file, so it wins.
 // .prose h1 (0,1,1) beats Tailwind's prose rules and Vane's prose-h2:font-[800] (both 0,1,0).
-const TYPE = String.raw`/*fane:type*/
-/* Commissioner, Copyright 2019 The Commissioner Project Authors (github.com/kosbarts/Commissioner), SIL OFL 1.1 */
+const BASE = String.raw`/* Commissioner, Copyright 2019 The Commissioner Project Authors (github.com/kosbarts/Commissioner), SIL OFL 1.1 */
 ${SUBSETS.map(face).join('\n')}
 .__className_62a70d{font-family:Commissioner,Montserrat,Arial,sans-serif}
 .prose h1{font-size:1.75rem;font-weight:700;line-height:1.2}
@@ -43,16 +44,23 @@ ${SUBSETS.map(face).join('\n')}
 .prose p,.prose li{line-height:1.5}
 .prose p{margin-top:.9em;margin-bottom:.9em}
 .text-\[10px\]{font-size:.75rem;line-height:1rem}`;
+// The first version of the block, as a stylesheet patched before the Discover and Library rules holds it.
+const TYPE_V1 = `/*fane:type*/\n${BASE}`;
+const TYPE = String.raw`/*fane:type-2*/
+${BASE}
+.text-xs.leading-relaxed.line-clamp-2{font-size:.8125rem;line-height:1.45}
+.text-base.leading-relaxed.line-clamp-4{line-height:1.5}
+a[href^="/c/"].line-clamp-2{max-width:60ch;overflow-wrap:anywhere}`;
 
 const TARGETS = [
   {
-    name: 'Commissioner, answer headings and spacing',
+    name: 'Commissioner, answer, Discover and Library type',
     file: FILES.appCss,
-    from: END,
-    to: `${END}\n${TYPE}\n`,
-    marker: '/*fane:type*/',
+    // an older block is replaced where it stands (patch-colors may sit between it and the stylesheet's last rule)
+    alts: [{ from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
+    marker: '/*fane:type-2*/',
   },
 ];
 
-module.exports = { TARGETS, TYPE };
+module.exports = { TARGETS, TYPE, TYPE_V1 };
 if (require.main === module) run('patch-type', TARGETS);

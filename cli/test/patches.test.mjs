@@ -86,6 +86,31 @@ test('patch-type: intact Commissioner WOFF2s for Latin and Greek on Vane\'s font
   }
 });
 
+test('patch-type: a stylesheet patched with the first version is upgraded in place, wherever patch-colors put it', () => {
+  const colors = require('../../patches/patch-colors.js');
+  const type = require('../../patches/patch-type.js');
+  const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
+  for (const old of [`x{}${end}\n${type.TYPE_V1}\n\n${colors.COLORS}\n`, `x{}${end}\n${colors.COLORS}\n\n${type.TYPE_V1}\n`]) {
+    const r = planPatch({ [FILES.appCss]: old }, type.TARGETS);
+    assert.deepEqual(r.errors, []);
+    const css = r.next[FILES.appCss];
+    assert.ok(css.includes(type.TYPE) && css.includes(colors.COLORS));
+    assert.ok(!css.includes('/*fane:type*/')); // the old block is gone, not left above the new one
+    assert.deepEqual(planPatch(r.next, type.TARGETS).applied, []);
+  }
+});
+
+test('patch-discover-ellipsis: three periods at the end of a summary become a no-break space and an ellipsis', () => {
+  const { ELLIPSIS, TARGETS } = require('../../patches/patch-discover-ellipsis.js');
+  const out = ELLIPSIS([{ content: 'but that...' }, { content: 'ends here …' }, { content: 'v1.2... works' }, { title: 't' }, null]);
+  assert.deepEqual(out.map(b => b?.content), ['but that …', 'ends here …', 'v1.2... works', undefined, undefined]);
+  assert.equal(ELLIPSIS('x'), 'x');
+  // the injected code is valid JavaScript in the route
+  const route = 'async function GET(){let e=[];return Response.json({blogs:e},{status:200})}';
+  const r = planPatch({ [FILES.discoverRoute]: route }, TARGETS);
+  assert.deepEqual(r.errors, []);
+});
+
 test('every patch declares well-formed targets on known Vane files', () => {
   const dir = new URL('../../patches/', import.meta.url);
   const known = new Set(Object.values(FILES));
