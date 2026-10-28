@@ -6,10 +6,9 @@
 //  - the model's reasoning printed as the answer ("Thinking Process: ...")
 //  - JSON roles: no parseable JSON object
 // Errors 401/402 (bad key, no credits) hit every model alike and stop the chain.
+import { FATAL_STATUS } from '../image/openrouter.mjs';
 import { THINKING_LEAK } from './checks.mjs';
 import { REASONING, isJsonRole } from './models.mjs';
-
-const FATAL = new Set([401, 402]);
 
 const textOf = (content) => (Array.isArray(content) ? content.map(p => p?.text || '').join('') : String(content ?? '')).trim();
 const stripThinking = (s) => s.replace(/<(think|thinking)>[\s\S]*?<\/\1>/gi, '').trim();
@@ -29,21 +28,35 @@ export function extractJson(text) {
 export const costOf = (usage, price) => (typeof usage?.cost === 'number' ? usage.cost
   : price ? ((usage?.prompt_tokens || 0) * price.in + (usage?.completion_tokens || 0) * price.out) / 1e6 : 0);
 
+// How a finished call shows in a pipeline's phase record: 'ok', 'fallback' (a later model answered) or 'failed',
+// and the problems of the models that did not answer.
+export const statusOf = (r) => (r.ok ? (r.fallback ? 'fallback' : 'ok') : 'failed');
+export const noteOf = (r) => (r.ok ? (r.fallback ? r.attempts.filter(a => a.problem).map(a => `${a.model}: ${a.problem}`).join('; ') : '') : r.errors.join('; '));
+
 // -> { ok: true, text, data?, model, fallback, attempts, cost } | { ok: false, fatal, errors, attempts, cost }
 // `fallback` is true when a model after the first one answered.
 // A network failure ("fetch failed": no HTTP status, not a timeout) hits every model alike. Two live Quality
 // runs lost the connection for minutes and spent each phase's whole chain in seconds, so the next model waits.
 // A 429 (rate limit) hits every model of the chain alike too, so it waits the same way.
 export const NETWORK_WAIT_MS = 10_000;
+
+// FANE_MAX_COST (USD) stops a run once the calls of one pipeline have cost that much; unset is no limit.
+// It is checked before each model call, so the call in flight when it is reached still finishes.
+export const maxCostFromEnv = (env = process.env) => {
+  const n = Number(env.FANE_MAX_COST);
+  return n > 0 ? n : Infinity;
+};
 const isNetworkError = (err) => err.status === 429 || (!err.status && err.name !== 'TimeoutError' && err.name !== 'AbortError');
 
-export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new Promise(r => setTimeout(r, ms)) }) {
+export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new Promise(r => setTimeout(r, ms)), maxCost = maxCostFromEnv() }) {
+  let spent = 0;
   // `json`: whether the role answers JSON; the coding roles (code/models.mjs) say so here, the article roles by name.
   // `code`: the answer is code, which may contain think tags of its own (see stripLeadingThinking).
   return async function call(role, { system, user }, { chain, maxTokens, temperature, prices, json = isJsonRole(role), code = false }) {
     const attempts = [];
     let cost = 0, offline = 0;
     for (const [i, model] of chain.entries()) {
+      if (spent >= maxCost) return { ok: false, fatal: true, errors: [`spend limit of $${maxCost} reached (FANE_MAX_COST)`], attempts, cost };
       if (offline) await sleep(NETWORK_WAIT_MS * offline);
       const body = {
         model,
@@ -69,10 +82,12 @@ export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new P
         const cause = err.cause?.code || err.cause?.message;
         attempts.push({ model, problem: `${String(err.message || err)}${cause ? ` (${cause})` : ''}`.slice(0, 160) });
         log(`${role}: ${model} failed (${attempts.at(-1).problem})`);
-        if (FATAL.has(status)) return { ok: false, fatal: true, status, errors: attempts.map(a => `${a.model}: ${a.problem}`), attempts, cost };
+        if (FATAL_STATUS.has(status)) return { ok: false, fatal: true, status, errors: attempts.map(a => `${a.model}: ${a.problem}`), attempts, cost };
         continue;
       }
-      cost += costOf(res?.usage, prices?.[model]);
+      const spend = costOf(res?.usage, prices?.[model]);
+      cost += spend;
+      spent += spend;
       const choice = res?.choices?.[0];
       const raw = textOf(choice?.message?.content);
       const text = code ? stripLeadingThinking(raw) : stripThinking(raw);

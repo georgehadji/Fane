@@ -5,12 +5,13 @@
 // own provider settings, on the chains of the mode's price band (the article trial's models). The answer is one
 // block, updated as the work goes, and ends with ANSWER_MARKER (tagged()) like every Fane answer.
 import { readFile } from 'node:fs/promises';
-import { createOpenRouterClient, findOpenRouterKey } from '../image/openrouter.mjs';
+import { openRouterClientFromVane, openRouterNeeded } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue } from '../write/catalogue.mjs';
 import { detectLanguage } from '../write/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
+import { retryEmpty } from '../write/research.mjs';
 import { isBrainstormRequest } from './intent.mjs';
 import { createBrainstormPipeline, selectBrainstormChains } from './pipeline.mjs';
 import { renderBrainstormFailure, renderBrainstormProgress, renderBrainstormResult } from './present.mjs';
@@ -28,14 +29,10 @@ export async function handleBrainstormRequest(query, { emit, update, configPath,
   const id = emit(tagged(renderBrainstormProgress(state)));
   const say = (markdown) => { try { update(id, tagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
   try {
+    client ??= await openRouterClientFromVane({ configPath, readConfig, log });
     if (!client) {
-      let apiKey = null;
-      try { apiKey = findOpenRouterKey(JSON.parse(readConfig ? await readConfig() : await readFile(configPath, 'utf8')).modelProviders); } catch (err) { log(`could not read Vane config: ${err.message}`); }
-      if (!apiKey) {
-        say(quiet([escapeHtml('Brainstorming needs an OpenRouter provider: in Settings → Models, add an OpenAI-compatible provider with Base URL https://openrouter.ai/api/v1 and your OpenRouter API key.')]));
-        return true;
-      }
-      client = createOpenRouterClient({ apiKey });
+      say(quiet([escapeHtml(openRouterNeeded('Brainstorming'))]));
+      return true;
     }
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
@@ -44,14 +41,7 @@ export async function handleBrainstormRequest(query, { emit, update, configPath,
       say(quiet([escapeHtml('No text model has passed the article trial: run node scripts/article-trial.mjs.')]));
       return true;
     }
-    // Vane sometimes finds no sources for a query that worked a minute ago: one retry.
-    const retrieve = research ? async (q) => {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const found = await research(q);
-        if (found.length) return found;
-      }
-      return [];
-    } : undefined;
+    const retrieve = retryEmpty(research);
     let queue = Promise.resolve();
     const onProgress = (e) => {
       if (e.status === 'preview') { if (e.ideas) state.ideas = e.ideas; }

@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FAMILIES, TIERS, TIER_FOR_MODE, VIAS } from './image/catalogue.mjs';
 import { imageSubject, isImageRequest } from './image/intent.mjs';
-import { ASPECT_RATIOS, DEFAULT_IMAGES, DEFAULT_TEXT_MODEL, IMAGE_SIZES, MAX_IMAGES } from './image/generate.mjs';
+import { ASPECT_RATIOS, DEFAULT_IMAGES, IMAGE_SIZES, IMAGE_TEXT_MODEL, MAX_IMAGES } from './image/generate.mjs';
 import { parseImageOptions } from './image/intent.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from './write/intent.mjs';
 import { POSTS, POST_PLATFORMS } from './write/formats.mjs';
@@ -39,8 +39,6 @@ const VALID_MODES = ['speed', 'balanced', 'quality'];
 const STARTUP_WAIT_MS = 90_000;
 const SEARCH_RETRIES = 1; // retried only on HTTP 5xx / connection reset, never on timeout (that would double the wait)
 const SLUG_RE = /^[\w.~-]+\/[\w.:~-]+$/; // vendor/model[:variant], the OpenRouter id shape
-// Cheap text model for image-prompt enhancement and intent classification.
-const IMAGE_TEXT_MODEL = process.env.VANE_IMAGE_TEXT_MODEL || DEFAULT_TEXT_MODEL;
 
 const USAGE = `Usage: vane "<question>" [options]
        vane --list-models [--json]

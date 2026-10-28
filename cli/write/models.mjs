@@ -3,7 +3,7 @@
 //   speed 2 (outline, draft), balanced 6, quality 8 (+4 for the one retry after a failed audit),
 //   plus one or two trim calls whenever a text ends up more than a quarter over its target (pipeline.mjs MAX_OVER);
 //   a Greek or other non-English topic adds one cheap call to write English search queries.
-import { DEFAULT_TEXT_MODEL } from '../image/generate.mjs';
+import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
 
 export const MODES = ['speed', 'balanced', 'quality'];
 export const DEFAULT_MODE = 'balanced';

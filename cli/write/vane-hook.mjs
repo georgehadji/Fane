@@ -9,10 +9,9 @@
 // adds the audit. The answer is one block, updated as the work goes: status lines, then the draft
 // as soon as it exists, then the finished article.
 import { readFile } from 'node:fs/promises';
-import { createOpenRouterClient, findOpenRouterKey } from '../image/openrouter.mjs';
-import { previousAnswer } from '../image/vane-hook.mjs';
+import { openRouterClientFromVane, openRouterNeeded } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
-import { escapeHtml, quiet, tagged } from '../image/present.mjs';
+import { escapeHtml, previousAnswer, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue, selectChains } from './catalogue.mjs';
 import { createArticleEditor, isArticleEdit, parseArticleAnswer, targetLanguage } from './edit.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from './intent.mjs';
@@ -20,6 +19,7 @@ import { LANGUAGE_NAMES, detectLanguage } from './language.mjs';
 import { DEFAULT_MODE, MODES } from './models.mjs';
 import { createArticlePipeline } from './pipeline.mjs';
 import { renderArticleFailure, renderArticleProgress, renderArticleResult, renderPostResult } from './present.mjs';
+import { retryEmpty } from './research.mjs';
 
 const TRIAL_FILE = new URL('./trial.json', import.meta.url);
 
@@ -46,14 +46,10 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   const id = emit(tagged(renderArticleProgress(state)));
   const say = (markdown) => { try { update(id, tagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
   try {
+    client ??= await openRouterClientFromVane({ configPath, readConfig, log });
     if (!client) {
-      let apiKey = null;
-      try { apiKey = findOpenRouterKey(JSON.parse(readConfig ? await readConfig() : await readFile(configPath, 'utf8')).modelProviders); } catch (err) { log(`could not read Vane config: ${err.message}`); }
-      if (!apiKey) {
-        say(quiet([escapeHtml('Article writing needs an OpenRouter provider: in Settings → Models, add an OpenAI-compatible provider with Base URL https://openrouter.ai/api/v1 and your OpenRouter API key.')]));
-        return true;
-      }
-      client = createOpenRouterClient({ apiKey });
+      say(quiet([escapeHtml(openRouterNeeded('Article writing'))]));
+      return true;
     }
     trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {};
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
@@ -62,21 +58,14 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
       say(quiet([escapeHtml(`No text model has passed the trial for ${LANGUAGE_NAMES[lang]}: run node scripts/article-trial.mjs, or ask in English.`)]));
       return true;
     }
-    // Vane sometimes finds no sources for a query that worked a minute ago: one retry.
-    const retrieve = async (q) => {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const found = await research(q);
-        if (found.length) return found;
-      }
-      return [];
-    };
+    const retrieve = retryEmpty(research);
     if (earlier) {
       const edit = editor || createArticleEditor({ client, log });
       const onEdit = (e) => {
         if (e.phase === 'sources' && e.status === 'done') researchDone();
         if (e.status === 'running') { state.running = e.phase; say(renderArticleProgress(state)); }
       };
-      const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, mode: useMode, chains: chosen.chains, prices: chosen.prices, retrieve: research ? retrieve : undefined, onProgress: onEdit });
+      const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, mode: useMode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: onEdit });
       say(r.ok ? renderArticleResult(r) : renderArticleFailure({ ...r, edit: true }, lang));
       return true;
     }

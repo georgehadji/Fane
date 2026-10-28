@@ -5,7 +5,7 @@
 //   speed:    spec, generate
 //   balanced: docs research, spec, generate, review, fix, tests
 //   quality:  + a search for known vulnerabilities of the stack, given to the review
-import { DEFAULT_TEXT_MODEL } from '../image/generate.mjs';
+import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
 import { THINKING_HEADROOM } from '../write/models.mjs';
 
 export const CODE_ROLES = ['spec', 'generate', 'review', 'fix', 'tests'];

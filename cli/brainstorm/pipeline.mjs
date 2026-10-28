@@ -8,11 +8,11 @@
 //    three ideas the clustering model marked "keep", in the order of its themes, whatever their scores);
 //  - ids are given by code; answers that name an unknown id are ignored, so nothing invented reaches the result.
 // Failures are values: a round, the development or the synthesis that fails is listed in `degraded`.
-import { createRoleCaller } from '../write/llm.mjs';
+import { createRoleCaller, statusOf } from '../write/llm.mjs';
 import { selectChains } from '../write/catalogue.mjs';
 import { LANGUAGE_NAMES, detectLanguage, fold, repairFinalNu, repairHomoglyphs } from '../write/language.mjs';
 import { DEFAULT_MODE, MODES, THINKING_HEADROOM } from '../write/models.mjs';
-import { DEFAULT_TEXT_MODEL } from '../image/generate.mjs';
+import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
 import { brainstormPrompts } from './prompts.mjs';
 
 export const ROLES = ['generate', 'cluster', 'develop', 'synthesis'];
@@ -129,7 +129,7 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
       const r = await call(role, brainstormPrompts[role]({ text: request, lang, ...ctx }), { chain: chains[role] || chains.generate, maxTokens: tokensFor(role, lang), temperature: TEMPERATURE[role], prices, json: true });
       calls += r.attempts.length;
       cost += r.cost;
-      const rec = { phase: role, note, model: r.model || null, status: r.ok ? (r.fallback ? 'fallback' : 'ok') : 'failed', ms: now() - started };
+      const rec = { phase: role, note, model: r.model || null, status: statusOf(r), ms: now() - started };
       phases.push(rec);
       emit(rec);
       return { ...r, rec };

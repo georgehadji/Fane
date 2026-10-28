@@ -6,11 +6,12 @@
 // (selectCodeChains over trial.json). The answer is one block, updated as the work goes. Every answer carries
 // CODE_ANSWER_MARKER, so the patched browser code leaves its "[x]" alone.
 import { readFile } from 'node:fs/promises';
-import { createOpenRouterClient, findOpenRouterKey } from '../image/openrouter.mjs';
+import { openRouterClientFromVane, openRouterNeeded } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, quiet } from '../image/present.mjs';
 import { detectLanguage } from '../write/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
+import { retryEmpty } from '../write/research.mjs';
 import { buildCodeCatalogue, selectCodeChains } from './catalogue.mjs';
 import { isCodeRequest } from './intent.mjs';
 import { createCodePipeline } from './pipeline.mjs';
@@ -30,14 +31,10 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
   const id = emit(codeTagged(renderCodeProgress(state)));
   const say = (markdown) => { try { update(id, codeTagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
   try {
+    client ??= await openRouterClientFromVane({ configPath, readConfig, log });
     if (!client) {
-      let apiKey = null;
-      try { apiKey = findOpenRouterKey(JSON.parse(readConfig ? await readConfig() : await readFile(configPath, 'utf8')).modelProviders); } catch (err) { log(`could not read Vane config: ${err.message}`); }
-      if (!apiKey) {
-        say(quiet([escapeHtml('Code writing needs an OpenRouter provider: in Settings → Models, add an OpenAI-compatible provider with Base URL https://openrouter.ai/api/v1 and your OpenRouter API key.')]));
-        return true;
-      }
-      client = createOpenRouterClient({ apiKey });
+      say(quiet([escapeHtml(openRouterNeeded('Code writing'))]));
+      return true;
     }
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
@@ -46,14 +43,7 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
       say(quiet([escapeHtml('No model has passed the coding trial: run node scripts/code-trial.mjs.')]));
       return true;
     }
-    // Vane sometimes finds no sources for a query that worked a minute ago: one retry.
-    const retrieve = research ? async (q) => {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const found = await research(q);
-        if (found.length) return found;
-      }
-      return [];
-    } : undefined;
+    const retrieve = retryEmpty(research);
     let queue = Promise.resolve();
     const onProgress = (e) => {
       if (e.status === 'preview') { if (e.files) state.files = e.files; }

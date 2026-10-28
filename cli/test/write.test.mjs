@@ -6,11 +6,12 @@ import { articleTopic, isArticleRequest, parseArticleOptions } from '../write/in
 import { checkCitations, renumber, rhythm, runChecks, sentences, sourcesSection } from '../write/checks.mjs';
 import { AUDIT_DIMENSIONS, auditResult, claimLedger, claimSupportRatio } from '../write/gate.mjs';
 import { DEFAULT_WORDS, PHASES, chainsFor, clampWords, tokensFor } from '../write/models.mjs';
-import { createRoleCaller, extractJson } from '../write/llm.mjs';
+import { createRoleCaller, extractJson, maxCostFromEnv, noteOf, statusOf } from '../write/llm.mjs';
+import { retryEmpty } from '../write/research.mjs';
 import { createArticlePipeline } from '../write/pipeline.mjs';
 import { parseArticleAnswer } from '../write/edit.mjs';
 import { prompts, sourceBlock } from '../write/prompts.mjs';
-import { OpenRouterError } from '../image/openrouter.mjs';
+import { OpenRouterError, openRouterClientFromVane, openRouterNeeded } from '../image/openrouter.mjs';
 
 for (const k of ['VANE_URL', 'VANE_CHAT_MODEL', 'VANE_EMBEDDING_MODEL', 'VANE_CONTAINER', 'VANE_SOURCES', 'VANE_MODE']) delete process.env[k];
 const { parseCli } = await import('../vane.mjs');
@@ -304,6 +305,52 @@ test('role call: a 429 waits before the next model, longer each time', async () 
   assert.equal(r.model, 'm3');
   assert.deepEqual(waits, [10_000, 20_000]);
   assert.match(r.attempts[0].problem, /429/);
+});
+
+test('role call: once the calls cost the limit, the next model is not asked and the run is fatal', async () => {
+  const call = createRoleCaller({ client: stub([reply('', { usage: { cost: 0.6 } }), reply('never asked')]), maxCost: 0.5 });
+  const r = await call('draft', { system: 's', user: 'u' }, { chain: ['m1', 'm2'], maxTokens: 100 });
+  assert.equal(r.ok, false);
+  assert.equal(r.fatal, true);
+  assert.deepEqual(r.attempts.map(a => a.model), ['m1']);
+  assert.match(r.errors[0], /spend limit of \$0\.5 reached/);
+  assert.ok(Math.abs(r.cost - 0.6) < 1e-9);
+  // the total is per caller: a later call on the same caller is refused at once
+  assert.equal((await call('draft', { system: 's', user: 'u' }, { chain: ['m1'], maxTokens: 100 })).fatal, true);
+});
+
+test('FANE_MAX_COST: a positive number is the limit, anything else is none', () => {
+  assert.equal(maxCostFromEnv({ FANE_MAX_COST: '0.25' }), 0.25);
+  for (const v of [undefined, '', '0', '-1', 'abc']) assert.equal(maxCostFromEnv({ FANE_MAX_COST: v }), Infinity, String(v));
+});
+
+test('statusOf and noteOf describe a call for the phase record', () => {
+  const ok = { ok: true, fallback: false, attempts: [{ model: 'a', problem: null }] };
+  const fb = { ok: true, fallback: true, attempts: [{ model: 'a', problem: 'empty answer' }, { model: 'b', problem: null }] };
+  const bad = { ok: false, errors: ['a: empty answer', 'b: not JSON'], attempts: [] };
+  assert.deepEqual([ok, fb, bad].map(statusOf), ['ok', 'fallback', 'failed']);
+  assert.deepEqual([ok, fb, bad].map(noteOf), ['', 'a: empty answer', 'a: empty answer; b: not JSON']);
+});
+
+test('retryEmpty asks Vane once more when a search finds nothing, and is undefined without research', async () => {
+  let asked = 0;
+  const retrieve = retryEmpty(async () => (++asked === 2 ? [{ url: 'u' }] : []));
+  assert.deepEqual(await retrieve('q'), [{ url: 'u' }]);
+  assert.equal(asked, 2);
+  asked = -5;
+  assert.deepEqual(await retrieve('q'), []); // still nothing after two tries
+  assert.equal(retryEmpty(undefined), undefined);
+});
+
+test('openRouterClientFromVane: a client for the OpenRouter provider in the config of Vane, else null', async () => {
+  const cfg = (providers) => async () => JSON.stringify({ modelProviders: providers });
+  const logged = [];
+  const client = await openRouterClientFromVane({ readConfig: cfg([{ config: { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'k' } }]) });
+  assert.equal(typeof client.chat, 'function');
+  assert.equal(await openRouterClientFromVane({ readConfig: cfg([{ config: { baseURL: 'https://api.openai.com/v1', apiKey: 'k' } }]) }), null);
+  assert.equal(await openRouterClientFromVane({ readConfig: async () => 'not json', log: (m) => logged.push(m) }), null);
+  assert.match(logged[0], /could not read Vane config/);
+  assert.match(openRouterNeeded('Code writing'), /^Code writing needs an OpenRouter provider: .*https:\/\/openrouter\.ai\/api\/v1/);
 });
 
 test('role call: a model that reports no cost is priced from its token counts', async () => {

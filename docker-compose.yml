@@ -26,6 +26,8 @@ services:
     environment:
       # Switches on the CORE academic engine (searxng/settings.yml); empty leaves it off.
       CORE_API_KEY: ${CORE_API_KEY:-}
+      # Spend limit in USD for one article, code or brainstorm run (cli/write/llm.mjs); empty is no limit.
+      FANE_MAX_COST: ${FANE_MAX_COST:-}
     entrypoint: ["sh", "/fane/docker/fane-entrypoint.sh"]
     command: ["/home/vane/entrypoint.sh"]
 

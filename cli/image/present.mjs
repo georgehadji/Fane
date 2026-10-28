@@ -18,6 +18,15 @@ export const tagged = (markdown) => `${markdown}\n\n${ANSWER_MARKER}`;
 const NBSP = ' ';
 const DIM = 'opacity:0.7';
 
+// The text of the previous answer: from Vane's database when the patch provides lastAnswer(), else
+// from the chat history the browser sent (which can hold an older, partial version of it). The image and
+// article hooks use it to find what a follow-up edits.
+export async function previousAnswer(history, lastAnswer) {
+  try { const text = await lastAnswer?.(); if (typeof text === 'string') return text; } catch { /* use the history */ }
+  const last = history?.at(-1);
+  return last?.role === 'assistant' ? String(last.content ?? '') : '';
+}
+
 // Status, summary and notes: one small dimmed block, one line each. Lines are already escaped.
 // role="status": a screen reader announces progress and the final summary politely.
 export const quiet = (lines) => `<p role="status" style="font-size:14px;${DIM}">${lines.filter(Boolean).join('<br>')}</p>`;

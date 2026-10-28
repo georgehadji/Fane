@@ -8,6 +8,7 @@ import { ASPECT_RATIOS, ASPECT_WORDS, DEFAULT_TIER, buildCatalogue, emitsSvg, se
 import { classifyIntent } from './intent.mjs';
 import { REWRITE_SYSTEM, hasRiskTerms, heuristicRewrite, shouldRetry } from './policy.mjs';
 import { collectImageCandidates, sniffMime } from './extract.mjs';
+import { DEFAULT_TEXT_MODEL, FATAL_STATUS } from './openrouter.mjs';
 
 // Closest ratio from a provider's accepted list ("auto" ignored), compared on a log scale.
 export function nearestRatio(want, accepted) {
@@ -23,11 +24,10 @@ export const IMAGE_SIZES = ['1K', '2K', '4K'];
 export const MAX_IMAGES = 8; // every image is a paid call, fanned out in parallel
 export const DEFAULT_IMAGES = 4; // one per model, from different labs where possible
 // Cheap text model for prompt enhancement and intent classification (CLI and Vane hook).
-export const DEFAULT_TEXT_MODEL = 'google/gemini-3.5-flash-lite';
+export const IMAGE_TEXT_MODEL = process.env.VANE_IMAGE_TEXT_MODEL || DEFAULT_TEXT_MODEL;
 
 const ENHANCE_SYSTEM = 'You are an image-prompt engineer. Expand the description into one detailed prompt for an image model: subject, setting, composition, lighting, colour palette, medium or style, and mood. Keep every element the user asked for; add no text, logos or artist names they did not ask for. Reply with the prompt only, under 120 words.';
 const unquote = (s) => String(s || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
-const FATAL = new Set([401, 402]); // bad key or no credits: every model fails the same way
 
 const toResultImage = (i) => ({ dataUrl: i.dataUrl, model: i.model.id, name: i.model.name, via: viaOf(i.model), endpoint: i.endpoint, aspect: i.aspect, pricePerImage: i.model.price, text: i.text });
 
@@ -79,7 +79,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
     const failures = [];
     for (const call of order) {
       try { return await call(model, prompt, opts); } catch (err) {
-        if (FATAL.has(err.status)) throw err;
+        if (FATAL_STATUS.has(err.status)) throw err;
         failures.push(err);
       }
     }
@@ -149,7 +149,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
           images[slot] = { ...drawn, model: m }; onImage(slot); return;
         } catch (err) {
           errors.push(`${m.id}: ${err.message}`);
-          if (FATAL.has(err.status)) fatal ||= err;
+          if (FATAL_STATUS.has(err.status)) fatal ||= err;
         }
       }
     }));

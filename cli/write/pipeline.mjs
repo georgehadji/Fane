@@ -11,7 +11,7 @@ import { checkCitations, firstComment, renumber, runChecks, sourcesSection, stri
 import { clampPostWords, isPost } from './formats.mjs';
 import { AUDIT_DIMENSIONS, MIN_CLAIM_SUPPORT, auditResult, claimLedger, claimSupportRatio } from './gate.mjs';
 import { countTells, detectLanguage, repairFinalNu, repairHomoglyphs, wordCount } from './language.mjs';
-import { createRoleCaller } from './llm.mjs';
+import { createRoleCaller, noteOf, statusOf } from './llm.mjs';
 import { DEFAULT_MODE, MODES, PHASES, POST_PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
 import { postEditRule, prompts } from './prompts.mjs';
 
@@ -64,7 +64,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const r = await call(role, prompt, { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, size, lang), prices });
       calls += r.attempts.length;
       cost += r.cost;
-      const rec = { phase: role, model: r.model || null, status: r.ok ? (r.fallback ? 'fallback' : 'ok') : 'failed', ms: now() - started, note: r.ok ? (r.fallback ? `${r.attempts.filter(a => a.problem).map(a => `${a.model}: ${a.problem}`).join('; ')}` : '') : r.errors.join('; ') };
+      const rec = { phase: role, model: r.model || null, status: statusOf(r), ms: now() - started, note: noteOf(r) };
       phases.push(rec);
       emit({ ...rec, status: rec.status });
       if (r.fatal) throw Object.assign(new Stop(r.errors[0] || 'the provider refused the request'), { status: r.status });

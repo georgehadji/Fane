@@ -6,7 +6,7 @@
 // empty and "thinking" answers and walks the role's fallback chain. `checkSyntax` (syntax.mjs) parses files without
 // running them; nothing generated is ever executed. Failures are returned as values; a phase that fails after the
 // files exist is skipped and listed in `degraded`, so a weakened run is never presented as a clean one.
-import { createRoleCaller } from '../write/llm.mjs';
+import { createRoleCaller, noteOf, statusOf } from '../write/llm.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../write/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { MAX_FILE_CHARS, extractCode, fileChecks, parseFiles, safePath, sameFile } from './files.mjs';
@@ -137,7 +137,7 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
       });
       calls += r.attempts.length;
       cost += r.cost;
-      const rec = { phase: role, file: ctx.file?.path, model: r.model || null, status: r.ok ? (r.fallback ? 'fallback' : 'ok') : 'failed', ms: now() - started, note: r.ok ? (r.fallback ? r.attempts.filter(a => a.problem).map(a => `${a.model}: ${a.problem}`).join('; ') : '') : r.errors.join('; ') };
+      const rec = { phase: role, file: ctx.file?.path, model: r.model || null, status: statusOf(r), ms: now() - started, note: noteOf(r) };
       phases.push(rec);
       emit(rec);
       if (r.fatal) throw Object.assign(new Stop(r.errors[0] || 'the provider refused the request'), { status: r.status });
