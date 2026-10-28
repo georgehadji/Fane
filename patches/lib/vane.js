@@ -34,6 +34,9 @@ module.exports = {
   FANE_CODE_DIR: '/fane/code',
   // Ends every answer of the code hook (cli/code/present.mjs CODE_ANSWER_MARKER; a test keeps them equal).
   CODE_ANSWER_MARKER: '<!--fane:code-answer-->',
+  // Where Fane's brainstorming modules (cli/brainstorm) live in the container, mounted or copied like FANE_IMAGE_DIR.
+  // They read the article trial from FANE_WRITE_DIR (../write/trial.json).
+  FANE_BRAINSTORM_DIR: '/fane/brainstorm',
   // The Fane project page (docs/ served by GitHub Pages), linked from Vane's menu by patch-fane-link.
   FANE_PAGE_URL: 'https://georgehadji.github.io/Fane/',
 };

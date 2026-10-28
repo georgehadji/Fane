@@ -8,6 +8,7 @@
 // language ("a Python class"). After "give me"/"show me" only a noun that is code itself counts (script, regex ...),
 // and the Greek words for program, tool and library count only before "που" or a language. A text noun right after the verb (article, post, essay, poem ...) is never code:
 // "write an article on machine learning in Python" stays an article. write/intent.mjs asks this module first.
+import { isBrainstormRequest } from '../brainstorm/intent.mjs';
 import { fold } from '../write/language.mjs';
 
 const POLITE = String.raw`(?:please\s+|can you\s+|could you\s+|i(?:'|’)d like you to\s+|i want you to\s+|i need you to\s+|παρακαλω\s+|μπορεισ να\s+|θα ηθελα να\s+|θελω να\s+)*`;
@@ -50,6 +51,7 @@ const EL_IN_LANG = new RegExp(String.raw`(?:σε|με)\s+(?:την\s+|το\s+|τ
 
 export function isCodeRequest(text) {
   const t = String(text || '');
+  if (isBrainstormRequest(t)) return false; // "generate ideas for a game in Python" asks for ideas
   const en = EN_START.exec(t);
   if (en) {
     const rest = t.slice(en[0].length);

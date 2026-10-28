@@ -320,6 +320,54 @@ The trial of 2026-10-28 tried 45 models for $0.63:
 
 Follow-up edits of code ("make it async") are not supported yet: the request goes to Vane as usual.
 
+### Brainstorm (`--brainstorm`)
+
+`vane --brainstorm "<problem>"` gives ranked ideas, the best of them worked out, one recommendation and a plan. Requests that start like these do it automatically, in the CLI and in Vane's chat (`--no-auto-brainstorm` searches instead):
+
+- "brainstorm …", "give me 10 ideas for …", "suggest names for …", "list ways to …";
+- «δώσε μου ιδέες για …», «πρότεινε τρόπους να …», «καταιγισμός ιδεών για …».
+
+Questions ("what are good ideas for dinner?") and bare topics stay searches. So does "suggest alternatives to Photoshop", which asks for products that exist.
+
+The method is reasoner's brainstorming flow ([`brainstorming.py`](https://github.com/georgehadji/reasoner/blob/main/src/reasoner/application/flows/brainstorming.py)), built on Verbalized Sampling:
+
+1. **Existing work:** one Vane research on the problem (Balanced, Quality).
+2. **Rounds of ideas:** 5 ideas a round. Each idea comes with the probability that a typical model would give it, and at least 2 a round must be below 0.10. Naming the probability makes the model see its obvious ideas and reach past them. Each round sees the titles of the earlier ones.
+3. **Themes and scores:** near-duplicates merged, the rest grouped in 3 to 5 themes, every idea scored 0–10 on novelty, impact and feasibility.
+4. **Development** of the best ideas: a use case, 3 to 5 steps, the risks, and how success is measured.
+5. **Synthesis:** which idea to pursue and why, insights that only show when the ideas are seen together, a plan with time frames and go/no-go points, the riskiest assumption, the likely bias of the idea set, and open questions.
+
+| Mode | Phases |
+|---|---|
+| `speed` | 2 rounds, themes and scores, synthesis |
+| `balanced` | + existing work, 3 rounds, 3 ideas developed |
+| `quality` | as Balanced, with 4 rounds and 4 ideas developed |
+
+Where Fane differs from reasoner:
+
+- **Existing work is used.** Reasoner searched for prior art and then gave it to no prompt. Here the rounds are told what already exists, and the scoring gives an idea that already exists a novelty of 3 or less and names the source.
+- **Code picks the ideas to develop.** Reasoner developed the first three ideas the model marked "keep", in the order of its themes, whatever their scores. Fane ranks by score (novelty 0.4, impact 0.35, feasibility 0.25), takes the best of each theme in turn so three variants of one idea are not developed, and skips ideas with feasibility below 3.
+- **Ids come from code.** An answer that names an idea of its own invention is ignored, so nothing made up reaches the result. In the text, ids are replaced by the ideas' titles.
+- **The answer is written by code** from the scored ideas, with the recommendation first. A round, the development or the synthesis that fails is listed as a note, and the rest is still shown.
+
+Greek answers get the article pipeline's spelling repairs (Latin look-alike letters, the dropped final ν).
+
+```bash
+vane "brainstorm ways a small bookshop can win back readers from online stores"
+vane --brainstorm "names for a bakery in Thessaloniki" -o speed --out names.md
+```
+
+**Which models.** The models that passed the article trial (`cli/write/trial.json`), in the mode's price band: brainstorming needs good prose in the language and JSON answers, which that trial checks. When no model passed for Greek, the English pool is used. `--brainstorm-model a/x,b/y` sets the models.
+
+**Measured live:**
+
+- **CLI, Balanced:** "ways a small independent bookshop can win back readers from online stores" took 6 model calls, $0.04 and 171 s. It gave 15 ideas in 4 themes, 8 pages of existing work, and 3 ideas developed from 3 different themes, with a recommendation and a 3-step plan.
+- **Web UI, Speed, Greek:** «δώσε μου ιδέες για να μειώσει ένα δημοτικό σχολείο τα πλαστικά μιας χρήσης» took 1 m 44 s and $0.010, giving 10 ideas in 4 themes. That run showed ids such as "R1I1" in the text, which led to the title replacement above.
+
+**In Vane's web UI** (`patches/patch-brainstorm-chat.js`), the idea titles appear as each round lands, then the whole answer. Square brackets in model text become parentheses, because Vane's chat page rewrites every `[x]` of an answer. The modules are mounted from `cli/brainstorm` at `/fane/brainstorm`, or copied there by `node scripts/apply.mjs`.
+
+Follow-up requests ("develop the third one") are not supported yet: the request goes to Vane as usual.
+
 ### Citation check (`--verify`)
 
 `--verify` checks the answer against the text of the sources Vane returned, with no extra model calls. A cited sentence counts as supported when at least 30% of its content words appear in one of the sources it cites, and every multi-digit number in it appears in a cited source. The report lists weakly supported sentences, numbers not found in their sources, citation numbers that have no source, and how many sentences have no citation. With `-j` it is in the `verification` field.

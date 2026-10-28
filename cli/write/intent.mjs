@@ -2,6 +2,7 @@
 // Like the image intent, it needs a writing verb at the start ("write an article about ...",
 // "γράψε ένα άρθρο για ..."): "article about X" on its own is a search question and stays one.
 // A bare "κείμενο" (text) is not enough either: it would catch ordinary questions.
+import { isBrainstormRequest } from '../brainstorm/intent.mjs';
 import { isCodeRequest } from '../code/intent.mjs';
 import { DEFAULT_PLATFORM } from './formats.mjs';
 import { detectLanguage, fold } from './language.mjs';
@@ -20,7 +21,7 @@ const EL = new RegExp(String.raw`^\s*${POLITE}${EL_VERB}\s+(?:μου\s+|μασ\s
 // A code request is never an article: "write a report generator in Python" has "report" after the verb.
 export const isArticleRequest = (text) => {
   const t = String(text || '');
-  return (EN.test(t) || EL.test(fold(t))) && !isCodeRequest(t);
+  return (EN.test(t) || EL.test(fold(t))) && !isCodeRequest(t) && !isBrainstormRequest(t); // «γράψε 5 τίτλους για ...»
 };
 
 // Over folded text, after the request words: "about", "για", "σχετικά με" ...
@@ -64,7 +65,7 @@ const platformIn = (folded) => {
 export function postPlatform(text) {
   const folded = fold(text);
   if (!EN_POST.test(folded) && !EL_POST.test(folded)) return null;
-  if (isCodeRequest(text)) return null; // "write a LinkedIn post scheduler in Python"
+  if (isCodeRequest(text) || isBrainstormRequest(text)) return null; // "write a LinkedIn post scheduler in Python", "give me ideas for LinkedIn posts"
   const platform = platformIn(folded);
   if (!platform && /(?<![\p{L}])blog/iu.test(folded)) return null;
   return platform || DEFAULT_PLATFORM;

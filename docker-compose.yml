@@ -21,6 +21,8 @@ services:
       - ./cli/write:/fane/write:ro
       # FANE_CODE_DIR in patches/lib/vane.js; used by patch-code-chat (code in the web UI)
       - ./cli/code:/fane/code:ro
+      # FANE_BRAINSTORM_DIR in patches/lib/vane.js; used by patch-brainstorm-chat (brainstorming in the web UI)
+      - ./cli/brainstorm:/fane/brainstorm:ro
     environment:
       # Switches on the CORE academic engine (searxng/settings.yml); empty leaves it off.
       CORE_API_KEY: ${CORE_API_KEY:-}

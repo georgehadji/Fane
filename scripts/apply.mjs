@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 import { DEFAULTS } from '../cli/vane.mjs';
 import { SECRET_KEY_LINE, renderSettings } from './searxng-settings.mjs';
 
-const { FANE_IMAGE_DIR, FANE_WRITE_DIR, FANE_CODE_DIR } = createRequire(import.meta.url)('../patches/lib/vane.js');
+const { FANE_IMAGE_DIR, FANE_WRITE_DIR, FANE_CODE_DIR, FANE_BRAINSTORM_DIR } = createRequire(import.meta.url)('../patches/lib/vane.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTAINER = DEFAULTS.container;
@@ -59,10 +59,10 @@ for (const file of readdirSync(join(ROOT, 'patches')).filter(f => /^patch-.*\.js
   }
 }
 
-// 1b. Fane's image, article and code modules, used by patch-image-chat, patch-article-chat and patch-code-chat
-// from inside Vane (the article and code folders also hold their trial.json). Node caches imported modules, so a
-// changed copy needs the restart below.
-for (const [name, dest] of [['image', FANE_IMAGE_DIR], ['write', FANE_WRITE_DIR], ['code', FANE_CODE_DIR]]) {
+// 1b. Fane's image, article, code and brainstorming modules, used by patch-image-chat, patch-article-chat,
+// patch-code-chat and patch-brainstorm-chat from inside Vane (the article and code folders also hold their
+// trial.json). Node caches imported modules, so a changed copy needs the restart below.
+for (const [name, dest] of [['image', FANE_IMAGE_DIR], ['write', FANE_WRITE_DIR], ['code', FANE_CODE_DIR], ['brainstorm', FANE_BRAINSTORM_DIR]]) {
   const keep = (f) => f.endsWith('.mjs') || f.endsWith('.json');
   const local = Object.fromEntries(readdirSync(join(ROOT, 'cli', name)).filter(keep).sort()
     .map(f => [f, createHash('sha256').update(readFileSync(join(ROOT, 'cli', name, f))).digest('hex')]));

@@ -17,6 +17,7 @@ import { buildTextCatalogue, selectChains } from './write/catalogue.mjs';
 import { LANGUAGES, detectLanguage } from './write/language.mjs';
 import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
 import { isCodeRequest } from './code/intent.mjs';
+import { isBrainstormRequest } from './brainstorm/intent.mjs';
 import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient, findOpenRouterKey } from './image/openrouter.mjs';
 
 // The defaults for every Fane tool (scripts/ import this object).
@@ -52,6 +53,7 @@ const USAGE = `Usage: vane "<question>" [options]
        vane --post ${POST_PLATFORMS.join('|')} "<topic>" [-o speed|balanced|quality] [--lang el|en] [--words n] [--out post.txt]
        vane --image "<prompt>" [-n ${DEFAULT_IMAGES}] [--tier ${TIERS.join('|')}] [--family <f>] [--aspect 1:1] [--out-dir dir]
        vane --code "<request>" [-o speed|balanced|quality] [--out-dir dir]
+       vane --brainstorm "<problem>" [-o speed|balanced|quality] [--lang el|en] [--out ideas.md]
 
 Options:
   -m, --model <id>       Chat model key or name (default: ${DEFAULTS.model}).
@@ -132,6 +134,17 @@ Code (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; documentation com
       --list-code-models Show the models each phase would use for -o <mode>
       --out-dir <dir>    Where to write the files (default: ./vane-code/<request>); must be new or empty
 
+Brainstorm (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; existing work comes from Vane's own research):
+      --brainstorm       Ideas for the problem: rounds of rare-on-purpose ideas, merged, themed and scored, the best
+                         developed, then one recommendation and a plan. "brainstorm ...", "give me 10 ideas for ..."
+                         or «δώσε μου ιδέες για ...» do this automatically
+      --no-auto-brainstorm  Search even when the question asks for ideas
+  -o, --mode <m>         speed (2 rounds, no development) | balanced (+ existing work, 3 rounds, 3 developed) |
+                         quality (4 rounds, 4 developed)
+      --brainstorm-model <id>  Models for every phase (comma list). Default: models that passed the article trial
+      --lang <l>         ${LANGUAGES.join('|')} (default: the request's language)
+      --out <file>       Also save the Markdown to a file
+
 Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURCES, VANE_MODE,
      OPENROUTER_API_KEY, VANE_IMAGE_TEXT_MODEL (prompt enhancement/intent, default ${IMAGE_TEXT_MODEL})
 Exit codes: 0 ok, 1 runtime error (or no sources with --require-sources, or support below --min-support), 2 usage error`;
@@ -189,6 +202,9 @@ export function parseCli(argv) {
       'code-model': { type: 'string', multiple: true, default: [] },
       'list-code-models': { type: 'boolean', default: false },
       'no-auto-code': { type: 'boolean', default: false },
+      brainstorm: { type: 'boolean', default: false },
+      'brainstorm-model': { type: 'string', multiple: true, default: [] },
+      'no-auto-brainstorm': { type: 'boolean', default: false },
       url: { type: 'string', default: DEFAULTS.url },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -239,6 +255,12 @@ export function parseCli(argv) {
     if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
     if (values.stream) throw new UsageError('--stream does not apply to --code');
   }
+  if (values.brainstorm) {
+    values['brainstorm-model'] = values['brainstorm-model'].flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean);
+    if (values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
+    if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
+    if (values.stream) throw new UsageError('--stream does not apply to --brainstorm');
+  }
   if (values['min-support'] !== undefined) {
     const r = Number(values['min-support']);
     if (!(r >= 0 && r <= 1)) throw new UsageError(`Invalid --min-support "${values['min-support']}" (use 0-1)`);
@@ -255,6 +277,7 @@ export function parseCli(argv) {
 export function autoRoute(opts, argv) {
   if (opts['list-models']) return null;
   if (!opts['no-auto-image'] && isImageRequest(opts.query)) return parseCli(['--image', ...argv]);
+  if (!opts['no-auto-brainstorm'] && isBrainstormRequest(opts.query)) return parseCli(['--brainstorm', ...argv]);
   if (!opts['no-auto-code'] && isCodeRequest(opts.query)) return parseCli(['--code', ...argv]);
   // a post before an article: «ανάρτηση» matches both
   const platform = opts['no-auto-article'] ? null : postPlatform(opts.query);
@@ -680,7 +703,7 @@ async function doctor(opts) {
       report('ok', `image modules present in ${FANE_IMAGE_DIR} (web UI image requests work)`);
     } catch { report('warn', `image modules missing in ${FANE_IMAGE_DIR}; web UI image requests fall back to text (run node scripts/apply.mjs)`); }
     // patch-article-chat imports the article modules (and trial.json, the models that passed the trial) the same way.
-    const { FANE_WRITE_DIR, FANE_CODE_DIR } = createRequire(import.meta.url)(join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches', 'lib', 'vane.js'));
+    const { FANE_WRITE_DIR, FANE_CODE_DIR, FANE_BRAINSTORM_DIR } = createRequire(import.meta.url)(join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches', 'lib', 'vane.js'));
     try {
       dockerOut(['exec', container, 'test', '-f', `${FANE_WRITE_DIR}/vane-hook.mjs`]);
       dockerOut(['exec', container, 'test', '-f', `${FANE_WRITE_DIR}/trial.json`]);
@@ -692,6 +715,11 @@ async function doctor(opts) {
       dockerOut(['exec', container, 'test', '-f', `${FANE_CODE_DIR}/trial.json`]);
       report('ok', `code modules present in ${FANE_CODE_DIR} (web UI coding requests work)`);
     } catch { report('warn', `code modules or their trial.json missing in ${FANE_CODE_DIR}; web UI coding requests say so (run node scripts/code-trial.mjs, then node scripts/apply.mjs)`); }
+    // patch-brainstorm-chat: the brainstorming modules (their models come from the article trial checked above).
+    try {
+      dockerOut(['exec', container, 'test', '-f', `${FANE_BRAINSTORM_DIR}/vane-hook.mjs`]);
+      report('ok', `brainstorm modules present in ${FANE_BRAINSTORM_DIR} (web UI brainstorm requests work)`);
+    } catch { report('warn', `brainstorm modules missing in ${FANE_BRAINSTORM_DIR}; web UI brainstorm requests fall back to a normal answer (run node scripts/apply.mjs)`); }
   }
 
   try {
@@ -950,6 +978,51 @@ async function runCode(opts) {
   if (r.checks.some(c => c.level === 'fail')) process.exitCode = 1;
 }
 
+// ---- brainstorm ----------------------------------------------------------
+
+async function runBrainstorm(opts) {
+  if (!opts.query) throw new UsageError('Missing problem. Example: vane --brainstorm "ways a small bookshop can win back readers"');
+  const apiKey = await resolveOpenRouterKey(opts);
+  const { createBrainstormPipeline, chainsFor, selectBrainstormChains } = await import('./brainstorm/pipeline.mjs');
+  const { renderBrainstorm } = await import('./brainstorm/present.mjs');
+  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const lang = opts.lang ?? detectLanguage(opts.query);
+  const client = createOpenRouterClient({ apiKey });
+  let chosen = { chains: chainsFor(opts['brainstorm-model']) };
+  if (!opts['brainstorm-model'].length) {
+    chosen = selectBrainstormChains(buildTextCatalogue(await client.models()), (await loadTrial()).models || {}, { mode, lang });
+    if (!chosen) throw new UsageError('No text model has passed the article trial. Pass --brainstorm-model <id>[,<fallback>...], or run node scripts/article-trial.mjs.');
+  }
+  // Existing work is Vane's own research (Balanced, Quality); Vane is started only then.
+  let providers;
+  const retrieve = async (query) => {
+    providers ??= await getProvidersStartingVane(opts.url, DEFAULTS.container);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { sources } = await search({ ...opts, query, stream: false, mode }, providers);
+      if (sources.length) return sources;
+    }
+    return [];
+  };
+  const log = (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); };
+  const run = createBrainstormPipeline({ client, retrieve, log });
+  const r = await run({
+    request: opts.query, mode, lang, chains: chosen.chains, prices: chosen.prices,
+    onProgress: (e) => { if (!opts.json && e.status !== 'running' && e.status !== 'preview' && e.phase !== 'done') log(`${e.phase}${e.note ? ` ${e.note}` : ''} ${e.status}${e.model ? ` (${e.model}, ${(e.ms / 1000).toFixed(0)} s)` : ''}`); },
+  });
+  if (!r.ok) throw new Error(r.error);
+  const markdown = renderBrainstorm(r);
+  if (opts.out) {
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(opts.out, `${markdown}\n`);
+    log(`saved ${opts.out}`);
+  }
+  if (opts.json) return console.log(JSON.stringify(r, null, 2));
+  if (!opts.out) console.log(markdown);
+  const cost = r.cost ? ` · ≈ $${r.cost.toFixed(4)}` : '';
+  log(`${r.ideas.length} ideas in ${r.themes.length} themes, ${r.picked.length} picked, ${r.mode} · ${r.calls} model calls${cost} · ${Math.round(r.ms / 1000)} s`);
+  for (const d of r.degraded) log(`degraded: ${d}`);
+}
+
 async function readReference(file) {
   const { readFile } = await import('node:fs/promises');
   const { sniffMime } = await import('./image/extract.mjs');
@@ -1013,6 +1086,7 @@ async function main() {
   if (opts.doctor) { if (await doctor(opts)) process.exitCode = 1; return; }
   if (opts.image) return runImage(opts);
   if (opts.code) return runCode(opts);
+  if (opts.brainstorm) return runBrainstorm(opts);
   if (opts['list-code-models']) return listCodeModels(opts);
   if (opts['edit-article'] !== undefined) return runArticleEdit(opts);
   if (opts.article) return runArticle(opts);
@@ -1036,6 +1110,10 @@ async function main() {
   if (routed?.image) {
     process.stderr.write('vane: this asks for an image, so it goes to image generation (same as --image; --no-auto-image to search instead).\n');
     return runImage(routed);
+  }
+  if (routed?.brainstorm) {
+    process.stderr.write('vane: this asks for ideas, so it goes to brainstorming (same as --brainstorm; --no-auto-brainstorm to search instead).\n');
+    return runBrainstorm(routed);
   }
   if (routed?.code) {
     process.stderr.write('vane: this asks for code, so it goes to code writing (same as --code; --no-auto-code to search instead).\n');
