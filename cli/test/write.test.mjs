@@ -298,6 +298,14 @@ test('role call: after a network failure the next model waits, longer each time;
   assert.deepEqual(none, []);
 });
 
+test('role call: a 429 waits before the next model, longer each time', async () => {
+  const waits = [];
+  const r = await createRoleCaller({ client: stub([new OpenRouterError('429 slow down', 429), new OpenRouterError('429 slow down', 429), reply('An answer.')]), sleep: async (ms) => { waits.push(ms); } })('draft', { system: 's', user: 'u' }, { chain: ['m1', 'm2', 'm3'], maxTokens: 100 });
+  assert.equal(r.model, 'm3');
+  assert.deepEqual(waits, [10_000, 20_000]);
+  assert.match(r.attempts[0].problem, /429/);
+});
+
 test('role call: a model that reports no cost is priced from its token counts', async () => {
   const r = await createRoleCaller({ client: stub([reply('An answer.', { usage: { prompt_tokens: 2000, completion_tokens: 1000 } })]) })('draft', { system: 's', user: 'u' }, { chain: ['m'], maxTokens: 100, prices: { m: { in: 0.15, out: 0.6 } } });
   assert.ok(Math.abs(r.cost - 0.0009) < 1e-12);

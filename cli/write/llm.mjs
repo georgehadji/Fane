@@ -33,8 +33,9 @@ export const costOf = (usage, price) => (typeof usage?.cost === 'number' ? usage
 // `fallback` is true when a model after the first one answered.
 // A network failure ("fetch failed": no HTTP status, not a timeout) hits every model alike. Two live Quality
 // runs lost the connection for minutes and spent each phase's whole chain in seconds, so the next model waits.
+// A 429 (rate limit) hits every model of the chain alike too, so it waits the same way.
 export const NETWORK_WAIT_MS = 10_000;
-const isNetworkError = (err) => !err.status && err.name !== 'TimeoutError' && err.name !== 'AbortError';
+const isNetworkError = (err) => err.status === 429 || (!err.status && err.name !== 'TimeoutError' && err.name !== 'AbortError');
 
 export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new Promise(r => setTimeout(r, ms)) }) {
   // `json`: whether the role answers JSON; the coding roles (code/models.mjs) say so here, the article roles by name.
