@@ -47,6 +47,23 @@ test('a patched bundle that does not parse is refused', () => {
   assert.match(r.errors[0], /does not parse/);
 });
 
+test('a stylesheet is patched without the JavaScript parse check', () => {
+  const css = '/x/app.css';
+  const r = planPatch({ [css]: '.a{color:red}' }, [{ name: 'c', file: css, from: '.a{color:red}', to: '.a{color:red}\n.b{color:#000}' }]);
+  assert.deepEqual([r.errors, r.applied], [[], ['c']]);
+});
+
+test('patch-colors: balanced rules after the last one of the stylesheet, every color a 6-digit hex', () => {
+  const { TARGETS, COLORS } = require('../../patches/patch-colors.js');
+  const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
+  const one = planPatch({ [FILES.appCss]: `x{}${end}` }, TARGETS);
+  assert.deepEqual(one.errors, []);
+  assert.ok(one.next[FILES.appCss].endsWith(`${end}\n${COLORS}\n`));
+  assert.deepEqual(planPatch(one.next, TARGETS).applied, []); // idempotent
+  assert.equal(COLORS.split('{').length, COLORS.split('}').length);
+  assert.ok(COLORS.match(/#[0-9a-f]+\b/gi).every(c => c.length === 7));
+});
+
 test('every patch declares well-formed targets on known Vane files', () => {
   const dir = new URL('../../patches/', import.meta.url);
   const known = new Set(Object.values(FILES));

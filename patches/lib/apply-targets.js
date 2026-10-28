@@ -32,7 +32,7 @@ function planPatch(contents, targets) {
     applied.push(t.name);
   }
   for (const [file, s] of Object.entries(next)) {
-    if (s === contents[file] || errors.length) continue;
+    if (s === contents[file] || errors.length || file.endsWith('.css')) continue; // a stylesheet is not JavaScript
     try { new vm.Script(s, { filename: file }); } catch (err) { errors.push(`${file}: patched bundle does not parse (${err.message})`); }
   }
   return { next, applied, skipped, errors };

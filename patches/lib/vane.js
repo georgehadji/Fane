@@ -15,6 +15,8 @@ module.exports = {
     messageClient: '/home/vane/public/_next/static/chunks/2415-6f80633347836171.js',
     // Browser chunk with the sidebar; the hash in the name is fixed by the pinned digest.
     layoutClient: '/home/vane/public/_next/static/chunks/app/layout-dae1640c324f0337.js',
+    // Vane's compiled Tailwind stylesheet (served with max-age=0); fixed by the pinned digest.
+    appCss: '/home/vane/public/_next/static/css/d3fb2aad7d23930e.css',
   },
   // Title Vane's scraper returns instead of throwing when a page cannot be loaded.
   SCRAPE_FAILED_TITLE: 'Failed to scrape',
