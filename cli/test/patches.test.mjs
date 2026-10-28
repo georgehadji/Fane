@@ -111,6 +111,25 @@ test('patch-discover-ellipsis: three periods at the end of a summary become a no
   assert.deepEqual(r.errors, []);
 });
 
+test('patch-discover-greek: the Discover search adds every Greek site and query of the topic, in Greek; a failing one adds nothing', async () => {
+  const { GREEK, TARGETS } = require('../../patches/patch-discover-greek.js');
+  assert.deepEqual(Object.keys(GREEK), ['tech', 'finance', 'art', 'sports', 'entertainment']); // Vane's Discover topics
+  // the patched search, run with a fake SearXNG client
+  const route = `(async (b, d, v) => { let e; ${TARGETS[0].from}; return e; })`;
+  const r = planPatch({ [FILES.discoverRoute]: route }, TARGETS);
+  assert.deepEqual(r.errors, []);
+  const calls = [];
+  const v = { n: async (q, { language }) => { calls.push([q, language]); if (q.includes('lifo.gr')) throw new Error('bing down'); return { results: [{ url: `${language}:${q}` }] }; } };
+  const english = { links: ['wired.com'], query: ['AI'] };
+  const run = async (topic) => (await eval(r.next[FILES.discoverRoute])(new URLSearchParams(topic ? { topic } : {}), english, v)).map(s => s.url);
+  const art = await run('art');
+  assert.equal(art.length, 1 + 3 * 2 - 2); // lifo.gr's two searches failed and gave nothing
+  assert.ok(art.includes('el:site:efsyn.gr πολιτισμός') && art.includes('en:site:wired.com AI'));
+  assert.ok(calls.filter(([, l]) => l === 'el').every(([q]) => /^site:\S+\.(gr|com) /.test(q)));
+  assert.equal((await run()).filter(u => u.startsWith('el:')).length, 6); // no topic: tech, as in Vane
+});
+
+
 test('patch-editorial-greek: a static Greek-only face under PP Editorial\'s name, stacked with patch-colors and patch-type', () => {
   const ed = require('../../patches/patch-editorial-greek.js');
   const colors = require('../../patches/patch-colors.js');
