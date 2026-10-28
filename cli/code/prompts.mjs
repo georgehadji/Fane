@@ -8,7 +8,7 @@
 //    assemble step was asked to return files whose content it was never given);
 //  - web pages (documentation, vulnerability notes) are untrusted data, and the request is the user's own words.
 import { LANGUAGE_NAMES } from '../write/language.mjs';
-import { fenceFor } from './files.mjs';
+import { MAX_FILE_CHARS, fenceFor } from './files.mjs';
 import { MAX_FILES } from './models.mjs';
 
 const JSON_ONLY = 'Reply with one JSON object and nothing else: no prose before or after, no code fence, no reasoning.';
@@ -76,7 +76,7 @@ Rules: the smallest set of source files that does the job, at most ${MAX_FILES};
 
   fix: ({ text, spec, file, issues }) => ({
     system: `You are a principal engineer doing the final integration pass on one file. Apply the listed fixes and make the file consistent with the rest of the project; change nothing else. ${NO_THINKING}\n\n${CONTRACT}`,
-    user: `${request(text)}\n\n${specSummary(spec)}\n\n${fenced(file, 40_000)}\n\nFixes to apply to ${file.path}:\n${issues.map(i => `- [${i.severity}] ${i.issue}${i.fix ? ` Fix: ${i.fix}` : ''}`).join('\n')}\n\nKeep the file's exports and everything that is not part of a fix as it is. Output the complete corrected file ${file.path} in one fenced code block and nothing else.`,
+    user: `${request(text)}\n\n${specSummary(spec)}\n\n${fenced(file, MAX_FILE_CHARS)}\n\nFixes to apply to ${file.path}:\n${issues.map(i => `- [${i.severity}] ${i.issue}${i.fix ? ` Fix: ${i.fix}` : ''}`).join('\n')}\n\nKeep the file's exports and everything that is not part of a fix as it is. Output the complete corrected file ${file.path} in one fenced code block and nothing else.`,
   }),
 
   tests: ({ spec, files, issues }) => ({

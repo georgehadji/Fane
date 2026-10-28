@@ -6,7 +6,8 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 import { isCodeRequest } from '../code/intent.mjs';
-import { extractCode, fenceFor, fileChecks, languageOf, parseFiles, safePath } from '../code/files.mjs';
+import { MAX_FILE_CHARS, extractCode, fenceFor, fileChecks, languageOf, parseFiles, safePath } from '../code/files.mjs';
+import { codePrompts } from '../code/prompts.mjs';
 import { buildReadme, createCodePipeline, normalizeReview, normalizeSpec } from '../code/pipeline.mjs';
 import { createSyntaxChecker } from '../code/syntax.mjs';
 import { CODE_ANSWER_MARKER, codeTagged, renderCodeResult } from '../code/present.mjs';
@@ -46,7 +47,24 @@ test('code requests: a request verb and a code noun, or "in <language>"; text an
     'what is a Python decorator?',
     'γράψε ένα άρθρο για την Python',
     'γράψε μια ανάρτηση για το LinkedIn σχετικά με την JavaScript',
+    // recommendations and plans, not code (all of these were code requests before)
+    'show me the best apps for learning Greek',
+    'give me tools for photo editing',
+    'give me an app for tracking habits',
+    'make a list of tools for gardening',
+    'show me the code of conduct',
+    'φτιάξε μου ένα πρόγραμμα γυμναστικής',
+    'γράψε ένα πρόγραμμα διατροφής για την εβδομάδα',
+    'φτιάξε μια λίστα με εργαλεία κήπου',
   ]) assert.equal(isCodeRequest(q), false, q);
+  for (const q of [
+    'show me a Python script that renames files',
+    'give me a function to slugify text',
+    'show me code that parses ISO dates',
+    'build a tool for converting CSV to JSON',
+    'φτιάξε ένα πρόγραμμα Python για αντίγραφα ασφαλείας',
+    'φτιάξε μια εφαρμογή για λίστα αγορών',
+  ]) assert.equal(isCodeRequest(q), true, q);
 });
 
 test('code requests are not articles or posts, and the CLI routes them to --code', () => {
@@ -66,6 +84,8 @@ test('safePath keeps relative paths inside the folder and refuses the rest', () 
   assert.equal(safePath('./a\\b.js'), 'a/b.js');
   assert.equal(safePath('.gitignore'), '.gitignore');
   for (const p of ['../x.js', 'a/../../x', '/etc/passwd', 'C:/Windows/x', '~/.ssh/k', '.git/hooks/pre-commit', 'nul.txt', 'a//b', 'a b.js', '', null]) assert.equal(safePath(p), null, String(p));
+  // .git on a case-blind file system, and Windows dropping a trailing dot
+  for (const p of ['.GIT/hooks/post-checkout', 'x/.Git/config', '.git./config', 'src./a.js']) assert.equal(safePath(p), null, p);
 });
 
 test('code out of answers: one fenced file, several "File:" blocks, and a fence the code cannot close', () => {
@@ -75,6 +95,7 @@ test('code out of answers: one fenced file, several "File:" blocks, and a fence 
   assert.equal(extractCode('````md\n```js\nx\n```\n````'), '```js\nx\n```\n'); // a longer fence holds a shorter one
   const files = parseFiles('File: tests/test_a.py\n```python\ndef test_a(): assert 1\n```\n\n### `test_b.js`\n```js\nok()\n```\n```js\nno path\n```\nFile: ../evil.py\n```python\nx\n```');
   assert.deepEqual(files.map(f => f.path), ['tests/test_a.py', 'test_b.js']);
+  assert.deepEqual(parseFiles('File: Tests/a.py\n```py\nx\n```\nFile: tests/A.py\n```py\ny\n```').map(f => f.path), ['Tests/a.py']); // one file on Windows
   assert.equal(fenceFor('a ``` b'), '````');
   assert.equal(fenceFor('none'), '```');
   assert.equal(languageOf('src/main.py'), 'python');
@@ -90,6 +111,11 @@ test('fileChecks: empty files and syntax errors fail; stubs and secrets warn', (
     { path: 'e.py', content: 'try:\n    os.symlink(a, b)\nexcept (OSError, NotImplementedError):\n    pass\n' }, // catching it is not a stub
   ]);
   assert.deepEqual(items.map(i => `${i.path}:${i.level}:${i.name}`), ['a.py:warn:unfinished', 'b.js:warn:secret', 'c.js:fail:empty', 'd.js:fail:syntax']);
+  // a todo app and an HTTP 501 are not stubs
+  assert.deepEqual(fileChecks([
+    { path: 'todo.py', content: 'def add(todo: Todo) -> None:\n    todos.append(todo)\n' },
+    { path: 'srv.js', content: "res.writeHead(501); res.end('Not Implemented');\n" },
+  ]), []);
 });
 
 test('normalizeSpec drops unsafe and repeated paths and a README, and caps the files', () => {
@@ -100,6 +126,15 @@ test('normalizeSpec drops unsafe and repeated paths and a README, and caps the f
   assert.ok(dropped.some(d => /unusable path/.test(d)));
   assert.ok(dropped.some(d => /listed 15 files/.test(d)));
   assert.equal(normalizeSpec({ language: 'x', files: [{ path: '/abs' }] }).spec, null);
+  assert.deepEqual(normalizeSpec({ language: 'JavaScript', files: [{ path: 'App.js' }, { path: 'app.js' }] }).spec.files.map(f => f.path), ['App.js']);
+});
+
+test('the fix prompt holds the whole file, up to MAX_FILE_CHARS', () => {
+  const content = `${'x = 1\n'.repeat(9000)}last_line = True\n`; // 54k characters
+  assert.ok(content.length > 40_000 && content.length <= MAX_FILE_CHARS);
+  const { user } = codePrompts.fix({ text: 'r', spec: normalizeSpec({ language: 'Python', files: [{ path: 'big.py' }] }).spec, file: { path: 'big.py', content }, issues: [{ severity: 'high', issue: 'i' }] });
+  assert.ok(user.includes('last_line = True'));
+  assert.ok(!/cut at/.test(user));
 });
 
 test('normalizeReview pins findings to known files and says needs_fixes while any critical or high one is open', () => {
@@ -211,6 +246,45 @@ test('pipeline: a file that does not parse is sent to the fix step even without 
   assert.equal(r.checks.filter(c => c.level === 'fail').length, 0);
 });
 
+test('pipeline: a fix after which the file still does not parse is not reported as fixing the parse', async () => {
+  const client = fakeClient(answers({ generate: (b) => (fileOf(b) === 'count.mjs' ? '```js\nexport function countWords(s) {\n```' : `\`\`\`js\n${GOOD['cli.mjs']}\n\`\`\``), review: JSON.stringify({ verdict: 'approved' }), fix: () => '```js\nexport function countWords(s) { s.split(\n```' }));
+  const checkSyntax = async (files) => files.map(f => ({ path: f.path, status: f.path === 'count.mjs' ? 'error' : 'ok', detail: 'Unexpected end of input' }));
+  const r = await createCodePipeline({ client, retrieve: async () => [], checkSyntax })({ request: 'write a JS word counter', mode: 'balanced' });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.fixes, []);
+  assert.doesNotMatch(r.readme, /Fixed after the review/);
+  assert.ok(r.degraded.some(d => /check "syntax" failed: count\.mjs/.test(d)));
+});
+
+test('pipeline: code that holds think tags is kept as written; only a leading reasoning block is removed', async () => {
+  const code = "export const OPEN = '<think>';\nexport const strip = (s) => s.split('</think>').pop();";
+  const client = fakeClient(answers({ generate: (b) => (fileOf(b) === 'count.mjs' ? `<think>plan the file</think>\n\`\`\`js\n${code}\n\`\`\`` : `\`\`\`js\n${GOOD['cli.mjs']}\n\`\`\``) }));
+  const r = await createCodePipeline({ client, checkSyntax: syntaxOk })({ request: 'write a JS think-tag stripper', mode: 'speed', chains: { spec: ['m'], generate: ['m'] } });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.files.find(f => f.path === 'count.mjs').content, `${code}\n`);
+});
+
+test('pipeline: after a 402 in one file the other workers start no new file', async () => {
+  const { OpenRouterError } = await import('../image/openrouter.mjs');
+  const spec = { language: 'JavaScript', files: Array.from({ length: 12 }, (_, i) => ({ path: `m${i}.mjs`, purpose: 'x' })) };
+  const generated = [];
+  const client = {
+    chat: async (body) => {
+      const role = roleOf(body);
+      if (role === 'spec') return reply(JSON.stringify(spec));
+      const file = fileOf(body);
+      generated.push(file);
+      if (file === 'm0.mjs') throw new OpenRouterError('402 no credits', 402);
+      await new Promise(res => setTimeout(res, 20));
+      return reply('```js\nexport const x = 1;\n```');
+    },
+  };
+  const r = await createCodePipeline({ client, checkSyntax: syntaxOk })({ request: 'write a JS thing', mode: 'speed', chains: { spec: ['m'], generate: ['m'] } });
+  assert.equal(r.fatal, true);
+  await new Promise(res => setTimeout(res, 150)); // let workers that are still running finish
+  assert.equal(generated.length, 4); // the four started together, no more
+});
+
 test('pipeline: a failed spec ends the run; a 402 stops it as fatal; one failed file is reported, not stored', async () => {
   const bad = await createCodePipeline({ client: fakeClient(answers({ spec: 'no json' })), checkSyntax: syntaxOk })({ request: 'write a JS word counter', mode: 'speed', chains: { spec: ['m'], generate: ['m'] } });
   assert.equal(bad.ok, false);
@@ -260,6 +334,27 @@ test('syntax check: JavaScript with node --check, JSON in process, Python with a
   const py = await check([{ path: 'ok.py', content: 'def f(x: int) -> int:\n    return x\n' }, { path: 'bad.py', content: 'def f(:\n' }]);
   if (python) assert.deepEqual(py.map(x => x.status), ['ok', 'error']);
   else assert.deepEqual(py.map(x => x.status), ['unchecked', 'unchecked']);
+});
+
+test('syntax check: an ast.py in the current folder (a file of an earlier run) is not imported by the Python check', async (t) => {
+  let python = null;
+  for (const cmd of ['python3', 'python']) { try { if (execFileSync(cmd, ['-c', 'import sys;print(sys.version_info[0])'], { encoding: 'utf8', windowsHide: true }).trim() === '3') { python = cmd; break; } } catch { /* not here */ } }
+  if (!python) return t.skip('no Python 3');
+  const { mkdtempSync, writeFileSync, existsSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'fane-cwd-'));
+  writeFileSync(join(dir, 'ast.py'), "open('ran.txt', 'w').write('ran')\n");
+  const cwd = process.cwd();
+  try {
+    process.chdir(dir);
+    const [r] = await createSyntaxChecker({ pythons: [python] })([{ path: 'ok.py', content: 'x = 1\n' }]);
+    assert.equal(r.status, 'ok');
+    assert.equal(existsSync(join(dir, 'ran.txt')), false);
+  } finally {
+    process.chdir(cwd);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---- the web answer and the hook ----

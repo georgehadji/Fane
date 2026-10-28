@@ -53,7 +53,8 @@ export function createSyntaxChecker({ node = process.execPath, pythons = ['pytho
       if (!py) return { status: 'unchecked', detail: 'no Python 3 installed' };
       const p = join(dir, file.path);
       await writeFile(p, file.content);
-      try { await run(py, [...(py === 'py' ? ['-3'] : []), '-c', PY_PARSE, p], { timeout: TIMEOUT_MS, windowsHide: true }); return { status: 'ok' }; } catch (err) { return { status: 'error', detail: clean(err.stderr || err.message, dir) }; }
+      // -I: without it `-c` puts the current folder on sys.path, and an ast.py written there by an earlier run would run
+      try { await run(py, [...(py === 'py' ? ['-3'] : []), '-I', '-c', PY_PARSE, p], { timeout: TIMEOUT_MS, windowsHide: true }); return { status: 'ok' }; } catch (err) { return { status: 'error', detail: clean(err.stderr || err.message, dir) }; }
     }
     return { status: 'unchecked' };
   }

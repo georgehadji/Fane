@@ -14,7 +14,8 @@ export function safePath(p) {
   const s = String(p ?? '').trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
   if (!s || s.length > 200 || s.startsWith('/') || s.startsWith('~') || /^[a-z]:/i.test(s)) return null;
   const parts = s.split('/');
-  if (parts.some(x => !x || x === '.' || x === '..' || x === '.git' || DEVICE.test(x) || !/^[\w.@+-]+$/.test(x))) return null;
+  // Windows and macOS match names case-blind and Windows drops a trailing dot: ".GIT" and ".git." are .git there
+  if (parts.some(x => !x || x.endsWith('.') || x.toLowerCase() === '.git' || DEVICE.test(x) || !/^[\w.@+-]+$/.test(x))) return null;
   return parts.join('/');
 }
 
@@ -31,6 +32,9 @@ export const languageOf = (path) => {
   if (name === 'makefile') return 'makefile';
   return LANGS[name.includes('.') ? name.split('.').pop() : ''] || '';
 };
+
+// One file on a case-blind file system (Windows, macOS): "App.js" and "app.js" cannot both be written.
+export const sameFile = (a, b) => a.toLowerCase() === b.toLowerCase();
 
 // Fenced blocks: an opening fence of 3+ backticks or tildes with an info string, the same fence closing it.
 const FENCE = /^([`~]{3,})([^\n`]*)\n([\s\S]*?)(?:\n|^)\1[ \t]*$/gm;
@@ -66,7 +70,7 @@ export function parseFiles(text) {
     from = b.end;
     const path = safePath(pathInLine(before) || b.info.match(/(?:title|file(?:name)?)=["']?([^"'\s]+)/)?.[1]);
     const content = b.code.replace(/\s+$/, '');
-    if (path && content && !files.some(f => f.path === path)) files.push({ path, content: `${content}\n` });
+    if (path && content && !files.some(f => sameFile(f.path, path))) files.push({ path, content: `${content}\n` });
   }
   return files;
 }
@@ -74,7 +78,9 @@ export function parseFiles(text) {
 // A Markdown fence one backtick longer than any run of backticks inside the code.
 export const fenceFor = (code) => '`'.repeat(Math.max(3, ...[...String(code).matchAll(/`+/g)].map(m => m[0].length + 1)));
 
-const STUB = /\b(?:TODO|FIXME|XXX)\b|your (?:code|implementation|logic) here|implement (?:this|me|the rest)|rest of (?:the )?(?:code|implementation|file)|\.\.\.\s*(?:existing|rest|more|remaining)\b|not (?:yet )?implemented|raise NotImplementedError/i; // catching NotImplementedError is fine (a live test did)
+// The markers in capitals only: `todo` is an ordinary name in a todo app, and "Not Implemented" is HTTP 501.
+const STUB_MARK = /\b(?:TODO|FIXME|XXX)\b/;
+const STUB = /your (?:code|implementation|logic) here|implement (?:this|me|the rest)|rest of (?:the )?(?:code|implementation|file)|\.\.\.\s*(?:existing|rest|more|remaining)\b|not yet implemented|raise NotImplementedError/i; // catching NotImplementedError is fine (a live test did)
 const SECRET = /\b(?:sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,})|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:password|passwd|secret|api_?key|token)\s*[:=]\s*["'][^"'\s]{8,}["']/i;
 
 // -> [{ path, level: 'fail' | 'warn', name, detail }]
@@ -82,7 +88,7 @@ export function fileChecks(files) {
   const items = [];
   for (const f of files) {
     if (!f.content.trim()) items.push({ path: f.path, level: 'fail', name: 'empty', detail: `${f.path} is empty` });
-    const stub = STUB.exec(f.content);
+    const stub = STUB_MARK.exec(f.content) || STUB.exec(f.content);
     if (stub) items.push({ path: f.path, level: 'warn', name: 'unfinished', detail: `${f.path}: "${stub[0]}"` });
     if (SECRET.test(f.content)) items.push({ path: f.path, level: 'warn', name: 'secret', detail: `${f.path} seems to contain a hard-coded secret` });
     if (f.syntax?.status === 'error') items.push({ path: f.path, level: 'fail', name: 'syntax', detail: `${f.path}: ${f.syntax.detail}` });

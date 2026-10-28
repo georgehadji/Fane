@@ -866,9 +866,7 @@ async function listCodeModels(opts) {
   const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
   const client = createOpenRouterClient();
   const chosen = await defaultCodeChains({ mode, client });
-  const { buildCodeCatalogue } = await import('./code/catalogue.mjs');
-  const price = new Map(buildCodeCatalogue(await client.models()).map(m => [m.id, m]));
-  const show = (id) => `${id} ($${price.get(id)?.priceIn}/${price.get(id)?.priceOut})`;
+  const show = (id) => `${id} ($${chosen.prices[id]?.in}/${chosen.prices[id]?.out})`;
   if (opts.json) return console.log(JSON.stringify({ mode, trialDate: chosen.trialDate, pool: chosen.pool, band: chosen.band, chains: chosen.chains }, null, 2));
   console.log(`${mode}: ${chosen.pool} models passed the coding trial (${chosen.trialDate || 'undated'}); this mode's price band: ${chosen.band.join(', ')}`);
   for (const [role, chain] of Object.entries(chosen.chains)) console.log(`  ${role.padEnd(10)}${chain.map(show).join('  >  ')}`);

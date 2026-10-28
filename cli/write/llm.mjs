@@ -13,6 +13,9 @@ const FATAL = new Set([401, 402]);
 
 const textOf = (content) => (Array.isArray(content) ? content.map(p => p?.text || '').join('') : String(content ?? '')).trim();
 const stripThinking = (s) => s.replace(/<(think|thinking)>[\s\S]*?<\/\1>/gi, '').trim();
+// Code can hold these tags itself (a parser of model output): only a block in front of the answer is reasoning.
+const stripLeadingThinking = (s) => s.replace(/^\s*<(think|thinking)>[\s\S]*?<\/\1>/i, '').trim();
+const CODE_THINKING_LEAK = /^\s*(?:thinking process|<think>|<thinking>)/i;
 
 export function extractJson(text) {
   const s = String(text || '').replace(/^\s*```(?:json)?\s*|\s*```\s*$/gi, '');
@@ -35,7 +38,8 @@ const isNetworkError = (err) => !err.status && err.name !== 'TimeoutError' && er
 
 export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new Promise(r => setTimeout(r, ms)) }) {
   // `json`: whether the role answers JSON; the coding roles (code/models.mjs) say so here, the article roles by name.
-  return async function call(role, { system, user }, { chain, maxTokens, temperature, prices, json = isJsonRole(role) }) {
+  // `code`: the answer is code, which may contain think tags of its own (see stripLeadingThinking).
+  return async function call(role, { system, user }, { chain, maxTokens, temperature, prices, json = isJsonRole(role), code = false }) {
     const attempts = [];
     let cost = 0, offline = 0;
     for (const [i, model] of chain.entries()) {
@@ -70,12 +74,12 @@ export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new P
       cost += costOf(res?.usage, prices?.[model]);
       const choice = res?.choices?.[0];
       const raw = textOf(choice?.message?.content);
-      const text = stripThinking(raw);
+      const text = code ? stripLeadingThinking(raw) : stripThinking(raw);
       let problem = null;
       if (choice?.finish_reason === 'length') problem = `cut off at ${maxTokens} tokens`;
       else if (choice?.finish_reason === 'content_filter') problem = 'blocked by the provider';
       else if (!text) problem = 'empty answer';
-      else if (THINKING_LEAK.test(text)) problem = 'reasoning in place of an answer';
+      else if ((code ? CODE_THINKING_LEAK : THINKING_LEAK).test(text)) problem = 'reasoning in place of an answer';
       let data;
       if (!problem && json) {
         data = extractJson(text);

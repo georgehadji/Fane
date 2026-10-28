@@ -9,7 +9,7 @@
 import { createRoleCaller } from '../write/llm.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../write/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
-import { MAX_FILE_CHARS, extractCode, fileChecks, parseFiles, safePath } from './files.mjs';
+import { MAX_FILE_CHARS, extractCode, fileChecks, parseFiles, safePath, sameFile } from './files.mjs';
 import { CODE_JSON_ROLES, CODE_PHASES, CONCURRENCY, MAX_FILES, codeChainsFor, codeTokensFor } from './models.mjs';
 import { codePrompts } from './prompts.mjs';
 
@@ -27,7 +27,7 @@ export function normalizeSpec(data) {
   for (const f of Array.isArray(data?.files) ? data.files : []) {
     const path = safePath(f?.path);
     if (!path) { dropped.push(`the spec named an unusable path (${String(f?.path ?? '').slice(0, 60)}): skipped`); continue; }
-    if (files.some(x => x.path === path) || /^readme(?:\.md)?$/i.test(path)) continue;
+    if (files.some(x => sameFile(x.path, path)) || /^readme(?:\.md)?$/i.test(path)) continue;
     files.push({ path, purpose: text(f.purpose) || path, exports: strings(f.exports), imports: strings(f.imports) });
   }
   if (!files.length) return { spec: null, dropped };
@@ -62,11 +62,15 @@ export function normalizeReview(data, files) {
   return { critical, high, medium, verdict, posture: text(data?.security_posture) };
 }
 
-async function mapLimited(items, n, fn) {
+// After one item throws (a 402 Stop), the other workers take no new item: they would only make more paid calls.
+export async function mapLimited(items, n, fn) {
   const out = new Array(items.length);
-  let next = 0;
+  let next = 0, failed = false;
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
-    while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); }
+    while (!failed && next < items.length) {
+      const i = next++;
+      try { out[i] = await fn(items[i], i); } catch (err) { failed = true; throw err; }
+    }
   }));
   return out;
 }
@@ -129,7 +133,7 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
       emit({ phase: role, status: 'running', file: ctx.file?.path });
       const started = now();
       const r = await call(role, codePrompts[role]({ text: request, lang, today, ...ctx }), {
-        chain: chains[role] || chains.generate, maxTokens: codeTokensFor(role), temperature: 0.2, prices, json: CODE_JSON_ROLES.has(role),
+        chain: chains[role] || chains.generate, maxTokens: codeTokensFor(role), temperature: 0.2, prices, json: CODE_JSON_ROLES.has(role), code: true,
       });
       calls += r.attempts.length;
       cost += r.cost;
@@ -229,7 +233,11 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
             for (const i of issues) unfixed.add(i);
             return null;
           }
-          fixes.push({ path: file.path, issues });
+          // a file that did not parse and still does not: the fix is kept for its other changes, the parse is not fixed
+          const still = next.syntax.status === 'error' ? issues.filter(i => i.severity === 'syntax') : [];
+          for (const i of still) unfixed.add(i);
+          const done = issues.filter(i => !still.includes(i));
+          if (done.length) fixes.push({ path: file.path, issues: done });
           return next;
         });
         const fixed = new Map(results.filter(Boolean).map(f => [f.path, f]));
@@ -243,8 +251,7 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
         const r = await step('tests', { spec, files, issues: review ? [...review.critical, ...review.high] : [] });
         if (!r.ok) degraded.push(`the tests could not be written (${r.errors.at(-1) || 'no answer'})`);
         else {
-          const paths = new Set(files.map(f => f.path));
-          tests = parseFiles(r.text).filter(t => !paths.has(t.path) && t.content.length <= MAX_FILE_CHARS).map(t => ({ ...t, role: 'test' }));
+          tests = parseFiles(r.text).filter(t => !files.some(f => sameFile(f.path, t.path)) && t.content.length <= MAX_FILE_CHARS).map(t => ({ ...t, role: 'test' }));
           if (!tests.length) degraded.push('the test answer held no usable test file');
           await check(tests);
         }
