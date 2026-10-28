@@ -32,7 +32,10 @@ test('a request in flight is aborted when the signal fires, and the call fails w
 });
 
 test('a signal that ended by its deadline says so', async () => {
-  const client = createOpenRouterClient({ apiKey: 'k', fetchImpl: hangingFetch(), signal: AbortSignal.timeout(5) });
+  // AbortSignal.timeout's timer is unref'd: with a fetch that never settles, Node 22 ends the event loop and cancels the file
+  const deadline = new AbortController();
+  setTimeout(() => deadline.abort(new DOMException('The operation timed out.', 'TimeoutError')), 5);
+  const client = createOpenRouterClient({ apiKey: 'k', fetchImpl: hangingFetch(), signal: deadline.signal });
   await assert.rejects(client.chat({}), (err) => err.status === STOPPED_STATUS && /time limit/.test(err.message));
 });
 
