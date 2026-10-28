@@ -6,7 +6,7 @@
 //  - the model's reasoning printed as the answer ("Thinking Process: ...")
 //  - JSON roles: no parseable JSON object
 // Errors 401/402 (bad key, no credits) hit every model alike and stop the chain.
-import { FATAL_STATUS } from '../image/openrouter.mjs';
+import { FATAL_STATUS, FREE_PREFIX, STOPPED_STATUS, isFreeModel } from '../image/openrouter.mjs';
 import { THINKING_LEAK } from './checks.mjs';
 import { REASONING, isJsonRole } from './models.mjs';
 
@@ -50,12 +50,16 @@ const isNetworkError = (err) => err.status === 429 || (!err.status && err.name !
 
 export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new Promise(r => setTimeout(r, ms)), maxCost = maxCostFromEnv() }) {
   let spent = 0;
+  // A bad OpenRouter key or no credits (401/402) when a chain still has free: models (freellmapi): the rest of the run
+  // uses only those, instead of stopping. Holds the error that put OpenRouter out.
+  let paidOut = null;
   // `json`: whether the role answers JSON; the coding roles (code/models.mjs) say so here, the article roles by name.
   // `code`: the answer is code, which may contain think tags of its own (see stripLeadingThinking).
   return async function call(role, { system, user }, { chain, maxTokens, temperature, prices, json = isJsonRole(role), code = false }) {
     const attempts = [];
     let cost = 0, offline = 0;
     for (const [i, model] of chain.entries()) {
+      if (paidOut && !isFreeModel(model)) continue;
       if (spent >= maxCost) return { ok: false, fatal: true, errors: [`spend limit of $${maxCost} reached (FANE_MAX_COST)`], attempts, cost };
       if (offline) await sleep(NETWORK_WAIT_MS * offline);
       const body = {
@@ -82,7 +86,14 @@ export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new P
         const cause = err.cause?.code || err.cause?.message;
         attempts.push({ model, problem: `${String(err.message || err)}${cause ? ` (${cause})` : ''}`.slice(0, 160) });
         log(`${role}: ${model} failed (${attempts.at(-1).problem})`);
-        if (FATAL_STATUS.has(status)) return { ok: false, fatal: true, status, errors: attempts.map(a => `${a.model}: ${a.problem}`), attempts, cost };
+        if (FATAL_STATUS.has(status)) {
+          if (status !== STOPPED_STATUS && !isFreeModel(model) && chain.slice(i + 1).some(isFreeModel)) {
+            paidOut = `${model}: ${attempts.at(-1).problem}`;
+            log(`${role}: OpenRouter is out (${status}); the rest of the run uses freellmapi`);
+            continue;
+          }
+          return { ok: false, fatal: true, status, errors: attempts.map(a => `${a.model}: ${a.problem}`), attempts, cost };
+        }
         continue;
       }
       const spend = costOf(res?.usage, prices?.[model]);
@@ -107,8 +118,11 @@ export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new P
         continue;
       }
       attempts.push({ model, problem: null });
-      return { ok: true, text, ...(json ? { data } : {}), model, fallback: i > 0, attempts, cost };
+      const served = isFreeModel(model) && res?.routedVia ? `${FREE_PREFIX}${res.routedVia}` : model;
+      return { ok: true, text, ...(json ? { data } : {}), model: served, fallback: i > 0, attempts, cost };
     }
+    // every model skipped: OpenRouter is out and this chain has no free: model
+    if (!attempts.length && paidOut) return { ok: false, fatal: true, errors: [paidOut], attempts, cost };
     return { ok: false, fatal: false, errors: attempts.map(a => `${a.model}: ${a.problem}`), attempts, cost };
   };
 }

@@ -9,20 +9,28 @@ import { articleTopic, parseArticleOptions, postTopic } from './core/intent-arti
 import { POSTS } from './core/formats.mjs';
 import { buildTextCatalogue, selectChains } from './write/catalogue.mjs';
 import { detectLanguage } from './core/language.mjs';
-import { OPENROUTER_BASE_URL, createOpenRouterClient, findOpenRouterKey } from './image/openrouter.mjs';
+import { chainsFor } from './write/models.mjs';
+import { OPENROUTER_BASE_URL, createOpenRouterClient, modelClientFor, withFreeLlm } from './image/openrouter.mjs';
 import { DEFAULTS, UsageError, getProviders, getProvidersStartingVane, search } from './client.mjs';
 
 // ---- image generation ----------------------------------------------------
 
-// OPENROUTER_API_KEY, or with --key-from-vane the key of Vane's OpenRouter provider.
-// The key is passed to the OpenRouter client and nowhere else (never printed or saved).
-async function resolveOpenRouterKey(opts) {
-  if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY;
-  if (!opts['key-from-vane']) throw new UsageError('This needs an OpenRouter key: set OPENROUTER_API_KEY, or pass --key-from-vane to use the one configured in Vane.');
-  const res = await fetch(`${opts.url}/api/config`, { signal: AbortSignal.timeout(10_000) });
-  const key = findOpenRouterKey((await res.json()).values?.modelProviders);
-  if (!key) throw new UsageError(`No Vane provider with Base URL ${OPENROUTER_BASE_URL} and an API key at ${opts.url}.`);
-  return key;
+// OPENROUTER_API_KEY, or with --key-from-vane the providers of Vane: its OpenRouter key, and its freellmapi provider
+// (free: models; alone it serves the text features, `images` needs OpenRouter). With both, the environment's key wins.
+// The keys are passed to the clients and nowhere else (never printed or saved).
+async function resolveClient(opts, { images = false } = {}) {
+  const apiKey = process.env.OPENROUTER_API_KEY || undefined;
+  let providers = [];
+  if (opts['key-from-vane']) {
+    try {
+      const res = await fetch(`${opts.url}/api/config`, { signal: AbortSignal.timeout(10_000) });
+      providers = (await res.json()).values?.modelProviders || [];
+    } catch (err) { if (!apiKey) throw err; }
+  } else if (!apiKey) throw new UsageError('This needs an OpenRouter key: set OPENROUTER_API_KEY, or pass --key-from-vane to use the one configured in Vane.');
+  // Vane's container calls the host host.docker.internal; this runs on the host, where freellmapi listens on 127.0.0.1
+  const client = modelClientFor(providers, { apiKey, freeBaseUrl: (u) => u.replace('//host.docker.internal', '//127.0.0.1') });
+  if (!client || (images && client.freeLlm === 'only')) throw new UsageError(`No Vane provider with Base URL ${OPENROUTER_BASE_URL} and an API key at ${opts.url}${images ? '' : ', nor a freellmapi one'}.`);
+  return client;
 }
 
 // ---- articles ------------------------------------------------------------
@@ -48,10 +56,10 @@ async function loadTrial() {
   try { return JSON.parse(await readFile(new URL('./write/trial.json', import.meta.url), 'utf8')); } catch { return { models: {} }; }
 }
 
-// Chains of the mode's price band, from the models that passed the trial for this language.
+// Chains of the mode's price band, from the models that passed the trial for this language (and freellmapi's, withFreeLlm).
 async function defaultChains({ mode, lang, client }) {
   const trial = await loadTrial();
-  const chosen = selectChains(buildTextCatalogue(await client.models()), trial.models || {}, { mode, lang });
+  const chosen = await withFreeLlm(client, mode, async () => selectChains(buildTextCatalogue(await client.models()), trial.models || {}, { mode, lang }), chainsFor);
   if (!chosen) throw new UsageError(`No text model has passed the trial for ${lang === 'el' ? 'Greek' : 'English'}. Pass --article-model <id>[,<fallback>...], or run node scripts/article-trial.mjs.`);
   return { ...chosen, trialDate: trial.updated };
 }
@@ -70,8 +78,8 @@ export async function listArticleModels(opts) {
 
 export async function runArticle(opts) {
   if (!opts.query) throw new UsageError('Missing topic. Example: vane --article "tidal power in Greece"');
-  const apiKey = await resolveOpenRouterKey(opts);
-  const [{ createOpenRouterClient }, { createArticlePipeline }] = await Promise.all([import('./image/openrouter.mjs'), import('./write/pipeline.mjs')]);
+  const client = await resolveClient(opts);
+  const { createArticlePipeline } = await import('./write/pipeline.mjs');
   const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);
   const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
   // Sources are Vane's own research; its answer text is not used. Vane sometimes returns none for a query that worked a minute ago.
@@ -82,7 +90,6 @@ export async function runArticle(opts) {
     }
     return [];
   };
-  const client = createOpenRouterClient({ apiKey });
   const write = createArticlePipeline({ client, retrieve, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
   const post = opts.post; // a platform of formats.mjs, or undefined for an article
   const topic = post ? postTopic(opts.query) : articleTopic(opts.query);
@@ -123,13 +130,12 @@ export async function runArticleEdit(opts) {
   const file = opts['edit-article'];
   if (!opts.query) throw new UsageError(`Missing the change. Example: vane --edit-article ${file || 'article.md'} "make it shorter"`);
   const { readFile } = await import('node:fs/promises');
-  const [{ createArticleEditor, parseArticleAnswer, targetLanguage }, { chainsFor }] = await Promise.all([import('./write/edit.mjs'), import('./write/models.mjs')]);
+  const { createArticleEditor, parseArticleAnswer, targetLanguage } = await import('./write/edit.mjs');
   let text;
   try { text = await readFile(file, 'utf8'); } catch (err) { throw new UsageError(`Cannot read ${file}: ${err.message}`); }
   const earlier = parseArticleAnswer(text);
   if (!earlier?.sources.length) throw new UsageError(`${file} does not look like an article from vane --article (a "# " title, at least 80 words, a Sources list).`);
-  const apiKey = await resolveOpenRouterKey(opts);
-  const client = createOpenRouterClient({ apiKey });
+  const client = await resolveClient(opts);
   const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
   const lang = opts.lang ?? targetLanguage(opts.query, earlier.lang);
   const explicit = opts['article-model'].length > 0;
@@ -154,10 +160,10 @@ export async function runArticleEdit(opts) {
 // Models that passed scripts/code-trial.mjs, in the mode's price band.
 async function defaultCodeChains({ mode, client }) {
   const { readFile } = await import('node:fs/promises');
-  const { buildCodeCatalogue, selectCodeChains } = await import('./code/catalogue.mjs');
+  const [{ buildCodeCatalogue, selectCodeChains }, { codeChainsFor }] = await Promise.all([import('./code/catalogue.mjs'), import('./code/models.mjs')]);
   let trial = {};
   try { trial = JSON.parse(await readFile(new URL('./code/trial.json', import.meta.url), 'utf8')); } catch { /* none yet */ }
-  const chosen = selectCodeChains(buildCodeCatalogue(await client.models()), trial.models || {}, { mode });
+  const chosen = await withFreeLlm(client, mode, async () => selectCodeChains(buildCodeCatalogue(await client.models()), trial.models || {}, { mode }), codeChainsFor);
   if (!chosen) throw new UsageError('No model has passed the coding trial. Pass --code-model <id>[,<fallback>...], or run node scripts/code-trial.mjs.');
   return { ...chosen, trialDate: trial.updated };
 }
@@ -217,10 +223,9 @@ function printCodeReport(r, dir) {
 export async function runCode(opts) {
   if (!opts.query) throw new UsageError('Missing request. Example: vane --code "a Python script that renames photos by the date they were taken"');
   const dir = await codeDir(opts); // before any paid call
-  const apiKey = await resolveOpenRouterKey(opts);
+  const client = await resolveClient(opts);
   const [{ createCodePipeline }, { createSyntaxChecker }, { codeChainsFor }] = await Promise.all([import('./code/pipeline.mjs'), import('./code/syntax.mjs'), import('./code/models.mjs')]);
   const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
-  const client = createOpenRouterClient({ apiKey });
   const chosen = opts['code-model'].length ? { chains: codeChainsFor(opts['code-model']) } : await defaultCodeChains({ mode, client });
   // Documentation is Vane's own research (Balanced, Quality); Vane is started only then.
   let providers;
@@ -254,15 +259,15 @@ export async function runCode(opts) {
 
 export async function runBrainstorm(opts) {
   if (!opts.query) throw new UsageError('Missing problem. Example: vane --brainstorm "ways a small bookshop can win back readers"');
-  const apiKey = await resolveOpenRouterKey(opts);
-  const { createBrainstormPipeline, chainsFor, selectBrainstormChains } = await import('./brainstorm/pipeline.mjs');
+  const client = await resolveClient(opts);
+  const { createBrainstormPipeline, chainsFor: brainstormChainsFor, selectBrainstormChains } = await import('./brainstorm/pipeline.mjs');
   const { renderBrainstorm } = await import('./brainstorm/present.mjs');
   const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
   const lang = opts.lang ?? detectLanguage(opts.query);
-  const client = createOpenRouterClient({ apiKey });
-  let chosen = { chains: chainsFor(opts['brainstorm-model']) };
+  let chosen = { chains: brainstormChainsFor(opts['brainstorm-model']) };
   if (!opts['brainstorm-model'].length) {
-    chosen = selectBrainstormChains(buildTextCatalogue(await client.models()), (await loadTrial()).models || {}, { mode, lang });
+    const trial = (await loadTrial()).models || {};
+    chosen = await withFreeLlm(client, mode, async () => selectBrainstormChains(buildTextCatalogue(await client.models()), trial, { mode, lang }), brainstormChainsFor);
     if (!chosen) throw new UsageError('No text model has passed the article trial. Pass --brainstorm-model <id>[,<fallback>...], or run node scripts/article-trial.mjs.');
   }
   // Existing work is Vane's own research (Balanced, Quality); Vane is started only then.
@@ -307,12 +312,12 @@ async function readReference(file) {
 export async function runImage(opts) {
   if (!opts.query) throw new UsageError('Missing image prompt. Example: vane --image "a red fox in fresh snow, morning light"');
   const references = await Promise.all(opts.ref.map(readReference));
-  const apiKey = await resolveOpenRouterKey(opts);
-  const [{ createOpenRouterClient }, { createImageGenerator }, { safeDownload }, { saveImages }] = await Promise.all([
-    import('./image/openrouter.mjs'), import('./image/generate.mjs'), import('./image/download.mjs'), import('./image/save.mjs'),
+  const client = await resolveClient(opts, { images: true });
+  const [{ createImageGenerator }, { safeDownload }, { saveImages }] = await Promise.all([
+    import('./image/generate.mjs'), import('./image/download.mjs'), import('./image/save.mjs'),
   ]);
   const generate = createImageGenerator({
-    client: createOpenRouterClient({ apiKey }),
+    client,
     download: (url) => safeDownload(url),
     textModel: IMAGE_TEXT_MODEL,
     log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); },

@@ -2,10 +2,11 @@
 // chat route, next to the image, article and code hooks: "brainstorm ...", "give me 10 ideas for ..." or «δώσε μου
 // ιδέες για ...» is answered by the same pipeline as `vane --brainstorm`. What already exists comes from Vane's own
 // research (`research`, provided by the patch, as for articles); the models run on OpenRouter with the key of Vane's
-// own provider settings, on the chains of the mode's price band (the article trial's models). The answer is one
+// own provider settings, on the chains of the mode's price band (the article trial's models), or on freellmapi
+// (withFreeLlm). The answer is one
 // block, updated as the work goes, and ends with ANSWER_MARKER (tagged()) like every Fane answer.
 import { readFile } from 'node:fs/promises';
-import { openRouterClientFromVane, openRouterNeeded } from '../image/openrouter.mjs';
+import { openRouterClientFromVane, openRouterNeeded, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue } from '../write/catalogue.mjs';
@@ -14,7 +15,7 @@ import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { retryEmpty } from '../write/research.mjs';
 import { isBrainstormRequest } from '../core/intent-brainstorm.mjs';
 import { beginRun } from '../core/runlog.mjs';
-import { createBrainstormPipeline, selectBrainstormChains } from './pipeline.mjs';
+import { chainsFor, createBrainstormPipeline, selectBrainstormChains } from './pipeline.mjs';
 import { brainstormPrompts } from './prompts.mjs';
 import { renderBrainstormFailure, renderBrainstormProgress, renderBrainstormResult } from './present.mjs';
 
@@ -35,12 +36,12 @@ export async function handleBrainstormRequest(query, { emit, update, configPath,
   try {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
-      say(quiet([escapeHtml(openRouterNeeded('Brainstorming'))]));
+      say(quiet([escapeHtml(openRouterNeeded('Brainstorming', { free: true }))]));
       return true;
     }
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
-    const chosen = selectBrainstormChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang });
+    const chosen = await withFreeLlm(client, useMode, async () => selectBrainstormChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang }), chainsFor);
     if (!chosen) {
       say(quiet([escapeHtml('No text model has passed the article trial: run node scripts/article-trial.mjs.')]));
       return true;

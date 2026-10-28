@@ -3,10 +3,10 @@
 // που ...» is answered with files, a review and tests by the same pipeline as `vane --code`. Documentation and
 // vulnerability notes come from Vane's own research (`research`, provided by the patch, as for articles); the
 // models run on OpenRouter with the key of Vane's own provider settings, on the chains of the mode's price band
-// (selectCodeChains over trial.json). The answer is one block, updated as the work goes. Every answer carries
+// (selectCodeChains over trial.json), or on freellmapi (withFreeLlm). The answer is one block, updated as the work goes. Every answer carries
 // CODE_ANSWER_MARKER, so the patched browser code leaves its "[x]" alone.
 import { readFile } from 'node:fs/promises';
-import { openRouterClientFromVane, openRouterNeeded } from '../image/openrouter.mjs';
+import { openRouterClientFromVane, openRouterNeeded, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, quiet } from '../image/present.mjs';
 import { detectLanguage } from '../core/language.mjs';
@@ -15,6 +15,7 @@ import { retryEmpty } from '../write/research.mjs';
 import { buildCodeCatalogue, selectCodeChains } from './catalogue.mjs';
 import { isCodeRequest } from '../core/intent-code.mjs';
 import { beginRun } from '../core/runlog.mjs';
+import { codeChainsFor } from './models.mjs';
 import { createCodePipeline } from './pipeline.mjs';
 import { codePrompts } from './prompts.mjs';
 import { codeTagged, renderCodeFailure, renderCodeProgress, renderCodeResult } from './present.mjs';
@@ -37,12 +38,12 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
   try {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
-      say(quiet([escapeHtml(openRouterNeeded('Code writing'))]));
+      say(quiet([escapeHtml(openRouterNeeded('Code writing', { free: true }))]));
       return true;
     }
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
-    const chosen = selectCodeChains(buildCodeCatalogue(await client.models()), trial, { mode: useMode });
+    const chosen = await withFreeLlm(client, useMode, async () => selectCodeChains(buildCodeCatalogue(await client.models()), trial, { mode: useMode }), codeChainsFor);
     if (!chosen) {
       say(quiet([escapeHtml('No model has passed the coding trial: run node scripts/code-trial.mjs.')]));
       return true;

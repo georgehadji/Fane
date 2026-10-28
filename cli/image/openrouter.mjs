@@ -42,15 +42,69 @@ export const DEFAULT_TEXT_MODEL = 'google/gemini-3.5-flash-lite';
 export const findOpenRouterKey = (modelProviders) =>
   (modelProviders || []).find(p => String(p.config?.baseURL || '').includes(OPENROUTER_HOST) && p.config?.apiKey)?.config.apiKey || null;
 
-// What the web UI says when Vane has no OpenRouter provider; `what` is the feature ("Code writing").
-export const openRouterNeeded = (what) => `${what} needs an OpenRouter provider: in Settings → Models, add an OpenAI-compatible provider with Base URL ${OPENROUTER_BASE_URL} and your OpenRouter API key.`;
+// freellmapi (github.com/tashfeenahmed/freellmapi) is a local OpenAI-compatible gateway over the free tiers of many
+// providers, with its own failover between them. Vane knows it as a provider whose key starts with `freellmapi-`.
+// A chain entry `free:<model>` (`free:auto`, `free:auto:smart`, or one of its model ids) goes there, the rest to OpenRouter.
+export const FREE_PREFIX = 'free:';
+export const FREE_KEY_PREFIX = 'freellmapi-';
+export const isFreeModel = (id) => String(id ?? '').startsWith(FREE_PREFIX);
+// Vane's mode picks freellmapi's routing: its fastest models, its active chain, its most capable models.
+export const FREE_MODEL = { speed: 'free:auto:fast', balanced: 'free:auto', quality: 'free:auto:smart' };
 
-// The client for the key in Vane's own settings, for the hooks that run inside Vane: config.json is read from
-// `configPath` (or `readConfig()`, injected for tests). null when the file cannot be read or has no OpenRouter provider.
+export function findFreeLlm(modelProviders) {
+  const p = (modelProviders || []).find(p => String(p.config?.apiKey || '').startsWith(FREE_KEY_PREFIX) && p.config?.baseURL);
+  return p ? { apiKey: p.config.apiKey, baseUrl: String(p.config.baseURL).replace(/\/+$/, '') } : null;
+}
+
+// What the web UI says when Vane has no provider for a feature; `what` is the feature ("Code writing"), `free`: whether
+// freellmapi would do (the text features; images need OpenRouter).
+export const openRouterNeeded = (what, { free = false } = {}) => `${what} needs an OpenRouter provider: in Settings → Models, add an OpenAI-compatible provider with Base URL ${OPENROUTER_BASE_URL} and your OpenRouter API key.${free ? ` For free models, a freellmapi provider works too (its Base URL, such as http://host.docker.internal:3001/v1, and its ${FREE_KEY_PREFIX}… key).` : ''}`;
+
+// The client for the providers in Vane's list (`apiKey`, when given, is the OpenRouter key to use instead of Vane's).
+// null without either provider, the plain OpenRouter client without freellmapi. With freellmapi, `freeLlm` says whether
+// it is the only provider ('only') or the fallback behind OpenRouter ('fallback'); `free:` models go to it.
+export function modelClientFor(modelProviders, { apiKey = findOpenRouterKey(modelProviders), signal, fetchImpl, freeBaseUrl = (u) => u } = {}) {
+  const openRouter = apiKey ? createOpenRouterClient({ apiKey, signal, fetchImpl }) : null;
+  const found = findFreeLlm(modelProviders);
+  if (!found) return openRouter;
+  const free = createOpenRouterClient({ apiKey: found.apiKey, baseUrl: freeBaseUrl(found.baseUrl), signal, fetchImpl });
+  const none = (model) => { throw new OpenRouterError(`404 ${model}: Vane has no OpenRouter provider`, 404); };
+  const pick = (model) => (isFreeModel(model) ? [free, model.slice(FREE_PREFIX.length)] : openRouter ? [openRouter, model] : none(model));
+  return {
+    freeLlm: openRouter ? 'fallback' : 'only',
+    models: async () => (openRouter ? openRouter.models() : []),
+    imageModels: async () => (openRouter ? openRouter.imageModels() : []),
+    images: async (body, timeoutMs) => (openRouter ? openRouter.images(body, timeoutMs) : none(body.model)),
+    async chat(body, timeoutMs) {
+      const [client, model] = pick(body.model);
+      if (client === openRouter) return client.chat(body, timeoutMs);
+      const { usage, ...rest } = body; // OpenRouter's own field: strict providers behind freellmapi refuse unknown keys
+      return client.chat({ ...rest, model }, timeoutMs);
+    },
+    async complete(model, ...rest) {
+      const [client, id] = pick(model);
+      return client.complete(id, ...rest);
+    },
+  };
+}
+
+// The chains a text feature runs on. `select()` is its own choice of OpenRouter models (null when none passed its
+// trial), `only(models)` its chains of just these models. freellmapi alone serves every role on the mode's router
+// entry; next to OpenRouter it ends every chain, and serves alone when no OpenRouter model passed the trial.
+export async function withFreeLlm(client, mode, select, only) {
+  const free = FREE_MODEL[mode] || FREE_MODEL.balanced;
+  const chosen = client.freeLlm === 'only' ? null : await select();
+  if (!client.freeLlm) return chosen;
+  if (!chosen) return { chains: only([free]), prices: {} };
+  return { ...chosen, chains: Object.fromEntries(Object.entries(chosen.chains).map(([role, chain]) => [role, [...chain, free]])) };
+}
+
+// The client for the providers in Vane's own settings, for the hooks that run inside Vane: config.json is read from
+// `configPath` (or `readConfig()`, injected for tests). null when the file cannot be read or has neither provider.
 export async function openRouterClientFromVane({ configPath, readConfig, log = () => {}, signal }) {
-  let apiKey = null;
-  try { apiKey = findOpenRouterKey(JSON.parse(readConfig ? await readConfig() : await readFile(configPath, 'utf8')).modelProviders); } catch (err) { log(`could not read Vane config: ${err.message}`); }
-  return apiKey ? createOpenRouterClient({ apiKey, signal: runSignal(signal) }) : null;
+  let providers = [];
+  try { providers = JSON.parse(readConfig ? await readConfig() : await readFile(configPath, 'utf8')).modelProviders; } catch (err) { log(`could not read Vane config: ${err.message}`); }
+  return modelClientFor(providers, { signal: runSignal(signal) });
 }
 
 // `signal` stops every call of this client, in flight or not yet made (a pipeline then ends on the 499).
@@ -82,6 +136,9 @@ export function createOpenRouterClient({ apiKey, baseUrl = OPENROUTER_BASE_URL, 
       const status = Number(json?.error?.code) || res.status;
       throw new OpenRouterError(`${status} ${json?.error?.message || text.slice(0, 200) || res.statusText}`, status);
     }
+    // freellmapi names the model it routed an `auto` call to (platform/model)
+    const via = res.headers?.get?.('x-routed-via');
+    if (via && json && typeof json === 'object') json.routedVia = via;
     return json;
   }
 

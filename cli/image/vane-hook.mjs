@@ -35,7 +35,8 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
   log = track.log;
   const id = emit(tagged(quiet([earlier ? 'Editing the image…' : 'Generating images…'])));
   const client = generator ? null : await openRouterClientFromVane({ configPath, readConfig, log, signal });
-  if (!client && !generator) {
+  // freellmapi alone is not enough: images are drawn on OpenRouter
+  if ((!client || client.freeLlm === 'only') && !generator) {
     update(id, tagged(openRouterNeeded('Image generation')));
     return true;
   }

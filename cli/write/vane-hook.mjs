@@ -4,19 +4,19 @@
 // same pipeline as `vane --article`. Sources come from Vane's own research (`research`, provided by
 // the patch: Vane's research class run on the user's chosen model and mode, so its progress shows in
 // the answer as usual); the writing runs on OpenRouter with the key of Vane's own provider settings,
-// on the models of the mode's price band (selectChains over trial.json).
+// on the models of the mode's price band (selectChains over trial.json), or on freellmapi (withFreeLlm).
 // Vane's mode picks the phases: Speed = outline and draft, Balanced adds checks and edits, Quality
 // adds the audit. The answer is one block, updated as the work goes: status lines, then the draft
 // as soon as it exists, then the finished article.
 import { readFile } from 'node:fs/promises';
-import { openRouterClientFromVane, openRouterNeeded } from '../image/openrouter.mjs';
+import { openRouterClientFromVane, openRouterNeeded, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, previousAnswer, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue, selectChains } from './catalogue.mjs';
 import { createArticleEditor, isArticleEdit, parseArticleAnswer, targetLanguage } from './edit.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from '../core/intent-article.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
-import { DEFAULT_MODE, MODES } from './models.mjs';
+import { DEFAULT_MODE, MODES, chainsFor } from './models.mjs';
 import { beginRun } from '../core/runlog.mjs';
 import { createArticlePipeline } from './pipeline.mjs';
 import { prompts } from './prompts.mjs';
@@ -52,12 +52,12 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   try {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
-      say(quiet([escapeHtml(openRouterNeeded('Article writing'))]));
+      say(quiet([escapeHtml(openRouterNeeded('Article writing', { free: true }))]));
       return true;
     }
     trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {};
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
-    const chosen = selectChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang });
+    const chosen = await withFreeLlm(client, useMode, async () => selectChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang }), chainsFor);
     if (!chosen) {
       say(quiet([escapeHtml(`No text model has passed the trial for ${LANGUAGE_NAMES[lang]}: run node scripts/article-trial.mjs, or ask in English.`)]));
       return true;
