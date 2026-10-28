@@ -64,13 +64,18 @@ test('patch-colors: balanced rules after the last one of the stylesheet, every c
   assert.ok(COLORS.match(/#[0-9a-f]+\b/gi).every(c => c.length === 7));
 });
 
-test('patch-type: an intact Greek WOFF2 for Montserrat, and it stacks with patch-colors in either order', () => {
+test('patch-type: intact Commissioner WOFF2s for Latin and Greek on Vane\'s font class, and it stacks with patch-colors in either order', () => {
   const colors = require('../../patches/patch-colors.js');
   const type = require('../../patches/patch-type.js');
-  const font = Buffer.from(type.TYPE.match(/base64,([A-Za-z0-9+/=]+)\)/)[1], 'base64');
-  assert.equal(font.toString('latin1', 0, 4), 'wOF2');
-  assert.equal(font.readUInt32BE(8), font.length); // the WOFF2 header's own length matches
-  assert.match(type.TYPE, /font-family:Montserrat;[^}]*unicode-range:U\+0370-03FF\}/); // Greek only: Latin keeps Montserrat
+  const fonts = [...type.TYPE.matchAll(/base64,([A-Za-z0-9+/=]+)\)/g)].map(m => Buffer.from(m[1], 'base64'));
+  assert.equal(fonts.length, 3);
+  for (const font of fonts) {
+    assert.equal(font.toString('latin1', 0, 4), 'wOF2');
+    assert.equal(font.readUInt32BE(8), font.length); // the WOFF2 header's own length matches
+  }
+  assert.match(type.TYPE, /unicode-range:U\+0000-00FF,/); // Latin
+  assert.match(type.TYPE, /unicode-range:U\+0370-0377,[^}]*U\+03A3-03FF\}/); // Greek
+  assert.match(type.TYPE, /\.__className_62a70d\{font-family:Commissioner,Montserrat,/); // Montserrat stays for Cyrillic
   assert.equal(type.TYPE.split('{').length, type.TYPE.split('}').length);
   const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
   for (const order of [[colors, type], [type, colors]]) {
