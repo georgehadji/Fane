@@ -27,6 +27,8 @@ test('brainstorm requests: "brainstorm ...", or an asking verb with ideas/ways/n
     'πρότεινε τρόπους να μειώσουμε τα απόβλητα',
     'καταιγισμός ιδεών για το σχολείο',
     'γράψε 5 τίτλους για ένα άρθρο',
+    'suggest ways a medium greek publishing house can win authors, especially university professors',
+    'give me some ways my team could ship faster',
   ]) assert.equal(isBrainstormRequest(q), true, q);
   for (const q of [
     'what are good ideas for dinner?',
@@ -36,6 +38,8 @@ test('brainstorm requests: "brainstorm ...", or an asking verb with ideas/ways/n
     'give me a Python script that renames files',
     'write an article about brainstorming',
     'τι ιδέες υπάρχουν για το σχολείο;',
+    'ways a medium greek publishing house can win authors',
+    'list ways the virus can spread',
   ]) assert.equal(isBrainstormRequest(q), false, q);
 });
 
