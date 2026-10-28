@@ -578,6 +578,18 @@ test('a draft that no model can write fails the run with the reasons; a 402 stop
   assert.match(f.error, /insufficient credits/);
 });
 
+test('a 402 in the fact-check waits for the critique running next to it before the run ends', async () => {
+  const base = fake({ factcheck: new OpenRouterError('402 insufficient credits', 402) });
+  let critiqueDone = false;
+  const client = { ...base, chat: async (body) => {
+    if (roleOf(body) === 'critique') { await new Promise(r => setTimeout(r, 30)); critiqueDone = true; }
+    return base.chat(body);
+  } };
+  const r = await run(client, { mode: 'balanced' });
+  assert.equal(r.fatal, true);
+  assert.equal(critiqueDone, true); // finished before the result, so its progress cannot overwrite the failure
+});
+
 test('no sources means no article; one failing search does not', async () => {
   const none = await run(fake(), { mode: 'speed' }, async () => []);
   assert.equal(none.ok, false);

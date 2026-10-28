@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { isCodeRequest } from '../core/intent-code.mjs';
 import { MAX_FILE_CHARS, extractCode, fenceFor, fileChecks, languageOf, parseFiles, safePath } from '../code/files.mjs';
 import { codePrompts } from '../code/prompts.mjs';
-import { buildReadme, createCodePipeline, normalizeReview, normalizeSpec } from '../code/pipeline.mjs';
+import { buildReadme, createCodePipeline, mapLimited, normalizeReview, normalizeSpec } from '../code/pipeline.mjs';
 import { createSyntaxChecker } from '../code/syntax.mjs';
 import { CODE_ANSWER_MARKER, codeTagged, renderCodeResult } from '../code/present.mjs';
 import { handleCodeRequest } from '../code/vane-hook.mjs';
@@ -432,4 +432,23 @@ test('code chains come from the code trial and include code specialists the arti
   assert.equal(chosen.pool, 2);
   assert.ok(!chosen.chains.spec.includes('b/model-2')); // spec and review need a JSON pass
   assert.ok(!Object.values(chosen.chains).flat().includes('c/model-3'));
+});
+
+test('mapLimited: a throw waits for the items already running, and starts no new one', async () => {
+  const done = [];
+  await assert.rejects(mapLimited([0, 1, 2, 3], 2, async (i) => {
+    if (i === 0) throw new Error('402 stop');
+    await new Promise(r => setTimeout(r, 30));
+    done.push(i);
+  }), /402 stop/);
+  assert.deepEqual(done, [1]);
+});
+
+test('the code trial runs model code with an empty environment', async () => {
+  const { runCases } = await import('../../scripts/code-sandbox.mjs');
+  process.env.FANE_SANDBOX_PROBE = 'secret';
+  try {
+    const code = "if (process.env.FANE_SANDBOX_PROBE) throw new Error('env leaked');\nexport const parseDuration = (s) => Number(s);";
+    assert.deepEqual(await runCases(code, [['5', 5]]), { results: [{ ok: true }] });
+  } finally { delete process.env.FANE_SANDBOX_PROBE; }
 });

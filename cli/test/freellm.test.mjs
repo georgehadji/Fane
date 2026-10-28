@@ -80,6 +80,8 @@ test('withFreeLlm: freellmapi alone serves every role, next to OpenRouter its ch
   assert.deepEqual((await withFreeLlm(client('fallback'), 'speed', { select: async () => chosen, free: none, only })).chains, { draft: ['a/1', 'b/2', 'free:auto:fast'], outline: ['b/2', 'free:auto:fast'] });
   assert.deepEqual((await withFreeLlm(client('fallback'), 'speed', { select: async () => chosen, free: ranked, only })).chains.outline, ['b/2', 'free:h', 'free:auto:fast']);
   assert.deepEqual((await withFreeLlm(client('fallback'), 'balanced', { select: async () => null, free: none, only })).chains.draft, [FREE_MODEL.balanced]);
+  // OpenRouter's catalogue down: the free chains serve alone
+  assert.deepEqual((await withFreeLlm(client('fallback'), 'speed', { select: async () => { throw new Error('fetch failed'); }, free: ranked, only })).chains.draft, ['free:g', 'free:auto:fast']);
   assert.equal(await withFreeLlm({}, 'balanced', { select: async () => chosen, free: never, only }), chosen); // OpenRouter alone: unchanged
   assert.equal(await withFreeLlm({}, 'balanced', { select: async () => null, free: never, only }), null);
   assert.equal((await withFreeLlm(client('only'), 'turbo', { select: never, free: none, only })).chains.draft[0], 'free:auto'); // an unknown mode is Balanced

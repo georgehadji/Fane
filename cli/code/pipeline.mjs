@@ -63,15 +63,18 @@ export function normalizeReview(data, files) {
 }
 
 // After one item throws (a 402 Stop), the other workers take no new item: they would only make more paid calls.
+// The throw waits for the items already running: they are paid for, and their late progress would overwrite the answer.
 export async function mapLimited(items, n, fn) {
   const out = new Array(items.length);
   let next = 0, failed = false;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+  const settled = await Promise.allSettled(Array.from({ length: Math.min(n, items.length) }, async () => {
     while (!failed && next < items.length) {
       const i = next++;
       try { out[i] = await fn(items[i], i); } catch (err) { failed = true; throw err; }
     }
   }));
+  const rejected = settled.find(s => s.status === 'rejected');
+  if (rejected) throw rejected.reason;
   return out;
 }
 

@@ -160,11 +160,15 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       emit({ phase: 'draft', status: 'preview', text: body, sources }); // lets a UI show the draft while the checks and edits run
 
       // 4. Fact-check (a ledger of claims against their cited sources) and the structural critique. Both read
-      // the same draft and neither needs the other, so they run at the same time.
-      const [f, c] = await Promise.all([
+      // the same draft and neither needs the other, so they run at the same time. A Stop in one waits for the other:
+      // it is paid for, and its late progress would overwrite the answer.
+      const both = await Promise.allSettled([
         plan.includes('factcheck') ? step('factcheck', { article: body, sources }) : null,
         plan.includes('critique') ? step('critique', { article: body }) : null,
       ]);
+      const stopped = both.find(s => s.status === 'rejected');
+      if (stopped) throw stopped.reason;
+      const [f, c] = both.map(s => s.value);
       let ledger = [], claimSupport = null;
       if (f) {
         if (f.ok) {

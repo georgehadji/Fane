@@ -55,7 +55,7 @@ Pieces that run in different places:
   - `core/intent-article.mjs` `isArticleRequest` and `postPlatform` return false/null for a code request, so the article hook (which runs first in the chat route) and `autoRoute` agree. `isCodeRequest` needs a request verb, then either a code noun followed by the end or a linking word, or "in/using <language>". Ambiguous nouns (class, application, test, game) count only next to a language; a text noun (article, post, report …) followed by a linking word is never code.
   - Models: `cli/code/trial.json` from `scripts/code-trial.mjs`:
     - `duration.mjs` with the real generate prompt must pass `TRIAL_CASES` with at most one miss, and the spec must come back as JSON.
-    - The generated function runs in a child Node with `--permission` (reads only its temp folder) and a 10 s timeout. That process can still use the network; the prompt is fixed.
+    - The generated function runs in a child Node with `--permission` (reads only its temp folder), an empty environment (no `OPENROUTER_API_KEY`) and a 10 s timeout (`scripts/code-sandbox.mjs`). That process can still use the network, Vane's `/api/config` on 127.0.0.1 included: Node 24's permission model has no network switch.
     - Candidates: the newest per lab plus the newest code specialist per lab. `buildTextCatalogue(..., { code: true })` keeps the `coder|codex` ids that the article catalogue drops.
     - `selectChains` takes `roles`/`jsonRoles` (`selectCodeChains`, trial key `code`); the article-only `queries` chain is added only when `jsonRoles` has it.
   - Web UI (`patch-code-chat.js`):

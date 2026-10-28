@@ -28,6 +28,11 @@ export function cleanMarkdown(text) {
   return s;
 }
 
+// An article body as Markdown next to Fane's own HTML: an unclosed tag ("<iframe src=…" with no ">") survives
+// cleanMarkdown, and the ">" of the sources list written after it would close it, so what is left of one is escaped.
+// (A post is escaped whole, so it needs no such step.)
+const articleMarkdown = (text) => cleanMarkdown(text).replace(/<(?=[a-zA-Z/!?])/g, '&lt;');
+
 // What the user sees while the pipeline runs. `state`: { lang, phases: [{ phase, status }],
 // running: phase | null, draft: { text, sources } | null }. Once a draft exists it is shown, with
 // the sources list, above the status line.
@@ -38,7 +43,7 @@ export function renderArticleProgress(state) {
   const current = state.draft ? words(lang).draft : state.running ? `${L[state.running] || state.running}…` : '';
   const status = quiet([escapeHtml(current), stepsDone(new Set(done).size, lang)]);
   if (!state.draft) return status;
-  const { text, used } = renumber(cleanMarkdown(state.draft.text), state.draft.sources);
+  const { text, used } = renumber(articleMarkdown(state.draft.text), state.draft.sources);
   return `${linkCitations(text, used).trimEnd()}${sourcesSection(used, lang, { html: true }).trimEnd()}\n\n${status}`;
 }
 
@@ -56,7 +61,7 @@ export function renderArticleResult(r) {
   ].filter(Boolean).join(' · ');
   const notes = [...new Set([...r.degraded, ...r.checks.items.filter(i => i.level !== 'ok').map(i => `${i.name}: ${i.detail}`)])].slice(0, 6);
   // r.article ends with the Markdown sources list; the web answer writes its own, with HTML links
-  const [body] = cleanMarkdown(r.article).split(/\n\n(?=## (?:Sources|Πηγές)\n)/);
+  const [body] = articleMarkdown(r.article).split(/\n\n(?=## (?:Sources|Πηγές)\n)/);
   return `${linkCitations(body, r.sources).trimEnd()}${sourcesSection(r.sources, lang, { html: true }).trimEnd()}\n\n${quiet([escapeHtml(summary), ...notes.map(n => escapeHtml(n))])}`;
 }
 

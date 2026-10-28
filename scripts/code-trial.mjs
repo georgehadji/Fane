@@ -6,21 +6,17 @@
 //
 //   node scripts/code-trial.mjs --key-from-vane [--dry] [--budget 1.5] [--per-lab 2] [--max 40] [--only a/x,b/y]
 //
-// The generated function is run, so it runs in its own Node process with the permission model on (no file writes,
-// no child processes, no workers, file reads only in its temporary folder) and a 10 s limit. That process can
-// still open network connections; the code comes from our fixed prompt, with no web page in it.
+// The generated function is run, in a locked-down Node process with an empty environment (scripts/code-sandbox.mjs).
+// That process can still open network connections, Vane's /api/config on 127.0.0.1 included: see that file.
 // Needs OPENROUTER_API_KEY or --key-from-vane (the key of Vane's OpenRouter provider; never printed).
 //
 //   node scripts/code-trial.mjs --free [--dry] [--only free:a,free:b] [--concurrency 2]
 //
 // --free tries the models freellmapi can serve now instead, at no cost (saved as free:<id>, ranked by
 // selectFreeCodeChains; a model with a call that got no answer is not saved, so a later run tries it again).
-import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, promisify } from 'node:util';
+import { parseArgs } from 'node:util';
 
 import { DEFAULTS } from '../cli/vane.mjs';
 import { OpenRouterError, createOpenRouterClient, findOpenRouterKey, fromHost, modelClientFor } from '../cli/image/openrouter.mjs';
@@ -29,8 +25,8 @@ import { REASONING } from '../cli/write/models.mjs';
 import { TRIAL_CASES, TRIAL_FILE, TRIAL_KEY, TRIAL_REQUEST, TRIAL_SPEC, buildCodeCatalogue, judgeTrialCode, judgeTrialSpec } from '../cli/code/catalogue.mjs';
 import { extractCode } from '../cli/code/files.mjs';
 import { codePrompts } from '../cli/code/prompts.mjs';
+import { runCases } from './code-sandbox.mjs';
 
-const run = promisify(execFile);
 const TRIAL_JSON = fileURLToPath(new URL('../cli/code/trial.json', import.meta.url));
 const MAX_TOKENS = 12000; // room for models that think before they write
 const SPEC_REQUEST = 'Write a command-line tool in Python that counts the words in the text files of a folder and prints the ten most common words.';
@@ -83,37 +79,10 @@ async function ask(client, model, { system, user }, { json = false } = {}) {
   }
 }
 
-const HARNESS = `const cases = JSON.parse(process.argv[2]);
-let mod;
-try { mod = await import('./duration.mjs'); } catch (e) { console.log(JSON.stringify({ loadError: String(e && e.message) })); process.exit(0); }
-if (typeof mod.parseDuration !== 'function') { console.log(JSON.stringify({ loadError: 'no parseDuration export' })); process.exit(0); }
-const results = cases.map(([input, want]) => {
-  try { const got = mod.parseDuration(input); return { ok: typeof want === 'number' && got === want }; }
-  catch (e) { return { ok: typeof want === 'string' && e instanceof globalThis[want] }; }
-});
-console.log(JSON.stringify({ results }));
-`;
-
-// Runs the cases against the generated module in a locked-down Node process. -> { results } | { loadError }
-async function runCases(code) {
-  const dir = await mkdtemp(join(tmpdir(), 'fane-code-trial-'));
-  try {
-    await writeFile(join(dir, 'duration.mjs'), code);
-    await writeFile(join(dir, 'harness.mjs'), HARNESS);
-    const flag = process.allowedNodeEnvironmentFlags.has('--permission') ? '--permission' : '--experimental-permission';
-    const { stdout } = await run(process.execPath, [flag, `--allow-fs-read=${dir}`, join(dir, 'harness.mjs'), JSON.stringify(TRIAL_CASES)], { timeout: 10_000, windowsHide: true, maxBuffer: 1 << 20 });
-    return JSON.parse(stdout.trim().split('\n').pop());
-  } catch (err) {
-    return { loadError: err.killed ? 'timed out' : String(err.stderr || err.message).trim().split('\n')[0] };
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
-
 async function trialOne(client, model) {
   const out = { price: { in: model.priceIn, out: model.priceOut } };
   const g = await ask(client, model, codePrompts.generate({ text: TRIAL_REQUEST, spec: TRIAL_SPEC, file: TRIAL_FILE, docs: [] }));
-  const ran = g.error || g.finish !== 'stop' ? { loadError: g.error || '' } : await runCases(extractCode(g.text));
+  const ran = g.error || g.finish !== 'stop' ? { loadError: g.error || '' } : await runCases(extractCode(g.text), TRIAL_CASES);
   out[TRIAL_KEY] = { ...(g.error ? { ok: false, problems: [g.error] } : judgeTrialCode(g.text, { results: ran.results, loadError: ran.loadError, finish: g.finish, ms: g.ms })), ms: g.ms };
   const j = await ask(client, model, codePrompts.spec({ text: SPEC_REQUEST, lang: 'en' }), { json: true });
   out.json = { ...(j.error ? { ok: false, problems: [j.error] } : judgeTrialSpec(j.text, j.finish)), ms: j.ms };

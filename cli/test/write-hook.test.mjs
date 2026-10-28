@@ -58,6 +58,17 @@ test('the result is the article followed by one summary paragraph', () => {
   assert.match(renderArticleResult(RESULT({ language: 'el', sources: [{}, {}] })), /412 λέξεις · 2 πηγές/);
 });
 
+test('an unclosed tag at the end of an article is not closed by the sources list after it', () => {
+  for (const tail of ['<iframe src="https://evil.example/" height="900"', '<!-- the rest is hidden']) {
+    const article = `# Tides\n\nCosts fell [1].\n\n${tail}`;
+    const html = [renderArticleResult(RESULT({ article, sources: SOURCES })), renderArticleProgress({ lang: 'en', phases: [], running: 'factcheck', draft: { text: article, sources: SOURCES } })];
+    for (const h of html) {
+      assert.doesNotMatch(h, /<iframe|<!--/);
+      assert.match(h, /&lt;(?:iframe|!--)/);
+    }
+  }
+});
+
 test('a source title with a comma is written as an HTML link, and read back by the editor', () => {
   // Vane rewrites any "[...]" in an answer with sources, split at its commas: "[Earth, moon and sun](url)" showed as "[Earth]" + a link
   const html = renderArticleResult(RESULT({ sources: [{ title: 'The Earth, moon & sun', url: 'https://example.org/a?x=1&y="2"' }] }));
@@ -332,11 +343,13 @@ test('an edit that loses the title or most of the text is refused and says so', 
   }
 });
 
-test('an edit keeps Vane in charge when the previous answer is not an article, or the message is an image request', async () => {
+test('an edit keeps Vane in charge when the previous answer is not an article, or the message is an image or code request', async () => {
   const client = editClient();
   const u = ui();
   assert.equal(await handleArticleRequest('make it shorter', { ...u, client, trial: TRIAL, lastAnswer: async () => 'Tidal power is a form of hydropower.', research: async () => SOURCES }), false);
   assert.equal(await handleArticleRequest('make an image of a tidal turbine', { ...u, client, trial: TRIAL, lastAnswer: async () => previous(), research: async () => SOURCES }), false);
+  assert.equal(await handleArticleRequest('make a Python script that downloads these sources', { ...u, client, trial: TRIAL, lastAnswer: async () => previous(), research: async () => SOURCES }), false); // the code hook's
+
   assert.equal(await handleArticleRequest('make it shorter', { ...u, client, trial: TRIAL, research: async () => SOURCES }), false); // no previous answer at all
   // Vane's own answer: a "# " title and citations, but no sources list of ours
   const vaneAnswer = `# Tidal power\n\n${'Tidal turbines in Orkney supplied about 1,200 homes last winter [1]. Costs fell by 40% once the designs settled [2]. '.repeat(6)}`;

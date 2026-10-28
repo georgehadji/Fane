@@ -15,6 +15,7 @@ import { escapeHtml, previousAnswer, providerMissing, quiet, tagged } from '../i
 import { buildTextCatalogue, selectChains, selectFreeChains } from './catalogue.mjs';
 import { createArticleEditor, isArticleEdit, parseArticleAnswer, targetLanguage } from './edit.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from '../core/intent-article.mjs';
+import { isCodeRequest } from '../core/intent-code.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES, chainsFor } from './models.mjs';
 import { beginRun } from '../core/runlog.mjs';
@@ -36,7 +37,8 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   // A follow-up edit: the message reads like one ("shorter", "rewrite the intro") and the answer before it is an article of ours.
   let earlier = null;
   if (!platform && !isArticleRequest(query)) {
-    if (isImageRequest(query) || !isArticleEdit(query)) return false;
+    // "make a Python script that ..." starts like an edit; the code hook, which runs after this one, takes it
+    if (isImageRequest(query) || isCodeRequest(query) || !isArticleEdit(query)) return false;
     earlier = parseArticleAnswer(await previousAnswer(history, lastAnswer));
     // Vane's own answers have a "# " title too; ours end with a sources list (the CLI's --edit-article asks the same)
     if (!earlier?.sources.length) return false;

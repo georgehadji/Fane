@@ -102,7 +102,8 @@ export async function withFreeLlm(client, mode, { select, free, only }) {
   const last = FREE_MODEL[mode] || FREE_MODEL.balanced;
   const ready = await client.freeReady().catch(() => null);
   const freeChosen = free(ready, last) || { chains: only([last]), prices: {} };
-  const chosen = client.freeLlm === 'only' ? null : await select();
+  // OpenRouter's catalogue unreachable: freellmapi serves the run alone rather than none at all
+  const chosen = client.freeLlm === 'only' ? null : await select().catch(() => null);
   if (!chosen) return freeChosen;
   return { ...chosen, chains: Object.fromEntries(Object.entries(chosen.chains).map(([role, chain]) => [role, [...chain, ...(freeChosen.chains[role] || [last])]])) };
 }
