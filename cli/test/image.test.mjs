@@ -194,6 +194,17 @@ test('private and loopback addresses are refused', async () => {
   for (const u of ['https://[::ffff:127.0.0.1]/x.png', 'https://[::7f00:1]/x.png', 'https://[64:ff9b::7f00:1]/x.png', 'https://[2002:7f00:1::]/x.png']) await assert.rejects(safeDownload(u, { fetchImpl: never }), /private address/, u);
 });
 
+test('a host that resolves to an IPv6 address is allowed only in global unicast, and not 6to4 or NAT64', async () => {
+  for (const ip of ['64:ff9b::a9fe:a9fe', '2002:7f00:1::', '2002:a9fe:a9fe::1', 'fc00::1', '::', 'not-an-address']) assert.ok(isPrivateAddress(ip), ip);
+  for (const ip of ['2606:4700::1111', '2001:4860:4860::8888', '2a00:1450:4001::1']) assert.ok(!isPrivateAddress(ip), ip);
+  const never = async () => { throw new Error('fetched'); };
+  for (const address of ['64:ff9b::a9fe:a9fe', '2002:7f00:1::']) {
+    await assert.rejects(safeDownload('https://img.test/x.png', { fetchImpl: never, resolve: async () => [{ address }] }), /private address/, address);
+  }
+  const ok = async () => new Response(PNG, { status: 200 });
+  assert.match(await safeDownload('https://img.test/x.png', { fetchImpl: ok, resolve: async () => [{ address: '2606:4700::1111' }] }), /^data:image\/png/);
+});
+
 test('download follows redirects with a re-check and sniffs the bytes', async () => {
   const fetchImpl = async (url) => (url.includes('first')
     ? new Response(null, { status: 302, headers: { location: 'https://cdn.test/final.png' } })

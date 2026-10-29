@@ -17,7 +17,10 @@ export function isPrivateAddress(ip) {
     return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
       || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
   }
-  return v === '::' || v === '::1' || /^f[cd]/.test(v) || /^fe[89ab]/.test(v);
+  // IPv6: allow-list. Global unicast is 2000::/3; 6to4 (2002::/16) embeds an IPv4 address, and NAT64 (64:ff9b::/96)
+  // lies outside 2000::/3 already. Everything else (::1, fc00::/7, fe80::/10, unparsable text) is refused.
+  const first = parseInt(v.split(':')[0] || '0', 16);
+  return !(first >= 0x2000 && first <= 0x3fff) || first === 0x2002;
 }
 
 export async function safeDownload(url, { fetchImpl = fetch, resolve = lookup, maxBytes = 20_000_000, maxRedirects = 3 } = {}) {

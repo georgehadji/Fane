@@ -74,6 +74,22 @@ test('patch-colors: the first version is replaced where it stands, and no GitHub
   assert.match(COLORS, /\.bg-light-primary\{background-color:rgb\(247 242 234\//);
 });
 
+test('patch-colors: version 2 is upgraded in place, and a filled button (Send) is excluded from the icon hover color', () => {
+  const { TARGETS, COLORS, COLORS_V2 } = require('../../patches/patch-colors.js');
+  const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
+  const r = planPatch({ [FILES.appCss]: `x{}${end}\n/*other*/\n\n${COLORS_V2}\n/*after*/` }, TARGETS);
+  assert.deepEqual(r.errors, []);
+  assert.equal(r.next[FILES.appCss], `x{}${end}\n/*other*/\n\n${COLORS}\n/*after*/`);
+  assert.deepEqual(planPatch(r.next, TARGETS).applied, []);
+  assert.ok(COLORS.startsWith('/*fane:colors-3*/') && !COLORS.includes('colors-2'));
+  // the same rules, plus the exclusion of the filled sky/terracotta button, in light and dark
+  const filled = String.raw`:not(.bg-\[\#24A0ED\]):not(.bg-sky-500)`;
+  assert.ok(COLORS.includes(`html button[data-fane-icon]${filled}:hover,html a[data-fane-icon]${filled}:hover{color:#9e4420}`));
+  assert.ok(COLORS.includes(`html.dark button[data-fane-icon]${filled}:hover,html.dark a[data-fane-icon]${filled}:hover{color:#e0805a}`));
+  assert.ok(!COLORS.includes('html button[data-fane-icon]:hover'));
+  assert.equal(COLORS.split('{').length, COLORS.split('}').length);
+});
+
 test('patch-icon-buttons: an icon-only button gets the name of its Lucide icon, a named or texted one is left alone', () => {
   const { LABEL_ICONS } = require('../../patches/patch-icon-buttons.js');
   const el = (cls, { text = '', label = null } = {}) => {
@@ -303,4 +319,100 @@ test('run: a write that fails leaves every bundle as it was', async () => {
     run('t', [{ name: 'a', file: a, from: 'a=1', to: 'a=2' }, { name: 'b', file: b, from: 'b=1', to: 'b=2' }]);
     assert.deepEqual([read(a, 'utf8'), read(b, 'utf8'), read(`${a}.bak`, 'utf8')], ['var a=2;', 'var b=2;', 'var a=1;']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('run: a failing backup write leaves every bundle, and the backups this run made, as they were', async () => {
+  const realFs = await import('node:fs');
+  const { mkdtempSync, readFileSync: read, rmSync, writeFileSync, existsSync } = realFs;
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { run } = require('../../patches/lib/apply-targets.js');
+  const dir = mkdtempSync(join(tmpdir(), 'fane-patch-'));
+  const a = join(dir, 'a.js'), b = join(dir, 'b.js');
+  writeFileSync(a, 'var a=1;');
+  writeFileSync(b, 'var b=1;');
+  const io = new Proxy(realFs, { get: (fs, key) => key !== 'writeFileSync' ? fs[key] : (f, ...rest) => {
+    if (String(f) === `${b}.bak`) throw new Error('disk full');
+    return fs.writeFileSync(f, ...rest);
+  } });
+  try {
+    const targets = [{ name: 'a', file: a, from: 'a=1', to: 'a=2' }, { name: 'b', file: b, from: 'b=1', to: 'b=2' }];
+    assert.throws(() => run('t', targets, io), /disk full/);
+    assert.deepEqual([read(a, 'utf8'), read(b, 'utf8')], ['var a=1;', 'var b=1;']);
+    assert.deepEqual([a, b].flatMap(f => [`${f}.fane-tmp`, `${f}.bak`]).filter(existsSync), []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('patch-scrape-guard: the injected private-address rule gives the same answers as isPrivateAddress', async () => {
+  const { PRIVATE_ADDRESS } = require('../../patches/lib/vane.js');
+  const { isPrivateAddress } = await import('../image/download.mjs');
+  const { isIP } = await import('node:net');
+  const injected = new Function(`return ${PRIVATE_ADDRESS}`)();
+  for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '172.32.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '100.128.0.1', '0.0.0.0',
+    '224.0.0.1', '255.255.255.255', '8.8.8.8', '93.184.216.34', '::1', '::', 'fc00::1', 'fd00::1', 'fe80::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:a9fe:a9fe',
+    '::ffff:808:808', '64:ff9b::a9fe:a9fe', '2002:7f00:1::', '2606:4700::1111', '2001:4860:4860::8888', '3fff::1', '4000::1']) {
+    assert.equal(injected(ip, isIP), isPrivateAddress(ip), ip);
+  }
+});
+
+test('patch-scrape-guard: a page cannot reach a private host or send data, and a redirect to one fails the scrape', async () => {
+  const { TARGETS } = require('../../patches/patch-scrape-guard.js');
+  const net = await import('node:net');
+  const fakeScraper = 'var d=c(32325),e=c(40131),f=c(24425);class g{static async scrape(a){let b=await this.browser.newContext({userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"});await b.addInitScript(()=>{});let c=await b.newPage();try{await c.goto(a,{waitUntil:"domcontentloaded",timeout:this.NAVIGATION_TIMEOUT}),await c.waitForTimeout(500);return{title:"read"}}catch(b){return{title:"Failed to scrape"}}finally{await b.close()}}}var OUT=g;';
+  const out = planPatch({ [TARGETS[0].file]: fakeScraper }, TARGETS);
+  assert.deepEqual([out.errors, out.applied.length, planPatch(out.next, TARGETS).applied], [[], 3, []]);
+
+  const dns = { 'a.example': ['93.184.216.34'], 'rebind.example': ['10.0.0.5'], 'mixed.example': ['93.184.216.34', '127.0.0.1'] };
+  const lookups = [];
+  const fakeRequire = (name) => name === 'node:net' ? net : name === 'node:dns'
+    ? { promises: { lookup: async (h) => { lookups.push(h); if (!dns[h]) throw new Error('ENOTFOUND'); return dns[h].map(address => ({ address })); } } }
+    : require(name);
+  const Scraper = new Function('require', 'c', 'console', out.next[TARGETS[0].file] + ';return OUT')(fakeRequire, () => ({}), { log() {} });
+
+  // One scrape against a fake browser: the page makes `requests` (each [method, url]) and the load ends at a
+  // response whose redirect chain is `hops` (oldest first).
+  const scrape = async (url, { requests = [], hops = [url] } = {}) => {
+    const decisions = [];
+    let options;
+    const chain = hops.reduce((from, u) => ({ url: () => u, redirectedFrom: () => from }), null);
+    Scraper.browser = { newContext: async (o) => {
+      options = o;
+      let handler;
+      return {
+        route: async (pattern, h) => { assert.equal(pattern, '**/*'); handler = h; },
+        addInitScript: async () => {}, close: async () => {},
+        newPage: async () => ({
+          goto: async () => {
+            for (const [method, u] of requests) {
+              await handler({ request: () => ({ url: () => u, method: () => method }), continue: async () => decisions.push(`continue ${method} ${u}`), abort: async () => decisions.push(`abort ${method} ${u}`) });
+            }
+            return { request: () => chain };
+          },
+          waitForTimeout: async () => {},
+        }),
+      };
+    } };
+    const result = await Scraper.scrape(url);
+    return { result, decisions, options };
+  };
+
+  const r = await scrape('https://a.example/page', { requests: [
+    ['GET', 'https://a.example/page'], ['POST', 'https://a.example/collect'], ['GET', 'http://127.0.0.1:3000/api/config'], ['POST', 'http://127.0.0.1:3000/api/config'],
+    ['GET', 'http://localhost:3000/api/config'], ['GET', 'http://[::1]:3000/'], ['GET', 'https://rebind.example/x'], ['GET', 'https://mixed.example/x'], ['GET', 'https://unknown.example/x'],
+    ['GET', 'data:text/plain,hi'],
+  ] });
+  assert.equal(r.options.serviceWorkers, 'block');
+  assert.deepEqual(r.decisions, [
+    'continue GET https://a.example/page', 'abort POST https://a.example/collect', 'abort GET http://127.0.0.1:3000/api/config', 'abort POST http://127.0.0.1:3000/api/config',
+    'abort GET http://localhost:3000/api/config', 'abort GET http://[::1]:3000/', 'abort GET https://rebind.example/x', 'abort GET https://mixed.example/x', 'abort GET https://unknown.example/x',
+    'continue GET data:text/plain,hi',
+  ]);
+  assert.equal(lookups.filter(h => h === 'a.example').length, 1, 'a name is looked up once per scrape');
+  assert.equal(r.result.title, 'read');
+
+  assert.equal((await scrape('https://a.example/p', { hops: ['https://a.example/p', 'https://a.example/q'] })).result.title, 'read');
+  assert.equal((await scrape('https://a.example/p', { hops: ['https://a.example/p', 'http://127.0.0.1:3000/api/config'] })).result.title, 'Failed to scrape');
+  assert.equal((await scrape('https://a.example/p', { hops: ['https://a.example/p', 'https://rebind.example/'] })).result.title, 'Failed to scrape');
+  assert.equal((await scrape('http://127.0.0.1:3000/api/config')).result.title, 'Failed to scrape');
+  assert.equal((await scrape('file:///etc/passwd')).result.title, 'Failed to scrape');
 });

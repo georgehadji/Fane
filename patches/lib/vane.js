@@ -25,6 +25,10 @@ module.exports = {
   APP_CSS_END: String.raw`.xl\:text-8xl{font-size:6rem;line-height:1}}`,
   // Title Vane's scraper returns instead of throwing when a page cannot be loaded.
   SCRAPE_FAILED_TITLE: 'Failed to scrape',
+  // Source of an arrow function (ip, isIP) -> true for an address a scraped page must not reach. The same rule as
+  // cli/image/download.mjs isPrivateAddress, which cannot be imported inside Vane's bundle; a test compares them on
+  // a table of addresses. No backticks or ${ }: it is injected into a bundle.
+  PRIVATE_ADDRESS: String.raw`(ip,isIP)=>{let h=/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(String(ip).toLowerCase()),v=h?[parseInt(h[1],16)>>8,parseInt(h[1],16)&255,parseInt(h[2],16)>>8,parseInt(h[2],16)&255].join("."):String(ip).toLowerCase().replace(/^::ffff:/,"");if(4===isIP(v)){let[a,b]=v.split(".").map(Number);return 0===a||10===a||127===a||169===a&&254===b||172===a&&b>=16&&b<=31||192===a&&168===b||100===a&&b>=64&&b<=127||a>=224}let f=parseInt(v.split(":")[0]||"0",16);return!(f>=8192&&f<=16383)||8194===f}`,
   // Vane's settings (providers and their API keys).
   CONFIG_JSON: '/home/vane/data/config.json',
   // Ends every answer of the image hook (cli/image/present.mjs ANSWER_MARKER; a test keeps them equal).

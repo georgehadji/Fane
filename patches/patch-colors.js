@@ -85,7 +85,7 @@ const NEUTRALS = String.raw`.border-light-200{border-color:rgb(226 216 199/var(-
 .hover\:dark\:bg-dark-secondary:is(.dark *):hover{background-color:rgb(31 27 20/var(--tw-bg-opacity,1))}
 .dark\:disabled\:bg-dark-200:disabled:is(.dark *){background-color:rgb(50 44 34/var(--tw-bg-opacity,1))}`;
 
-const COLORS = String.raw`/*fane:colors-2*/
+const COLORS_V2 = String.raw`/*fane:colors-2*/
 ${NEUTRALS}
 :root.dark *,body.dark *,html.dark *{scrollbar-color:#322c22 transparent}
 html.dark ::-webkit-scrollbar-thumb{background:#322c22}
@@ -126,17 +126,27 @@ html.dark .bg-transparent.text-red-400:hover,html.dark .bg-transparent.text-red-
 h2.text-3xl.-mt-8{color:#1f1a14}
 .dark h2.text-3xl.-mt-8{color:#ede6da}`;
 
+// Version 3: the hover color skips a filled button. The question box's Send button is a terracotta (#b4532a) disc with a
+// white arrow and is also a `data-fane-icon` button, so hovering it painted the arrow terracotta on terracotta.
+const FILLED = String.raw`:not(.bg-\[\#24A0ED\]):not(.bg-sky-500)`;
+const HOVER = ['html button[data-fane-icon]:hover,html a[data-fane-icon]:hover', 'html.dark button[data-fane-icon]:hover,html.dark a[data-fane-icon]:hover'];
+const COLORS = HOVER.reduce((css, rule) => {
+  const next = css.replace(rule, () => rule.replace(/(?:button|a)\[data-fane-icon\]/g, m => `${m}${FILLED}`));
+  if (next === css) throw new Error(`patch-colors: hover rule not found: ${rule}`);
+  return next;
+}, COLORS_V2.replace('/*fane:colors-2*/', '/*fane:colors-3*/'));
+
 const TARGETS = [
   {
     name: 'warm palette, one accent, accessible colors',
     file: FILES.appCss,
-    // the first version's block is replaced where it stands (other blocks may sit between it and the end)
-    alts: [{ from: COLORS_V1, to: COLORS }, { from: END, to: `${END}
+    // an earlier version's block is replaced where it stands (other blocks may sit between it and the end)
+    alts: [{ from: COLORS_V2, to: COLORS }, { from: COLORS_V1, to: COLORS }, { from: END, to: `${END}
 ${COLORS}
 ` }],
-    marker: '/*fane:colors-2*/',
+    marker: '/*fane:colors-3*/',
   },
 ];
 
-module.exports = { TARGETS, COLORS, COLORS_V1 };
+module.exports = { TARGETS, COLORS, COLORS_V1, COLORS_V2 };
 if (require.main === module) run('patch-colors', TARGETS);

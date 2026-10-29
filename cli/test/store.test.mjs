@@ -44,7 +44,8 @@ test('serveImage returns the file with safe headers, and 404 for anything else',
   assert.equal(ok.status, 200);
   assert.equal(ok.headers.get('content-type'), 'image/png');
   assert.equal(ok.headers.get('x-content-type-options'), 'nosniff');
-  assert.match(ok.headers.get('content-security-policy'), /sandbox/);
+  // scripts stay blocked, but a vector image's own <style> and embedded data: images still render when it is opened full size
+  assert.equal(ok.headers.get('content-security-policy'), "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox");
   assert.match(ok.headers.get('cache-control'), /immutable/);
   assert.deepEqual(Buffer.from(await ok.arrayBuffer()), PNG);
   for (const q of ['', '?fane-image=', '?fane-image=../../config.json', `?fane-image=${'c'.repeat(64)}.png`, '?other=1']) {
@@ -121,4 +122,29 @@ test('put prunes after writing, and a failing clean-up does not fail the image',
   assert.deepEqual(kept, [url.split('=')[1]]);
   const broken = createImageStore({ dir: '/d', fs: { mkdir: async () => {}, writeFile: async () => {} }, prune: async () => { throw new Error('disk'); } });
   assert.equal(await broken.put(png), url);
+});
+
+test('pruneStore: a file another request removed first is skipped, not an error; other failures still throw', async () => {
+  const enoent = () => Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
+  const files = {
+    [`${hex('a')}.png`]: { size: 40, mtimeMs: 1 },
+    [`${hex('b')}.png`]: { size: 40, mtimeMs: 2 },
+    [`${hex('c')}.png`]: { size: 40, mtimeMs: 3 },
+    [`${hex('d')}.png`]: { size: 40, mtimeMs: 4 },
+  };
+  const base = fakeDir(files);
+  // gone between the listing and the stat (a), and between the listing and the unlink (b)
+  const fs = {
+    ...base,
+    stat: async (p) => { if (basename(p) === `${hex('a')}.png`) throw enoent(); return base.stat(p); },
+    unlink: async (p) => { if (basename(p) === `${hex('b')}.png`) throw enoent(); return base.unlink(p); },
+  };
+  const removed = await pruneStore('/d', { maxBytes: 80, fs });
+  // a is not counted at all (120 left), b is gone by another hand (80 left): within the limit, nothing else removed
+  assert.deepEqual(removed, []);
+  assert.ok(files[`${hex('c')}.png`] && files[`${hex('d')}.png`]);
+  const tight = await pruneStore('/d', { maxBytes: 40, fs });
+  assert.deepEqual(tight, [`${hex('c')}.png`]); // the next oldest goes
+  const denied = { ...base, unlink: async () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } };
+  await assert.rejects(pruneStore('/d', { maxBytes: 1, fs: denied }), /EACCES/);
 });

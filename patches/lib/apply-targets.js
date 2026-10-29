@@ -38,11 +38,11 @@ function planPatch(contents, targets) {
   return { next, applied, skipped, errors };
 }
 
-function run(name, targets) {
+function run(name, targets, io = fs) { // `io`: tests pass a fake file system
   const files = [...new Set(targets.map(t => t.file))];
   const contents = {};
   for (const f of files) {
-    try { contents[f] = fs.readFileSync(f, 'utf8'); } catch { /* reported by planPatch */ }
+    try { contents[f] = io.readFileSync(f, 'utf8'); } catch { /* reported by planPatch */ }
   }
   const { next, applied, skipped, errors } = planPatch(contents, targets);
   for (const s of skipped) console.log(`${name}: skipped ${s}`);
@@ -53,23 +53,28 @@ function run(name, targets) {
     return;
   }
   if (!applied.length) return console.log(`${name}: already patched`);
-  // Every new bundle is written in full before any is replaced, so a failing write (disk full) leaves no file
-  // patched without its partner (an image hook without the route that serves its links).
+  // Every new bundle and every backup is written in full before any bundle is replaced, so a failing write (disk
+  // full) leaves no file patched without its partner (an image hook without the route that serves its links).
+  // What is left to do after that is renames only.
   const changed = files.filter(f => next[f] !== contents[f]);
+  const madeBaks = [];
   try {
     for (const f of changed) {
-      const st = fs.statSync(f); // the renamed file keeps the bundle's mode and owner
-      fs.writeFileSync(`${f}.fane-tmp`, next[f], { mode: st.mode });
-      try { fs.chownSync(`${f}.fane-tmp`, st.uid, st.gid); } catch { /* not root: the owner is already ours */ }
+      const st = io.statSync(f); // the renamed file keeps the bundle's mode and owner
+      io.writeFileSync(`${f}.fane-tmp`, next[f], { mode: st.mode });
+      try { io.chownSync(`${f}.fane-tmp`, st.uid, st.gid); } catch { /* not root: the owner is already ours */ }
+    }
+    for (const f of changed) {
+      if (io.existsSync(`${f}.bak`)) continue;
+      io.writeFileSync(`${f}.bak`, contents[f]);
+      madeBaks.push(`${f}.bak`);
     }
   } catch (err) {
-    for (const f of changed) fs.rmSync(`${f}.fane-tmp`, { force: true });
+    for (const f of changed) io.rmSync(`${f}.fane-tmp`, { force: true });
+    for (const b of madeBaks) io.rmSync(b, { force: true });
     throw err;
   }
-  for (const f of changed) {
-    if (!fs.existsSync(`${f}.bak`)) fs.writeFileSync(`${f}.bak`, contents[f]);
-    fs.renameSync(`${f}.fane-tmp`, f);
-  }
+  for (const f of changed) io.renameSync(`${f}.fane-tmp`, f);
   console.log(`${name}: patched ${applied.length} of ${targets.length} targets (backups: *.bak)`);
 }
 

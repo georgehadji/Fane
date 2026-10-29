@@ -44,20 +44,22 @@ export async function pruneStore(dir, { maxBytes = maxStoreBytesFromEnv(), keep,
   const entries = [];
   for (const name of await fs.readdir(dir)) {
     if (!IMAGE_NAME.test(name)) continue;
-    const { size, mtimeMs } = await fs.stat(join(dir, name));
-    entries.push({ name, size, mtimeMs });
+    // another request's prune may remove a file between the listing and here; gone is what this run wanted anyway
+    const st = await fs.stat(join(dir, name)).catch(gone);
+    if (st) entries.push({ name, size: st.size, mtimeMs: st.mtimeMs });
   }
   let total = entries.reduce((n, e) => n + e.size, 0);
   const removed = [];
   for (const e of entries.sort((a, b) => a.mtimeMs - b.mtimeMs)) {
     if (total <= maxBytes) break;
     if (e.name === keep) continue;
-    await fs.unlink(join(dir, e.name));
-    total -= e.size;
-    removed.push(e.name);
+    const done = await fs.unlink(join(dir, e.name)).then(() => true, gone);
+    total -= e.size; // removed here or by someone else: either way it no longer counts
+    if (done) removed.push(e.name);
   }
   return removed;
 }
+const gone = (err) => { if (err?.code === 'ENOENT') return undefined; throw err; };
 
 // put(dataUrl) -> link to the stored image; get(link) -> data URL again (for an edit that uses
 // the image as a reference). put rejects what is not a storable image; get what is not a link.
@@ -95,7 +97,8 @@ export async function serveImage(request, { dir, read = readFile } = {}) {
       'Content-Type': MIME_OF[name.slice(name.lastIndexOf('.') + 1)],
       'Cache-Control': 'public, max-age=31536000, immutable', // the name is the hash of the content
       'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': "default-src 'none'; sandbox",
+      // scripts stay blocked (default-src, sandbox); inline styles and data: images are what a vector image's own <style> and <image> need
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox",
     },
   });
 }
