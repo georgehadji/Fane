@@ -14,7 +14,8 @@ import { createRequire } from 'node:module';
 import { DEFAULTS } from '../cli/vane.mjs';
 import { KEYED_ENGINES, SECRET_KEY_LINE, renderSettings } from './searxng-settings.mjs';
 
-const { FANE_CORE_DIR, FANE_IMAGE_DIR, FANE_WRITE_DIR, FANE_CODE_DIR, FANE_BRAINSTORM_DIR } = createRequire(import.meta.url)('../patches/lib/vane.js');
+const require = createRequire(import.meta.url);
+const { FANE_CORE_DIR, FANE_IMAGE_DIR, FANE_WRITE_DIR, FANE_CODE_DIR, FANE_BRAINSTORM_DIR, needsRestart } = require('../patches/lib/vane.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTAINER = DEFAULTS.container;
@@ -42,7 +43,8 @@ try {
   fail(`cannot inspect container "${CONTAINER}": ${(err.stderr || err.message).toString().split('\n')[0]}. Is Docker running and Vane installed (README, Requirements)?`);
 }
 
-let changed = false;
+let changed = false; // something Vane's server reads changed: restart
+const browserOnly = []; // patches that changed only browser files: a page reload is enough
 let failed = false;
 
 // 1. Patches: each script exits non-zero without touching files when its target does not match.
@@ -52,7 +54,10 @@ for (const file of readdirSync(join(ROOT, 'patches')).filter(f => /^patch-.*\.js
   try {
     const out = docker(['exec', '-u', '0', CONTAINER, 'node', `${PATCH_DIR}/${file}`]);
     console.log(out.split('\n').join(' | ')); // each line already starts with the patch name
-    if (out.split('\n').some(l => /patched/.test(l) && !/already patched/.test(l))) changed = true;
+    if (out.split('\n').some(l => /patched/.test(l) && !/already patched/.test(l))) {
+      if (needsRestart(require(join(ROOT, 'patches', file)).TARGETS)) changed = true;
+      else browserOnly.push(file.replace(/\.js$/, ''));
+    }
   } catch (err) {
     failed = true;
     console.error(`${file}: FAILED. ${(err.stderr || err.message).toString().trim().split('\n')[0]}`);
@@ -131,6 +136,8 @@ if (changed) {
     ready = await fetch(`${DEFAULTS.url}/api/providers`, { signal: AbortSignal.timeout(5000) }).then(r => r.ok, () => false);
   }
   console.log(ready ? ' ready' : ' not ready after 90s');
+} else if (browserOnly.length) {
+  console.log(`only browser files changed (${browserOnly.join(', ')}); not restarting: reload the page`);
 } else {
   console.log('nothing changed; not restarting');
 }

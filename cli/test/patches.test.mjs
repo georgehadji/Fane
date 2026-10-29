@@ -172,6 +172,19 @@ test('patch-discover-ellipsis: three periods at the end of a summary become a no
   assert.deepEqual(r.errors, []);
 });
 
+test('apply.mjs restarts Vane only for a patch with a server target; browser chunks and the stylesheet need a reload', () => {
+  const { BROWSER_DIR, needsRestart } = require('../../patches/lib/vane.js');
+  const browser = Object.entries(FILES).filter(([, f]) => f.startsWith(BROWSER_DIR)).map(([k]) => k).sort();
+  assert.deepEqual(browser, ['appCss', 'chatClient', 'discoverClient', 'layoutClient', 'libraryClient', 'messageClient']);
+  assert.equal(needsRestart([{ file: FILES.layoutClient }, { file: FILES.appCss }]), false);
+  assert.equal(needsRestart([{ file: FILES.layoutClient }, { file: FILES.chatRoute }]), true); // one server target is enough
+  const patch = (n) => require(`../../patches/${n}.js`).TARGETS;
+  assert.equal(needsRestart(patch('patch-theme-toggle')), false);
+  assert.equal(needsRestart(patch('patch-colors')), false);
+  assert.equal(needsRestart(patch('patch-sources-required')), true);
+  assert.equal(needsRestart(patch('patch-discover-summary-greek')), true); // also edits the server-rendered pages
+});
+
 test('the README, and the project page\'s count and apply output, name every patch in patches/', () => {
   const names = readdirSync(new URL('../../patches/', import.meta.url)).filter(f => /^patch-.*\.js$/.test(f)).map(f => f.slice(0, -3)).sort();
   const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
