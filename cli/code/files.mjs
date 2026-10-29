@@ -36,12 +36,32 @@ export const languageOf = (path) => {
 // One file on a case-blind file system (Windows, macOS): "App.js" and "app.js" cannot both be written.
 export const sameFile = (a, b) => a.toLowerCase() === b.toLowerCase();
 
-// Fenced blocks: an opening fence of 3+ backticks or tildes with an info string, the same fence closing it.
-const FENCE = /^([`~]{3,})([^\n`]*)\n([\s\S]*?)(?:\n|^)\1[ \t]*$/gm;
-
+// Fenced blocks: an opening fence of 3+ backticks or tildes (with an info string), closed by a bare fence of the same
+// character and at least the same length. Inside an open block, a fence line of the same length WITH an info string
+// opens a nested block that the next bare fence closes, so a README or a Python docstring that shows a ```bash
+// example inside its own fence is one block, not cut at the example's closing fence. An unclosed block is no block.
+// shortcut: an unlabelled inner fence ("```" alone) still closes the block; models that nest them use a longer outer fence.
 export function codeBlocks(text) {
+  const s = String(text || '');
   const out = [];
-  for (const m of String(text || '').matchAll(FENCE)) out.push({ info: m[2].trim(), code: m[3], start: m.index, end: m.index + m[0].length });
+  let open = null, pos = 0;
+  for (const raw of s.split('\n')) {
+    const start = pos;
+    pos += raw.length + 1;
+    const line = raw.trimEnd();
+    const m = /^([`~]{3,})(.*)$/.exec(line);
+    // a backtick fence's info string has no backtick: "```x```" is code inside a sentence
+    const fence = m && !(m[1][0] === '`' && m[2].includes('`')) ? m : null;
+    if (!open) {
+      if (fence) open = { fence: fence[1], info: fence[2].trim(), start, body: pos, depth: 1 };
+      continue;
+    }
+    if (!fence || fence[1][0] !== open.fence[0]) continue;
+    if (fence[2].trim()) { if (fence[1].length === open.fence.length) open.depth++; continue; }
+    if (fence[1].length < open.fence.length || --open.depth) continue;
+    out.push({ info: open.info, code: s.slice(open.body, Math.max(open.body, start - 1)), start: open.start, end: start + line.length });
+    open = null;
+  }
   return out;
 }
 

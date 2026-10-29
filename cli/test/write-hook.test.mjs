@@ -28,6 +28,20 @@ test('cleanMarkdown removes HTML tags and keeps Markdown and plain angle bracket
   assert.doesNotMatch(cleanMarkdown('<<iframe>iframe src="https://evil.example">'), /<iframe/);
 });
 
+test('cleanMarkdown leaves code alone: generics in spans, HTML in fences; tags around a span still go', () => {
+  assert.equal(cleanMarkdown('Returns `Promise<string>` or `Array<T>` here'), 'Returns `Promise<string>` or `Array<T>` here');
+  const fenced = 'Example:\n\n```html\n<div class="a"><img src="x.png"></div>\n```\n\nDone <b>now</b>.';
+  assert.equal(cleanMarkdown(fenced), 'Example:\n\n```html\n<div class="a"><img src="x.png"></div>\n```\n\nDone now.');
+  assert.doesNotMatch(cleanMarkdown('<img `x` onerror=alert(1)>'), /onerror/);
+  assert.doesNotMatch(cleanMarkdown('<<img src=x onerror=alert(1)>img src=`y` onerror=alert(1)>'), /<img/);
+  // the article body escapes what is left of an unclosed tag in prose, and shows code as written
+  const article = ['# T', '', 'See `List<int>` and <iframe src=x', '', '```', '<p>kept</p>', '```', ''].join('\n');
+  const html = renderArticleResult(RESULT({ article }));
+  assert.match(html, /`List<int>`/);
+  assert.match(html, /&lt;iframe src=x/);
+  assert.match(html, /<p>kept<\/p>/);
+});
+
 test('progress without a draft is one status paragraph, in the language of the article', () => {
   const en = renderArticleProgress({ lang: 'en', phases: [{ phase: 'sources', status: 'done' }, { phase: 'outline', status: 'ok' }], running: 'draft', draft: null });
   assert.match(en, /^<p role="status"/);

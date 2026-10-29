@@ -61,7 +61,7 @@ export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&
 // Text for an attribute (alt): Vane does not decode entities there, so none are used. A pair of straight
 // quotes becomes curly ones, the rest of the characters that could end the attribute or open a tag are
 // replaced by look-alikes.
-export const attr = (s) => String(s ?? '').replace(/"([^"]*)"/g, '“$1”').replace(/"/g, '”').replace(/</g, '‹').replace(/>/g, '›').replace(/(\w)'(\w)/g, '$1’$2');
+export const attr = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().replace(/"([^"]*)"/g, '“$1”').replace(/"/g, '”').replace(/</g, '‹').replace(/>/g, '›').replace(/(\w)'(\w)/g, '$1’$2');
 
 export const altText = (subject, i, n, name) => `Image ${i} of ${n}: ${subject}${name ? ` (${name})` : ''}`;
 
@@ -86,7 +86,7 @@ const figure = (img, subject, i, n) => {
   // Vane's HTML parser trims the space at the edge of a span, so the gap after the name is a margin.
   // No "·" before the price: weight, opacity and the margin separate them, and a dot left at a line end dangles.
   const price = img.pricePerImage ? `≈${NBSP}$${img.pricePerImage.toFixed(3)}` : '';
-  const words = img.text ? `<br><span>${escapeHtml(img.text)}</span>` : '';
+  const words = img.text ? `<br><span>${escapeHtml(img.text.replace(/\s+/g, ' ').trim())}</span>` : ''; // a blank line would end Vane's raw-HTML block
   // The tile keeps its place (the asked ratio, then the picture's own) while a large original loads.
   return `<figure style="margin:0"><a href="${src(img)}" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="${src(img)}" alt="${attr(altText(subject, i, n))}" width="100%" loading="lazy" style="display:block;margin:0;height:auto;aspect-ratio:auto ${ratio(img.aspect)};background:${PLACEHOLDER};border-radius:8px"></a><figcaption style="font-size:14px;margin-top:6px"><span style="font-weight:500;margin-right:0.4em">${escapeHtml(modelLabel(img))}</span><span>${price}</span>${words}</figcaption></figure>`;
 };

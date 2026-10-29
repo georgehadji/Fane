@@ -34,6 +34,9 @@ export function createSyntaxChecker({ node = process.execPath, pythons = ['pytho
   async function checkOne(file, dir) {
     const lang = languageOf(file.path);
     if (lang === 'json') {
+      // tsconfig.json and jsconfig.json are JSON with comments and trailing commas: JSON.parse would fail a valid file
+      // shortcut: no JSONC parser (no dependency), so these are reported unchecked
+      if (/(?:^|\/)(?:ts|js)config(?:\.[\w-]+)?\.json$/i.test(file.path)) return { status: 'unchecked', detail: 'JSON with comments' };
       try { JSON.parse(file.content); return { status: 'ok' }; } catch (err) { return { status: 'error', detail: err.message.slice(0, 200) }; }
     }
     const ext = file.path.split('.').pop().toLowerCase();

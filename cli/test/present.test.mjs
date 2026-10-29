@@ -94,3 +94,10 @@ test('attr: alt text has no entities, no way out of the attribute, curly quotes'
   const md = renderResult({ images: [img(1, 0.01)], requested: 1, complete: true, errors: [] }, 'draw "><img src=x onerror=alert(1)>');
   assert.equal(md.match(/<img /g).length, 1); // the prompt cannot add an element
 });
+
+test('a prompt or caption with blank lines stays on one line, so Vane does not end the HTML block', () => {
+  const md = renderResult({ images: [img(1, 0.01, 'A fox.\n\nIn the snow.\n')], requested: 1, complete: true, errors: [] }, 'draw a fox\n\nin the snow\r\n');
+  assert.match(md, /alt="Image 1 of 1: a fox in the snow"/);
+  assert.match(md, /<span>A fox\. In the snow\.<\/span>/);
+  assert.doesNotMatch(md.split('<figcaption')[0], /\n\s*\n/); // no blank line inside the tile
+});

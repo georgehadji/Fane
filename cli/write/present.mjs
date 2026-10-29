@@ -6,6 +6,7 @@
 import { escapeHtml, failed, failureReason, formatDuration, quiet, stepsDone } from '../image/present.mjs';
 import { linkCitations, renumber, sourcesSection } from './checks.mjs';
 import { POSTS } from '../core/formats.mjs';
+import { mapOutsideFences, mapProse, segments } from '../core/markdown.mjs';
 
 const NBSP = ' ';
 
@@ -20,18 +21,28 @@ const WORDS = {
 const words = (lang) => WORDS[lang] || WORDS.en;
 const labels = (lang) => LABELS[lang] || LABELS.en;
 
-// Model text may carry HTML (or a page may have talked it into writing some): tags are removed,
-// the Markdown stays. Repeated until nothing changes: one pass turned "<<img …>img onerror=…>" into a tag.
-export function cleanMarkdown(text) {
-  let s = String(text || ''), prev;
+// Repeated until nothing changes: one pass turned "<<img …>img onerror=…>" into a tag.
+function stripTags(s) {
+  let prev;
   do { prev = s; s = s.replace(/<(?=[a-zA-Z/!?])[^>]*>/g, ''); } while (s !== prev);
   return s;
 }
 
+// Model text may carry HTML (or a page may have talked it into writing some): tags are removed, the Markdown stays.
+// Code is not HTML: `Promise<string>` and a fenced HTML example stay as written (Vane shows code as text). Inline code
+// is lifted out while the tags go, so a tag that wraps a span ("<img `x` onerror=…>") is removed whole.
+export function cleanMarkdown(text) {
+  return mapOutsideFences(String(text || ''), part => {
+    const spans = [];
+    const lifted = segments(part).map(s => (s.code ? `\u0001${spans.push(s.text) - 1}\u0002` : s.text)).join('');
+    return stripTags(lifted).replace(/\u0001(\d+)\u0002/g, (_, i) => spans[i] ?? '');
+  });
+}
+
 // An article body as Markdown next to Fane's own HTML: an unclosed tag ("<iframe src=…" with no ">") survives
-// cleanMarkdown, and the ">" of the sources list written after it would close it, so what is left of one is escaped.
-// (A post is escaped whole, so it needs no such step.)
-const articleMarkdown = (text) => cleanMarkdown(text).replace(/<(?=[a-zA-Z/!?])/g, '&lt;');
+// cleanMarkdown, and the ">" of the sources list written after it would close it, so what is left of one is escaped
+// (in prose; code is shown as text). (A post is escaped whole, so it needs no such step.)
+const articleMarkdown = (text) => mapProse(cleanMarkdown(text), s => s.replace(/<(?=[a-zA-Z/!?])/g, '&lt;'));
 
 // What the user sees while the pipeline runs. `state`: { lang, phases: [{ phase, status }],
 // running: phase | null, draft: { text, sources } | null }. Once a draft exists it is shown, with
