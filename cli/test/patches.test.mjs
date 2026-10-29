@@ -99,7 +99,9 @@ test('patch-type: intact Commissioner WOFF2s for Latin and Greek on Vane\'s font
   const colors = require('../../patches/patch-colors.js');
   const type = require('../../patches/patch-type.js');
   const fonts = [...type.TYPE.matchAll(/base64,([A-Za-z0-9+/=]+)\)/g)].map(m => Buffer.from(m[1], 'base64'));
-  assert.equal(fonts.length, 3);
+  assert.equal(fonts.length, 9); // Commissioner: 3 subsets; Literata: 3 subsets, roman and italic
+  assert.ok(type.TYPE.includes('.prose{font-family:Literata,Commissioner,'));
+  assert.ok(type.TYPE.includes('.prose [role=status]{font-family:Commissioner,')); // Fane's receipts stay sans
   for (const font of fonts) {
     assert.equal(font.toString('latin1', 0, 4), 'wOF2');
     assert.equal(font.readUInt32BE(8), font.length); // the WOFF2 header's own length matches
@@ -121,12 +123,12 @@ test('patch-type: a stylesheet patched with an earlier version is upgraded in pl
   const colors = require('../../patches/patch-colors.js');
   const type = require('../../patches/patch-type.js');
   const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
-  for (const old of [type.TYPE_V1, type.TYPE_V2].flatMap(v => [`x{}${end}\n${v}\n\n${colors.COLORS}\n`, `x{}${end}\n${colors.COLORS}\n\n${v}\n`])) {
+  for (const old of [type.TYPE_V1, type.TYPE_V2, type.TYPE_V3].flatMap(v => [`x{}${end}\n${v}\n\n${colors.COLORS}\n`, `x{}${end}\n${colors.COLORS}\n\n${v}\n`])) {
     const r = planPatch({ [FILES.appCss]: old }, type.TARGETS);
     assert.deepEqual(r.errors, []);
     const css = r.next[FILES.appCss];
     assert.ok(css.includes(type.TYPE) && css.includes(colors.COLORS));
-    assert.ok(!css.includes('/*fane:type*/') && !css.includes('/*fane:type-2*/')); // the old block is gone, not left above the new one
+    assert.ok(!css.includes('/*fane:type*/') && !css.includes('/*fane:type-2*/') && !css.includes('/*fane:type-3*/')); // the old block is gone, not left above the new one
     assert.deepEqual(planPatch(r.next, type.TARGETS).applied, []);
   }
 });

@@ -1,4 +1,4 @@
-// Vane: Commissioner instead of Montserrat, and calmer answer headings and spacing.
+// Vane: Commissioner instead of Montserrat, Literata for answer text, and calmer answer headings and spacing.
 // Measured on the pinned build:
 //  - Montserrat (Vane's text face) ships no Greek, so Greek answers fell back to a system sans while digits and Latin
 //    words stayed in Montserrat: two typefaces in every line. Commissioner has Latin and Greek drawn together, so every
@@ -50,17 +50,40 @@ const PAGES = String.raw`.text-xs.leading-relaxed.line-clamp-2{font-size:.8125re
 a[href^="/c/"].line-clamp-2{max-width:60ch;overflow-wrap:anywhere}`;
 // The second version, with the Discover and Library rules.
 const TYPE_V2 = `/*fane:type-2*/\n${BASE}\n${PAGES}`;
-const TYPE = `/*fane:type-3*/\n${BASE}\n${PAGES}\n.prose a{text-decoration-thickness:1px;text-underline-offset:.18em}`;
+const LINKS = '.prose a{text-decoration-thickness:1px;text-underline-offset:.18em}';
+// The third version, with the link underline.
+const TYPE_V3 = `/*fane:type-3*/\n${BASE}\n${PAGES}\n${LINKS}`;
+
+// Literata for the answer text (Vane's `.prose`), Commissioner for everything around it: a serif to read, a sans to
+// operate. Literata, Copyright 2017 The Literata Project Authors (github.com/googlefonts/literata), SIL OFL 1.1
+// (patches/fonts/OFL-literata.txt): the same three subsets, roman and italic (answers use italics; a slanted roman
+// would be fake), weights 300 to 700, without the optical-size axis (that axis doubled the files to 490 KB).
+// Its lowercase (x-height 52) matches Commissioner at 108% (54), so no size-adjust; line spacing 1.55 for the taller
+// serif text, and weight 370 on the dark theme, where light text on dark looks heavier. Fane's own status and receipt
+// lines (role="status") stay in Commissioner; code keeps the monospace font Tailwind gives `code` and `pre`.
+const literata = (style) => ([name, range]) => {
+  const file = `literata-${name}${style === 'italic' ? '-italic' : ''}.woff2`;
+  const data = fs.readFileSync(path.join(__dirname, 'fonts', file)).toString('base64');
+  return `@font-face{font-family:Literata;font-style:${style};font-weight:300 700;font-display:swap;src:url(data:font/woff2;base64,${data}) format("woff2");unicode-range:${range}}`;
+};
+const SERIF = String.raw`/* Literata, Copyright 2017 The Literata Project Authors (github.com/googlefonts/literata), SIL OFL 1.1 */
+${SUBSETS.map(literata('normal')).join('\n')}
+${SUBSETS.map(literata('italic')).join('\n')}
+.prose{font-family:Literata,Commissioner,Georgia,serif}
+.prose p,.prose li{line-height:1.55}
+.dark .prose{font-weight:370}
+.prose [role=status]{font-family:Commissioner,Montserrat,Arial,sans-serif}`;
+const TYPE = `/*fane:type-4*/\n${BASE}\n${PAGES}\n${LINKS}\n${SERIF}`;
 
 const TARGETS = [
   {
-    name: 'Commissioner, answer, Discover and Library type',
+    name: 'Commissioner, Literata answers, Discover and Library type',
     file: FILES.appCss,
     // an older block is replaced where it stands (patch-colors may sit between it and the stylesheet's last rule)
-    alts: [{ from: TYPE_V2, to: TYPE }, { from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
-    marker: '/*fane:type-3*/',
+    alts: [{ from: TYPE_V3, to: TYPE }, { from: TYPE_V2, to: TYPE }, { from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
+    marker: '/*fane:type-4*/',
   },
 ];
 
-module.exports = { TARGETS, TYPE, TYPE_V1, TYPE_V2 };
+module.exports = { TARGETS, TYPE, TYPE_V1, TYPE_V2, TYPE_V3 };
 if (require.main === module) run('patch-type', TARGETS);
