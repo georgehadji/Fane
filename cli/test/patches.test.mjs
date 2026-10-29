@@ -172,6 +172,15 @@ test('patch-discover-ellipsis: three periods at the end of a summary become a no
   assert.deepEqual(r.errors, []);
 });
 
+test('patch-answer-language: the writer prompt asks for the language of the question, first among its formatting rules', () => {
+  const { TARGETS } = require('../../patches/patch-answer-language.js');
+  const prompt = 'const w=(a,b)=>`\n\n    ### Formatting Instructions\n    - **Structure**: Use headings.\n    ${a}`;';
+  const r = planPatch({ [FILES.research]: prompt }, TARGETS);
+  assert.deepEqual(r.errors, []);
+  const text = new Function(`${r.next[FILES.research]}; return w('ctx')`)();
+  assert.match(text, /### Formatting Instructions\n {4}- \*\*Language\*\*: Write the whole answer[^\n]*Greek\.\n {4}- \*\*Structure\*\*/);
+  assert.deepEqual(planPatch(r.next, TARGETS).applied, []);
+});
 test('patch-discover-summary-greek: every Discover and home news link asks for a Greek summary, in an ASCII bundle', () => {
   const { TARGETS, ASK } = require('../../patches/patch-discover-summary-greek.js');
   // one fake bundle per file, holding each of its links as Vane writes them
