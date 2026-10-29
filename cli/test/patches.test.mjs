@@ -187,6 +187,24 @@ test('patch-greek-lang: mostly Greek text is marked "el", anything else keeps th
   assert.equal(LANG(undefined), undefined);
 });
 
+test('patch-quality-mode: Quality research stops after two rounds that found no new page', () => {
+  const { TARGETS } = require('../../patches/patch-quality-mode.js');
+  const loop = TARGETS.filter(t => /pages seen|without a new page/.test(t.name));
+  // Vane's research loop, cut down to the lines the two targets edit.
+  const fake = 'var research=(rounds,b,console)=>{let used=0,c=[],d=rounds.length,f={b:()=>""},i=0;for(let g=0;g<d;g++){let l=(0,f.b)(i,b.config.mode,g,d,b.config.fileIds);used++;let r=rounds[g];c.push(...r)}let l=c.filter(a=>"search_results"===a.type).flatMap(a=>a.results),m=new Map,n=l.map(a=>a);return used};';
+  const out = planPatch({ [loop[0].file]: fake }, loop);
+  assert.deepEqual([out.errors, out.applied.length, planPatch(out.next, loop).applied], [[], 2, []]);
+  const research = new Function(`${out.next[loop[0].file]}return research`)();
+  const quiet = { log() {} };
+  const found = (...urls) => [{ type: 'search_results', results: urls.map(url => ({ metadata: { url } })) }];
+  const run = (mode, rounds) => research(rounds, { config: { mode } }, quiet);
+  assert.equal(run('quality', [found('a'), found('b'), found('c'), found('d')]), 4);
+  assert.equal(run('quality', [found('a', 'b'), found('a'), found('b'), found('c')]), 3);
+  assert.equal(run('quality', [found('a'), found('a'), found('b'), found('b'), found('b')]), 5); // a new page resets the count
+  assert.equal(run('quality', [[], [], found('a'), found('b')]), 4); // rounds before the first search do not count
+  assert.equal(run('balanced', [found('a'), found('a'), found('a'), found('a')]), 4);
+});
+
 test('every patch declares well-formed targets on known Vane files', () => {
   const dir = new URL('../../patches/', import.meta.url);
   const known = new Set(Object.values(FILES));

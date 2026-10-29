@@ -14,8 +14,18 @@
 //     re-sends full tool results every iteration.
 //     -> 10 iterations; the researcher sees results trimmed to 1500 chars each
 //        (the writer still gets the full findings).
+//  6. The researcher prompt says "Do not call done early—exhaust your research budget first"
+//     and also "Aim for 4-7 information-gathering calls", so models were told to run every
+//     iteration, each reading up to 3 pages at 4 chunks.
+//     -> the budget line now agrees with 4-7 calls.
+//  7. Nothing stops a loop whose searches keep returning pages it already has.
+//     -> two rounds in a row with no new page (URL) end the research.
 const { run } = require('./lib/apply-targets');
 const { FILES } = require('./lib/vane');
+
+// Runs at the end of each research round, where `r` is the round's tool results and `b` the research input.
+const STOP = String.raw`;if("quality"===b.config.mode){let N=0;r.forEach(x=>{x&&"search_results"===x.type&&(x.results||[]).forEach(y=>{let u=y.metadata?.url;u&&!faneSeen.has(u)&&(faneSeen.add(u),N++)})});faneStale=faneSeen.size&&!N?faneStale+1:0;if(faneStale>=2){console.log("fane: quality research stopped after round "+(g+1)+", two rounds found no new page");break}}`;
+const LOOP_END = '}let l=c.filter(a=>"search_results"===a.type).flatMap(a=>a.results),m=new Map,n=l.map(';
 
 const TARGETS = [
   {
@@ -57,7 +67,18 @@ const TARGETS = [
     from: 'r.forEach((a,b)=>{k.push({role:"tool",id:q[b].id,name:q[b].name,content:JSON.stringify(a)})})',
     to: 'r.forEach((a,B)=>{k.push({role:"tool",id:q[B].id,name:q[B].name,content:JSON.stringify("quality"===b.config.mode&&a&&"search_results"===a.type?{...a,results:a.results.map(x=>({title:x.metadata?.title,url:x.metadata?.url,content:String(x.content||"").slice(0,1500)}))}:a)})})',
   },
+  {
+    name: 'budget line agrees with 4-7 calls',
+    from: 'Do not call done early—exhaust your research budget first.',
+    to: 'Most questions are covered in 4-7 information-gathering calls; call done once more searches would only repeat what you already have.',
+  },
+  {
+    name: 'pages seen across rounds',
+    from: 'for(let g=0;g<d;g++){let l=(0,f.b)(i,b.config.mode,g,d,b.config.fileIds)',
+    to: 'let faneSeen=new Set,faneStale=0;for(let g=0;g<d;g++){let l=(0,f.b)(i,b.config.mode,g,d,b.config.fileIds)',
+  },
+  { name: 'stop after two rounds without a new page', from: LOOP_END, to: STOP + LOOP_END },
 ].map(t => ({ file: FILES.research, ...t }));
 
-module.exports = { TARGETS };
+module.exports = { TARGETS, STOP };
 if (require.main === module) run('patch-quality-mode', TARGETS);
