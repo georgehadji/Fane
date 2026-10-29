@@ -446,6 +446,7 @@ async function doctor(opts) {
       [FANE_CORE_DIR, ['language.mjs'], 'shared modules', '', 'every web UI feature (articles, code, brainstorming, images) falls back to a normal answer (run node scripts/apply.mjs)'],
       [FANE_IMAGE_DIR, ['vane-hook.mjs'], 'image modules', 'web UI image requests work', 'web UI image requests fall back to text (run node scripts/apply.mjs)'],
       [FANE_WRITE_DIR, ['vane-hook.mjs', 'trial.json'], 'article modules', 'web UI article requests work', 'web UI article requests fall back to a normal answer (run node scripts/apply.mjs)'],
+      [FANE_WRITE_DIR, ['quality-check.mjs'], 'Quality answer check', 'Quality answers are checked against their sources', 'Quality answers are shown unchecked (run node scripts/apply.mjs)'],
       [FANE_CODE_DIR, ['vane-hook.mjs', 'trial.json'], 'code modules', 'web UI coding requests work', 'web UI coding requests say so (run node scripts/code-trial.mjs, then node scripts/apply.mjs)'],
       // the brainstorm models come from the article trial checked above
       [FANE_BRAINSTORM_DIR, ['vane-hook.mjs'], 'brainstorm modules', 'web UI brainstorm requests work', 'web UI brainstorm requests fall back to a normal answer (run node scripts/apply.mjs)'],
