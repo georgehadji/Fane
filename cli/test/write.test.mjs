@@ -151,6 +151,12 @@ test('renumber numbers cited sources by first appearance and drops numbers that 
   assert.deepEqual(r.used.map(s => s.url), ['https://example.org/c', 'https://example.org/a', 'https://example.org/d']);
 });
 
+
+test('renumber unlinks body URLs that no source gave', () => {
+  const r = renumber('Tides [1]. See [more](https://evil.test/x) and https://example.org/a.', SOURCES);
+  assert.equal(r.text, 'Tides [1]. See more and https://example.org/a.');
+  assert.deepEqual(r.removed, ['https://evil.test/x']);
+});
 test('renumber and checkCitations read ranges like [2–3]', () => {
   const r = renumber('Built in 2023 [2–3]. Costs fell [3]. Both [1-2].', SOURCES);
   assert.equal(r.text, 'Built in 2023 [1, 2]. Costs fell [2]. Both [1, 3].');

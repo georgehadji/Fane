@@ -49,5 +49,27 @@ export function mapOutsideFences(text, fn) {
   return out + fn(run);
 }
 
+const urlKey = (u) => String(u).trim().replace(/[.,;:!?]+$/, '').replace(/\/+$/, '').toLowerCase();
+
+// Prose may link only to `allowed` URLs (what the run retrieved). A Markdown link to any other address keeps its text
+// and loses the link; a bare URL is dropped. Code is left alone: a URL there is an example, not a citation.
+// -> { text, removed: [url...] } in order of first appearance.
+export function enforceCitations(text, allowed) {
+  const ok = new Set([...allowed].map(urlKey));
+  const removed = [];
+  const out = mapProse(text, (prose) => prose
+    .replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/gi, (m, label, url) => {
+      if (ok.has(urlKey(url))) return m;
+      removed.push(url);
+      return label;
+    })
+    .replace(/https?:\/\/[^\s)\]<>]+/gi, (url) => {
+      if (ok.has(urlKey(url))) return url;
+      removed.push(url);
+      return '';
+    }));
+  return { text: out, removed: [...new Set(removed)] };
+}
+
 // The text with its fenced blocks removed.
 export const withoutFences = (text) => segments(text).filter(s => !s.fenced).map(s => s.text).join('');

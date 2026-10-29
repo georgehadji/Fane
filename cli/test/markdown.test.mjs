@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { segments, mapProse, mapOutsideFences, withoutFences } from '../core/markdown.mjs';
+import { segments, mapProse, mapOutsideFences, withoutFences, enforceCitations } from '../core/markdown.mjs';
 
 const kinds = (t) => segments(t).map(s => `${s.fenced ? 'fence' : s.code ? 'span' : 'prose'}:${s.text}`);
 
@@ -29,4 +29,13 @@ test('mapProse changes prose only; mapOutsideFences changes everything but fence
   assert.equal(mapProse(t, s => s.replace(/ {2}/g, '_')), 'a_b `c  d`\n```\ne  f\n```\ng_h');
   assert.equal(mapOutsideFences(t, s => s.replace(/ {2}/g, '_')), 'a_b `c_d`\n```\ne  f\n```\ng_h');
   assert.equal(withoutFences(t), 'a  b `c  d`\ng  h');
+});
+
+test('enforceCitations keeps links to allowed URLs, unlinks the rest, and leaves code alone', () => {
+  const allowed = ['https://a.org/x', 'https://b.org'];
+  const text = 'See [A](https://a.org/x), [B](https://b.org/) and [C](https://evil.test/p). Bare https://evil.test/q here, ok https://a.org/x.\n```\nhttps://evil.test/code\n```\nInline `https://evil.test/i` stays.';
+  const r = enforceCitations(text, allowed);
+  assert.equal(r.text, 'See [A](https://a.org/x), [B](https://b.org/) and C. Bare  here, ok https://a.org/x.\n```\nhttps://evil.test/code\n```\nInline `https://evil.test/i` stays.');
+  assert.deepEqual(r.removed, ['https://evil.test/p', 'https://evil.test/q']);
+  assert.deepEqual(enforceCitations('plain text', []).removed, []);
 });

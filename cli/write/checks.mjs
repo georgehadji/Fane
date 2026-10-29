@@ -5,6 +5,7 @@
 // Citations are bracketed source numbers, [3] or [1, 4], as in Vane's own answers; the
 // "Sources" list is written by code (sourcesSection), so a model cannot invent a URL.
 import { POSTS, isPost } from '../core/formats.mjs';
+import { enforceCitations } from '../core/markdown.mjs';
 import { LANGUAGE_NAMES, countTells, findHomoglyphs, greekTypography, wordCount } from '../core/language.mjs';
 
 // "[3]", "[1, 4]" and ranges "[2–4]" (models write them although the prompt asks for lists)
@@ -58,7 +59,9 @@ export function renumber(article, sources) {
     for (const n of nums) if (!order.has(n)) order.set(n, order.size + 1);
     return nums.length ? `[${[...new Set(nums.map(n => order.get(n)))].sort((a, b) => a - b).join(', ')}]` : '';
   }).replace(/[ \t]+([.,;:!?])/g, '$1');
-  return { text, used: [...order.keys()].map(n => sources[n - 1]) };
+  // a model that writes its own link in the body cannot send readers to an address no source gave
+  const { text: clean, removed } = enforceCitations(text, sources.map(s => s.url).filter(Boolean));
+  return { text: clean, used: [...order.keys()].map(n => sources[n - 1]), removed };
 }
 
 // Only web links become links; spaces and parentheses would end a Markdown link early.
