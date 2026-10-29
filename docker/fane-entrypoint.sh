@@ -18,7 +18,11 @@ sed "s/^\([[:space:]]*secret_key:\).*/\1 '$key'/" /fane/searxng/settings.yml > /
 # The CORE academic engine is switched on only with a key (same rule as scripts/searxng-settings.mjs).
 # Only [A-Za-z0-9._-], 8 to 200 long, so the key cannot break the YAML line or this sed. A case pattern, not
 # grep: grep tests one line at a time and let a key with a newline through.
-if [ -n "${CORE_API_KEY:-}" ]; then
+# A pasted or CRLF-edited key is trimmed at both ends, as scripts/apply.mjs does with .trim().
+CORE_API_KEY=${CORE_API_KEY:-}
+CORE_API_KEY=${CORE_API_KEY#"${CORE_API_KEY%%[![:space:]]*}"}
+CORE_API_KEY=${CORE_API_KEY%"${CORE_API_KEY##*[![:space:]]}"}
+if [ -n "$CORE_API_KEY" ]; then
   case "$CORE_API_KEY" in
     *[!A-Za-z0-9._-]*) ok=no ;;
     *) if [ "${#CORE_API_KEY}" -ge 8 ] && [ "${#CORE_API_KEY}" -le 200 ]; then ok=yes; else ok=no; fi ;;

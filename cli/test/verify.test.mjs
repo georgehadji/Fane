@@ -80,3 +80,15 @@ test('--min-support validates and implies --verify', () => {
   assert.equal(o['min-support'], 0.8);
   assert.throws(() => parseCli(['q', '--min-support', '2']), /Invalid --min-support/);
 });
+
+test('Greek: function words and accents are not evidence; a real paraphrase is still supported', () => {
+  const parthenon = [{ title: '', content: 'Ο Παρθενώνας είναι αρχαίος ναός αφιερωμένος στη θεά Αθηνά και βρίσκεται στην Ακρόπολη της Αθήνας.' }];
+  // shares only function words (της, στην, είναι, και) with the source
+  const tidal = verifyCitations('Η παλιρροϊκή ενέργεια είναι μορφή ανανεώσιμης ενέργειας που παράγεται από τα κύματα της θάλασσας[1].', parthenon);
+  assert.equal(tidal.cited, 1);
+  assert.equal(tidal.supported, 0);
+  const same = verifyCitations('Ο Παρθενώνας είναι ναός της θεάς Αθηνάς στην Ακρόπολη[1].', parthenon);
+  assert.equal(same.supported, 1);
+  // accents and capitals do not matter: the same sentence typed in capitals without accents
+  assert.deepEqual([...tokenize('ΤΟ ΜΟΝΑΣΤΗΡΙ ΤΟΥ ΆΓΙΟΥ ΌΡΟΥΣ')].sort(), [...tokenize('το μοναστηρι του αγιου ορουσ')].sort());
+});

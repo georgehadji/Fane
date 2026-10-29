@@ -78,3 +78,33 @@ test('findOpenRouterProvider', () => {
   assert.equal(findOpenRouterProvider(two, 'Openrouter').id, 'p4'); // exact name beats substring matches
   assert.throws(() => findOpenRouterProvider([...providers, { id: 'p3', name: 'OpenRouter 2', chatModels: [] }]), /More than one/);
 });
+
+test('modeOf: an image tier decides the Vane mode, otherwise --mode does', async () => {
+  const { modeOf } = await import('../runners.mjs');
+  assert.equal(modeOf({ tier: 'premium', mode: 'speed' }), 'quality');
+  assert.equal(modeOf({ tier: 'budget', mode: 'quality' }), 'speed');
+  assert.equal(modeOf({ tier: 'value' }), 'balanced');
+  assert.equal(modeOf({ mode: 'speed' }), 'speed');
+  assert.equal(modeOf({ tier: undefined, mode: 'balanced' }), 'balanced');
+});
+
+test('vaneRetrieve: parallel searches share one provider fetch and one model registration; a failure is retried', async () => {
+  const { vaneRetrieve } = await import('../runners.mjs');
+  const calls = { fetch: 0, resolve: 0, search: [] };
+  const deps = {
+    getProviders: async () => { calls.fetch++; await new Promise(r => setTimeout(r, 10)); return ['raw']; },
+    resolve: async (list) => { calls.resolve++; return { model: {}, providers: [...list, 'registered'] }; },
+    search: async (o, providers) => { calls.search.push([o.query, providers.join('+')]); return { sources: [{ title: 'a', url: 'https://a.example', content: 'x' }] }; },
+  };
+  const retrieve = vaneRetrieve({ url: 'http://x', model: 'a/b' }, 'balanced', deps);
+  const results = await Promise.all(['one', 'two', 'three'].map(q => retrieve(q)));
+  assert.deepEqual([calls.fetch, calls.resolve, results.every(r => r.length === 1)], [1, 1, true]);
+  assert.deepEqual(calls.search.map(c => c[1]), ['raw+registered', 'raw+registered', 'raw+registered']); // every search sees the registered model
+  await retrieve('four');
+  assert.deepEqual([calls.fetch, calls.resolve], [1, 1]);
+  // a failed first fetch is not remembered
+  let n = 0;
+  const flaky = vaneRetrieve({ url: 'http://x' }, 'speed', { ...deps, getProviders: async () => { if (++n === 1) throw new Error('Vane is down'); return ['raw']; } });
+  await assert.rejects(flaky('q'), /Vane is down/);
+  assert.equal((await flaky('q')).length, 1);
+});

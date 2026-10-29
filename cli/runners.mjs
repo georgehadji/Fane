@@ -11,7 +11,7 @@ import { detectLanguage } from './core/language.mjs';
 import { chainsFor } from './write/models.mjs';
 import { retryEmpty } from './write/research.mjs';
 import { OPENROUTER_BASE_URL, createOpenRouterClient, fromHost, modelClientFor, withFreeLlm } from './image/openrouter.mjs';
-import { DEFAULTS, UsageError, getModelProviders, getProvidersStartingVane, search } from './client.mjs';
+import { DEFAULTS, UsageError, getModelProviders, getProvidersStartingVane, resolveChatModel, search } from './client.mjs';
 
 // ---- image generation ----------------------------------------------------
 
@@ -40,12 +40,20 @@ export const listingClient = (opts) => (opts['key-from-vane'] || process.env.OPE
 
 // Vane's own research as a pipeline's retrieve(query): its sources (its answer text is not used), asked again when it
 // finds none. Vane is started at the first search, so a run that needs none works without it.
-function vaneRetrieve(opts, mode) {
-  let providers;
-  return retryEmpty(async (query) => (await search({ ...opts, query, stream: false, mode }, providers ??= await getProvidersStartingVane(opts.url, DEFAULTS.container))).sources);
+// The provider list is fetched once per run, with the chat model already registered (an OpenRouter slug Vane does not
+// know yet is added by resolveChatModel; `search` would add it again on every call), and shared as one promise, so
+// searches that start together wait for the same work. A failure is not remembered. `deps`: tests inject fakes.
+export function vaneRetrieve(opts, mode, deps = { getProviders: getProvidersStartingVane, resolve: resolveChatModel, search }) {
+  let ready;
+  const providers = () => (ready ??= deps.getProviders(opts.url, DEFAULTS.container)
+    .then(list => deps.resolve(list, opts)).then(r => r.providers)
+    .catch(err => { ready = undefined; throw err; }));
+  return retryEmpty(async (query) => (await deps.search({ ...opts, query, stream: false, mode }, await providers())).sources);
 }
 
 export const MODE_FOR_TIER = Object.fromEntries(Object.entries(TIER_FOR_MODE).map(([mode, tier]) => [tier, mode]));
+// The Vane mode a run uses: --tier (an image tier) wins over --mode, because a tier is a price band that maps to one.
+export const modeOf = (opts) => MODE_FOR_TIER[opts.tier] ?? opts.mode;
 
 function printArticleReport(r) {
   const say = (s) => process.stderr.write(`${s}\n`);
@@ -79,7 +87,7 @@ async function defaultChains({ mode, lang, client }) {
 }
 
 export async function listArticleModels(opts) {
-  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const mode = modeOf(opts);
   const lang = opts.lang ?? (opts.query ? detectLanguage(opts.query) : 'en');
   const client = await listingClient(opts);
   const chosen = await defaultChains({ mode, lang, client });
@@ -94,7 +102,7 @@ export async function runArticle(opts) {
   if (!opts.query) throw new UsageError('Missing topic. Example: vane --article "tidal power in Greece"');
   const client = await resolveClient(opts);
   const { createArticlePipeline } = await import('./write/pipeline.mjs');
-  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const mode = modeOf(opts);
   const retrieve = vaneRetrieve(opts, mode);
   const write = createArticlePipeline({ client, retrieve, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
   const post = opts.post; // a platform of formats.mjs, or undefined for an article
@@ -142,7 +150,7 @@ export async function runArticleEdit(opts) {
   const earlier = parseArticleAnswer(text);
   if (!earlier?.sources.length) throw new UsageError(`${file} does not look like an article from vane --article (a "# " title, at least 80 words, a Sources list).`);
   const client = await resolveClient(opts);
-  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const mode = modeOf(opts);
   const lang = opts.lang ?? targetLanguage(opts.query, earlier.lang);
   const explicit = opts['article-model'].length > 0;
   const chosen = explicit ? { chains: chainsFor(opts['article-model']) } : await defaultChains({ mode, lang, client });
@@ -172,7 +180,7 @@ async function defaultCodeChains({ mode, client }) {
 }
 
 export async function listCodeModels(opts) {
-  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const mode = modeOf(opts);
   const client = await listingClient(opts);
   const chosen = await defaultCodeChains({ mode, client });
   const show = (id) => (chosen.prices?.[id] ? `${id} ($${chosen.prices[id].in}/${chosen.prices[id].out})` : id); // a free: model has no price
@@ -228,7 +236,7 @@ export async function runCode(opts) {
   const dir = await codeDir(opts); // before any paid call
   const client = await resolveClient(opts);
   const [{ createCodePipeline }, { createSyntaxChecker }, { codeChainsFor }] = await Promise.all([import('./code/pipeline.mjs'), import('./code/syntax.mjs'), import('./code/models.mjs')]);
-  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const mode = modeOf(opts);
   const chosen = opts['code-model'].length ? { chains: codeChainsFor(opts['code-model']) } : await defaultCodeChains({ mode, client });
   // Documentation is Vane's own research (Balanced, Quality); Vane is started only then.
   const retrieve = vaneRetrieve(opts, mode);
@@ -257,7 +265,7 @@ export async function runBrainstorm(opts) {
   const client = await resolveClient(opts);
   const { createBrainstormPipeline, chainsFor: brainstormChainsFor, selectBrainstormChains, selectFreeBrainstormChains } = await import('./brainstorm/pipeline.mjs');
   const { renderBrainstorm } = await import('./brainstorm/present.mjs');
-  const mode = opts.tier ? MODE_FOR_TIER[opts.tier] : opts.mode;
+  const mode = modeOf(opts);
   const lang = opts.lang ?? detectLanguage(opts.query);
   let chosen = { chains: brainstormChainsFor(opts['brainstorm-model']) };
   if (!opts['brainstorm-model'].length) {

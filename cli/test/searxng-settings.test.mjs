@@ -40,3 +40,20 @@ test('docker/fane-entrypoint.sh refuses the same keys as renderSettings, a newli
   assert.equal(accepts(KEY), true);
   for (const bad of ["abc'def123", 'abc def123', 'short', 'a'.repeat(201), `${KEY}\nx: y`, `${KEY}\n`]) assert.equal(accepts(bad), false, JSON.stringify(bad));
 });
+
+test('docker/fane-entrypoint.sh trims a pasted key like apply.mjs does, and still refuses a space inside it', { skip: spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh' }, () => {
+  const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
+  const trim = script.split('\n').filter(l => l.startsWith('CORE_API_KEY=')).join('\n');
+  assert.equal(trim.split('\n').length, 3);
+  const check = /case "\$CORE_API_KEY" in[\s\S]*?\n {2}esac/.exec(script)[0];
+  const sh = (key, tail) => spawnSync('sh', ['-c', `${trim}\n${tail}`], { env: { ...process.env, CORE_API_KEY: key }, encoding: 'utf8' }).stdout;
+  const trimmed = (key) => sh(key, 'printf "%s" "$CORE_API_KEY"');
+  const accepts = (key) => sh(key, `${check}\necho "$ok"`).trim() === 'yes';
+  for (const messy of [`${KEY} `, `${KEY}\r\n`, ` \t${KEY}\r`, `\n${KEY}`, `  ${KEY}  `]) {
+    assert.equal(trimmed(messy), KEY, JSON.stringify(messy));
+    assert.equal(accepts(messy), true, JSON.stringify(messy)); // the same settings as the clean key
+  }
+  assert.equal(trimmed('abc def123'), 'abc def123');
+  for (const bad of ['abc def123', `${KEY}\nx: y`, 'short ']) assert.equal(accepts(bad), false, JSON.stringify(bad));
+  assert.equal(trimmed(''), ''); // no key: nothing to render
+});

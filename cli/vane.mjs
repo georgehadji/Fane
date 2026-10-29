@@ -12,12 +12,12 @@ import { isImageRequest } from './image/intent.mjs';
 import { ASPECT_RATIOS, DEFAULT_IMAGES, IMAGE_SIZES, IMAGE_TEXT_MODEL, MAX_IMAGES } from './image/generate.mjs';
 import { isArticleRequest, postPlatform } from './core/intent-article.mjs';
 import { POSTS, POST_PLATFORMS } from './core/formats.mjs';
-import { LANGUAGES } from './core/language.mjs';
+import { LANGUAGES, fold } from './core/language.mjs';
 import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
 import { isCodeRequest } from './core/intent-code.mjs';
 import { isBrainstormRequest } from './core/intent-brainstorm.mjs';
 import { DEFAULTS, UsageError, VALID_MODES, VALID_SOURCES, addOpenRouterModel, findOpenRouterProvider, getProviders, getProvidersStartingVane, listOpenRouter, openRouterBaseUrlWarning, resolveModel, search, vaneModelRequest } from './client.mjs';
-import { MODE_FOR_TIER, listArticleModels, listCodeModels, listImageModels, runArticle, runArticleEdit, runBrainstorm, runCode, runImage } from './runners.mjs';
+import { modeOf, listArticleModels, listCodeModels, listImageModels, runArticle, runArticleEdit, runBrainstorm, runCode, runImage } from './runners.mjs';
 export { DEFAULTS, findOpenRouterProvider, resolveModel } from './client.mjs';
 
 const USAGE = `Usage: vane "<question>" [options]
@@ -189,7 +189,7 @@ export function parseCli(argv) {
   const bad = sources.filter(s => !VALID_SOURCES.includes(s));
   if (bad.length) throw new UsageError(`Invalid source(s): ${bad.join(', ')}. Use: ${VALID_SOURCES.join(', ')}`);
   if (!VALID_MODES.includes(values.mode)) throw new UsageError(`Invalid mode "${values.mode}". Use: ${VALID_MODES.join(', ')}`);
-  values.timeout ??= (MODE_FOR_TIER[values.tier] ?? values.mode) === 'quality' ? '600' : '180'; // --tier premium researches in quality mode
+  values.timeout ??= modeOf(values) === 'quality' ? '600' : '180'; // --tier premium researches in quality mode
   const timeoutSec = Number(values.timeout);
   if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) throw new UsageError(`Invalid timeout "${values.timeout}"`);
   if (values.stream && values.json) throw new UsageError('--stream cannot be combined with --json');
@@ -262,11 +262,15 @@ const CITE_RE = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
 const THRESHOLD = 0.3; // share of a sentence's content words found in a cited source
 const STOP = new Set(('the and for are but not you all any can had her was one our out has have this that with from they will would there their what which when your into than then them these some such only also more most other about after over very just like been were being does did how its may many much made make per via within without upon each both between while where who whom whose why yet own same so too use used using well even still could should might must shall here those because before during through against among across along around however therefore thus often less least few'
 ).split(' '));
+// Greek function words, folded (no accents, final sigma as sigma): without them every Greek sentence "shares" του, της,
+// στην, ειναι with every Greek source and counts as supported.
+// shortcut: no Greek stemming, so inflected forms of one word (αθηνα, αθηνασ) still count as different words.
+for (const w of ('και των την του της που για απο στο στη στην στον στις στους ενα μια ενασ μιασ ενοσ οτι ειναι αυτο αυτη αυτα αυτοσ αυτοι αυτεσ αυτου αυτησ αυτων τον τις τους ηταν εχει εχουν μπορει οπωσ αλλα ενω κατα μετα πριν ουτε οταν εαν οπου πωσ πιο πολυ εναν επισησ μονο ακομη ακομα ηδη μεσα ωστε επειδη γιατι ειχε ειχαν').split(' ')) STOP.add(w);
 const ABBREV_END = /\b(?:et al|e\.g|i\.e|vs|cf|approx|Fig|No|Dr|Mr|Mrs|Ms|St)\.$/i;
 const stem = (w) => (w.length > 5 ? w.replace(/(ing|ed|es|s)$/, '') : w);
 
 export function tokenize(text) {
-  const words = String(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+  const words = fold(text).match(/[\p{L}\p{N}]+/gu) || []; // folded, so Greek accents and final sigma do not split a word
   return new Set(words.filter(w => w.length >= 3 && !STOP.has(w)).map(stem));
 }
 
@@ -443,7 +447,7 @@ async function doctor(opts) {
     // The modules each hook imports (every hook imports ../core too), and the trial.json of the models that passed.
     const { FANE_CORE_DIR, FANE_IMAGE_DIR, FANE_WRITE_DIR, FANE_CODE_DIR, FANE_BRAINSTORM_DIR } = createRequire(import.meta.url)(join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..', 'patches', 'lib', 'vane.js'));
     const MODULES = [
-      [FANE_CORE_DIR, ['language.mjs'], 'shared modules', '', 'every web UI feature (articles, code, brainstorming, images) falls back to a normal answer (run node scripts/apply.mjs)'],
+      [FANE_CORE_DIR, ['language.mjs', 'markdown.mjs'], 'shared modules', '', 'every web UI feature (articles, code, brainstorming, images) falls back to a normal answer (run node scripts/apply.mjs)'],
       [FANE_IMAGE_DIR, ['vane-hook.mjs'], 'image modules', 'web UI image requests work', 'web UI image requests fall back to text (run node scripts/apply.mjs)'],
       [FANE_WRITE_DIR, ['vane-hook.mjs', 'trial.json'], 'article modules', 'web UI article requests work', 'web UI article requests fall back to a normal answer (run node scripts/apply.mjs)'],
       [FANE_WRITE_DIR, ['quality-check.mjs'], 'Quality answer check', 'Quality answers are checked against their sources', 'Quality answers are shown unchecked (run node scripts/apply.mjs)'],
@@ -470,7 +474,13 @@ async function doctor(opts) {
   try {
     const script = `fetch('http://localhost:8080/config').then(r=>r.json()).then(c=>c.engines.some(e=>e.name==='core.ac.uk')?fetch('http://localhost:8080/search?q=symplectic+integrator&format=json&engines=core.ac.uk').then(r=>r.json()).then(j=>({on:true,n:j.results.length,down:j.unresponsive_engines})):{on:false}).then(o=>console.log(JSON.stringify(o)))`;
     const core = JSON.parse(dockerOut(['exec', container, 'node', '-e', script], 60_000));
-    if (!core.on) report('ok', 'CORE academic engine off (optional: set CORE_API_KEY, then run node scripts/apply.mjs)');
+    if (!core.on) {
+      // a key in the container's environment that did not switch the engine on was refused by the entrypoint (letters, digits . _ - only, 8 to 200 long)
+      let keyed = false;
+      try { keyed = dockerOut(['exec', container, 'sh', '-c', 'test -n "$CORE_API_KEY" && echo set || echo unset'], 15_000) === 'set'; } catch { /* no shell or container: optional anyway */ }
+      if (keyed) report('warn', 'CORE_API_KEY is set in the container but the CORE engine is off: the key was refused (only letters, digits, ".", "_" and "-", 8 to 200 characters) or the settings were not re-rendered (restart the container)');
+      else report('ok', 'CORE academic engine off (optional: set CORE_API_KEY, then run node scripts/apply.mjs)');
+    }
     else report(core.n > 0 ? 'ok' : 'warn', core.n > 0 ? `CORE academic engine returns results (${core.n} for "symplectic integrator")` : `CORE academic engine returned 0 results${core.down.length ? `: ${core.down.map(([, why]) => why).join(', ')}` : ''} (check the key)`);
   } catch (err) { report('warn', `CORE check failed: ${err.message.split('\n')[0]}`); }
 

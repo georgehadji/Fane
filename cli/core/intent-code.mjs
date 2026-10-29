@@ -10,8 +10,9 @@
 // "write an article on machine learning in Python" stays an article. core/intent-article.mjs asks this module first.
 import { isBrainstormRequest } from './intent-brainstorm.mjs';
 import { fold } from './language.mjs';
+import { POLITE } from './polite.mjs';
 
-const POLITE = String.raw`(?:please\s+|can you\s+|could you\s+|i(?:'|’)d like you to\s+|i want you to\s+|i need you to\s+|παρακαλω\s+|μπορεισ να\s+|θα ηθελα να\s+|θελω να\s+)*`;
+// POLITE: the shared polite openings (./polite.mjs)
 const EN_VERB = String.raw`(write|create|build|make|generate|implement|code|develop|program|scaffold|give me|show me)`;
 // "show me the best apps for ...", "give me tools for ..." ask for recommendations: after these two verbs only a noun
 // that is code itself counts (or a language, as for the weak nouns)

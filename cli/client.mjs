@@ -223,7 +223,12 @@ async function readStream(res, onToken) {
     let nl;
     while ((nl = buf.indexOf('\n')) >= 0) { handle(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
   }
-  handle(buf);
+  // what is left is a line the stream ended in the middle of (Vane restarted, the connection dropped): say that,
+  // not "Unexpected end of JSON input"; the tokens already printed stay on the screen
+  try { handle(buf); } catch (err) {
+    if (err instanceof SyntaxError) throw new Error('Vane closed the stream in the middle of the answer');
+    throw err;
+  }
   return { message, sources };
 }
 

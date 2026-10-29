@@ -6,8 +6,9 @@ import { isBrainstormRequest } from './intent-brainstorm.mjs';
 import { isCodeRequest } from './intent-code.mjs';
 import { DEFAULT_PLATFORM } from './formats.mjs';
 import { detectLanguage, fold } from './language.mjs';
+import { POLITE } from './polite.mjs';
 
-const POLITE = String.raw`(?:please\s+|can you\s+|could you\s+|i(?:'|’)d like you to\s+|i want you to\s+|παρακαλω\s+|μπορεισ να\s+|θα ηθελα να\s+|θελω να\s+)*`;
+// POLITE: the shared polite openings (./polite.mjs)
 const EN_VERB = String.raw`(?:write|draft|compose|create|prepare|produce|generate)`;
 const EN_NOUN = String.raw`(?:article|blog ?post|blog|essay|op-?ed|long-?form piece|report|white ?paper)`;
 const EN_ADJ = String.raw`(?:(?:new|short|long|detailed|well[- ]researched|researched|in-depth|short|brief|full|complete|good|balanced|thoughtful|engaging|fact[- ]based|sourced),?\s+){0,3}`;
