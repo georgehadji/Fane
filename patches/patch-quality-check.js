@@ -20,6 +20,7 @@ const TARGETS = [
     file: FILES.chatRoute,
     from: `t=${writer('s')},u="";`,
     to: `t=${wrap('o?.searchFindings', '!0')}${writer('s')}),u="";`,
+    marker: '/*fane:quality-check*/', // patch-sources-required rewrites the writer call inside `to`
   },
   {
     // search route (the CLI): l = the research result, p = the writer prompt
@@ -27,6 +28,7 @@ const TARGETS = [
     file: FILES.searchRoute,
     from: `for await(let c of ${writer('p')})`,
     to: `for await(let c of ${wrap('l?.searchFindings', '!1')}${writer('p')}))`,
+    marker: '/*fane:quality-check*/',
   },
 ];
 

@@ -172,6 +172,34 @@ test('patch-discover-ellipsis: three periods at the end of a summary become a no
   assert.deepEqual(r.errors, []);
 });
 
+test('patch-sources-required: with no search result and no widget, the first question gets "nothing was found" and a follow-up a rule', async () => {
+  const quality = require('../../patches/patch-quality-check.js');
+  const required = require('../../patches/patch-sources-required.js');
+  // the chat route's writer call as Vane writes it; `calls` records what reached the model
+  const route = `(async (b,o,n,s,calls)=>{let t=b.config.llm.streamText({messages:[{role:"system",content:s},...b.chatHistory,{role:"user",content:b.followUp}]}),u="";let out="";for await(let c of t)out+=c.contentChunk;return out})`;
+  let r = planPatch({ [FILES.chatRoute]: route }, quality.TARGETS.slice(0, 1));
+  r = planPatch(r.next, required.TARGETS.slice(0, 1));
+  assert.deepEqual([r.errors, r.applied], [[], ['no answer from memory (/api/chat)']]);
+  for (const t of [quality.TARGETS[0], required.TARGETS[0]]) assert.deepEqual(planPatch(r.next, [t]).applied, [], t.name); // file order, twice
+  const answer = eval(r.next[FILES.chatRoute]);
+  const ask = async (followUp, { findings = [], widgets = [], history = [] } = {}) => {
+    const calls = [];
+    const llm = { streamText: ({ messages }) => { calls.push(messages[0].content); return (async function* () { yield { contentChunk: 'from the model' }; })(); } };
+    const text = await answer({ config: { mode: 'speed', llm }, chatHistory: history, followUp }, { searchFindings: findings }, widgets, 'PROMPT', calls);
+    return { text, calls };
+  };
+  assert.deepEqual(await ask('news?', { findings: [{}] }), { text: 'from the model', calls: ['PROMPT'] });
+  assert.deepEqual(await ask('weather in Athens', { widgets: [{}] }), { text: 'from the model', calls: ['PROMPT'] });
+  assert.deepEqual(await ask('latest news in Greece?'), { text: required.NOTHING.en, calls: [] });
+  assert.deepEqual(await ask('τα τελευταία νέα στην Ελλάδα;'), { text: required.NOTHING.el, calls: [] });
+  assert.deepEqual(await ask('translate that', { history: [['human', 'q'], ['assistant', 'a']] }), { text: 'from the model', calls: [`PROMPT${required.FOLLOW_UP_RULE}`] });
+  // the search route (CLI) matches too, after patch-quality-check
+  const search = `async function x(a,b,k,l,p){for await(let c of b.config.llm.streamText({messages:[{role:"system",content:p},...b.chatHistory,{role:"user",content:b.followUp}]}))a.emit("data",{type:"response",data:c.contentChunk});a.emit("end",{})}`;
+  let s = planPatch({ [FILES.searchRoute]: search }, quality.TARGETS.slice(1));
+  s = planPatch(s.next, required.TARGETS.slice(1));
+  assert.deepEqual([s.errors, s.applied], [[], ['no answer from memory (/api/search)']]);
+});
+
 test('patch-answer-language: the writer prompt asks for the language of the question, first among its formatting rules', () => {
   const { TARGETS } = require('../../patches/patch-answer-language.js');
   const prompt = 'const w=(a,b)=>`\n\n    ### Formatting Instructions\n    - **Structure**: Use headings.\n    ${a}`;';
