@@ -22,6 +22,10 @@ const SETTINGS = '(0,s.jsx)(u,{})]})}),(0,s.jsx)("div",{className:"fixed bottom-
 const GEAR = 'onClick:()=>t(!0),children:(0,s.jsx)(p.A,{size:19,className:"cursor-pointer"})})';
 const GEAR_KEYS = 'role:"button",tabIndex:0,"aria-label":"Settings",onKeyDown:k=>{("Enter"===k.key||" "===k.key)&&(k.preventDefault(),t(!0))},';
 
+// The toggle and the gear in one column. Only classes in Vane's compiled stylesheet work (Tailwind kept only the
+// ones Vane uses): the first version's gap-y-3 is not there, so the two circles touched; gap-y-4 is 16px.
+const stacked = (gap) => SETTINGS.replace('(0,s.jsx)(u,{})', `(0,s.jsxs)("div",{className:"flex flex-col items-center ${gap}",children:[(0,s.jsx)(fane_theme,{}),(0,s.jsx)(u,{})]})`);
+
 const TARGETS = [
   {
     name: 'theme toggle component',
@@ -32,8 +36,7 @@ const TARGETS = [
   {
     name: 'theme toggle above settings',
     file: FILES.layoutClient,
-    from: SETTINGS,
-    to: SETTINGS.replace('(0,s.jsx)(u,{})', '(0,s.jsxs)("div",{className:"flex flex-col items-center gap-y-3",children:[(0,s.jsx)(fane_theme,{}),(0,s.jsx)(u,{})]})'),
+    alts: [{ from: SETTINGS, to: stacked('gap-y-4') }, { from: stacked('gap-y-3'), to: stacked('gap-y-4') }],
   },
 ];
 
