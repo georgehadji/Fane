@@ -114,6 +114,18 @@ node scripts/apply.mjs          # or: docker compose up -d (passes CORE_API_KEY 
 - **Checking it:** `vane --doctor` runs one CORE query, and warns when the container has a `CORE_API_KEY` but the engine is off (the key was refused).
 - **Rate limit:** CORE allows 5 requests per 10 seconds. When a research sends more, SearXNG suspends the engine for a while.
 
+**Brave Search API and Tavily (optional).** Both are web indexes of their own behind an API key, so they are not blocked by IP the way the scraping engines are. They are installed the same way as CORE, with `BRAVE_API_KEY` (https://brave.com/search/api) and `TAVILY_API_KEY` (https://tavily.com):
+
+```bash
+export BRAVE_API_KEY=...        # PowerShell: $env:BRAVE_API_KEY = Read-Host "Brave key"
+export TAVILY_API_KEY=...       # PowerShell: $env:TAVILY_API_KEY = Read-Host "Tavily key"
+node scripts/apply.mjs          # prints e.g. "Brave on, Tavily on, CORE off"
+node scripts/engine-check.mjs --engines "brave api,tavily"
+```
+
+- **Every run of `apply.mjs` needs the keys again:** it renders the settings from its own environment, so running it without a key switches that engine off.
+- **Free limits:** every web search a research sends goes to both. Brave's free plan allows one request a second (a refused request gives no results instead of suspending the engine); Tavily's gives 1000 searches a month.
+
 If an engine reports `CAPTCHA` or `too many requests`, the engine has flagged your IP (shared VPN ranges often are). Restart the container to clear SearXNG's suspension timers after changing network.
 
 ## 3. Install the CLI

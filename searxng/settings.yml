@@ -48,6 +48,53 @@ engines:
   - name: hackernews
     disabled: false
 
+  # Brave Search API (https://brave.com/search/api): an index of its own, so no CAPTCHA and no block by IP. Needs a
+  # subscription token. The installers (scripts/searxng-settings.mjs, docker/fane-entrypoint.sh) write BRAVE_API_KEY
+  # into the X-Subscription-Token header and switch the engine on; without the variable it stays off. Never put the
+  # key in this file. The free plan allows one request a second: a 429 gives no results instead of an error, because
+  # SearXNG suspends an engine that errors. The scraping engine named "brave" below stays off.
+  - name: brave api
+    engine: json_engine
+    shortcut: brapi
+    categories: general
+    search_url: https://api.search.brave.com/res/v1/web/search?q={query}&count=20&search_lang={lang}&safesearch=off
+    results_query: web/results
+    url_query: url
+    title_query: title
+    content_query: description
+    title_html_to_text: true
+    content_html_to_text: true
+    no_result_for_http_status: [429]
+    timeout: 6.0
+    headers:
+      Accept: application/json
+      X-Subscription-Token: ''
+    inactive: true
+
+  # Tavily (https://tavily.com): a search API built for LLM answers, an index of its own like Brave's. Same rules as
+  # brave api: the installers write TAVILY_API_KEY into the Authorization header and switch the engine on; never put
+  # the key in this file. One basic search is one credit (the free plan has 1000 a month). json_engine puts the query
+  # into the body unescaped, so a query with a double quote or backslash is invalid JSON: Tavily's 400 gives no results.
+  # 432/433 are Tavily's plan and pay-as-you-go limits.
+  - name: tavily
+    engine: json_engine
+    shortcut: tav
+    categories: general
+    search_url: https://api.tavily.com/search
+    method: POST
+    request_body: >-
+      {{"query": "{query}", "max_results": 10, "search_depth": "basic"}}
+    results_query: results
+    url_query: url
+    title_query: title
+    content_query: content
+    no_result_for_http_status: [400, 429, 432, 433]
+    timeout: 8.0
+    headers:
+      Content-Type: application/json
+      Authorization: ''
+    inactive: true
+
   # Disabled: hard failures (access denied / HTTP error)
   - name: aol
     disabled: true

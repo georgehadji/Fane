@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { DEFAULTS } from '../cli/vane.mjs';
-import { SECRET_KEY_LINE, renderSettings } from './searxng-settings.mjs';
+import { KEYED_ENGINES, SECRET_KEY_LINE, renderSettings } from './searxng-settings.mjs';
 
 const { FANE_CORE_DIR, FANE_IMAGE_DIR, FANE_WRITE_DIR, FANE_CODE_DIR, FANE_BRAINSTORM_DIR } = createRequire(import.meta.url)('../patches/lib/vane.js');
 
@@ -22,7 +22,7 @@ const SETTINGS_PATH = '/etc/searxng/settings.yml';
 const PATCH_DIR = '/tmp/fane-patches'; // the whole folder: patches share patches/lib/
 
 if (process.argv.includes('-h') || process.argv.includes('--help')) {
-  console.log(`Usage: node scripts/apply.mjs [--no-searxng]\nEnv: VANE_CONTAINER (default ${DEFAULTS.container}), VANE_URL (default ${DEFAULTS.url}),\n     CORE_API_KEY (switches on the CORE academic engine; never printed)`);
+  console.log(`Usage: node scripts/apply.mjs [--no-searxng]\nEnv: VANE_CONTAINER (default ${DEFAULTS.container}), VANE_URL (default ${DEFAULTS.url}),\n     CORE_API_KEY (switches on the CORE academic engine; never printed),\n     BRAVE_API_KEY (switches on the Brave Search API engine; never printed),\n     TAVILY_API_KEY (switches on the Tavily engine; never printed)`);
   process.exit(0);
 }
 const withSearxng = !process.argv.includes('--no-searxng');
@@ -85,26 +85,30 @@ try {
   // environment; neither is written to the repo or printed.
   if (withSearxng) {
     const repoText = readFileSync(join(ROOT, 'searxng', 'settings.yml'), 'utf8');
-    let coreKey = process.env.CORE_API_KEY?.trim() || undefined;
-    try { renderSettings(repoText, { coreKey }); } catch (err) {
-      console.error(`searxng/settings.yml: ${err.message}; the CORE engine stays off`);
-      coreKey = undefined;
+    const engineKeys = {};
+    for (const e of KEYED_ENGINES) {
+      const key = process.env[e.env]?.trim();
+      if (!key) continue;
+      try { renderSettings(repoText, { [e.opt]: key }); engineKeys[e.opt] = key; } catch (err) {
+        console.error(`searxng/settings.yml: ${err.message}; the ${e.label} engine stays off`);
+      }
     }
-    const wanted = renderSettings(repoText, { coreKey });
+    const wanted = renderSettings(repoText, engineKeys);
+    const keys = KEYED_ENGINES.map(e => `${e.label} ${engineKeys[e.opt] ? 'on' : 'off'}`).join(', ');
     const norm = (s) => s.replace(/\r\n/g, '\n').replace(SECRET_KEY_LINE, '$1 X').trim();
     let current = '';
     try { current = docker(['exec', CONTAINER, 'cat', SETTINGS_PATH]); } catch { /* treat as different */ }
     if (norm(current) === norm(wanted)) {
-      console.log(`searxng/settings.yml: already applied (CORE ${coreKey ? 'on' : 'off'})`);
+      console.log(`searxng/settings.yml: already applied (${keys})`);
     } else {
       const dir = mkdtempSync(join(tmpdir(), 'fane-'));
       try {
         const tmp = join(dir, 'settings.yml');
-        writeFileSync(tmp, renderSettings(repoText, { coreKey, secretKey: randomBytes(32).toString('hex') }));
+        writeFileSync(tmp, renderSettings(repoText, { ...engineKeys, secretKey: randomBytes(32).toString('hex') }));
         docker(['cp', tmp, `${CONTAINER}:${SETTINGS_PATH}`]);
         changed = true; // the file is in place even if the chown below fails
         docker(['exec', '-u', '0', CONTAINER, 'chown', 'searxng:searxng', SETTINGS_PATH]);
-        console.log(`searxng/settings.yml: applied with a new random secret_key (CORE ${coreKey ? 'on' : 'off: set CORE_API_KEY to switch it on'})`);
+        console.log(`searxng/settings.yml: applied with a new random secret_key (${keys}; set ${KEYED_ENGINES.map(e => e.env).join(', ')} to switch an engine on)`);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

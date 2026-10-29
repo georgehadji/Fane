@@ -57,3 +57,41 @@ test('docker/fane-entrypoint.sh trims a pasted key like apply.mjs does, and stil
   for (const bad of ['abc def123', `${KEY}\nx: y`, 'short ']) assert.equal(accepts(bad), false, JSON.stringify(bad));
   assert.equal(trimmed(''), ''); // no key: nothing to render
 });
+
+test('a Brave key goes into the brave api header only, and switches that engine on', () => {
+  const out = renderSettings(repo, { braveKey: KEY });
+  assert.match(out, new RegExp(`- name: brave api\n(?: {4}[^\n]*\n)*? {6}X-Subscription-Token: '${KEY}'\n {4}inactive: false`));
+  assert.equal(out.split(KEY).length - 1, 1);
+  assert.equal(out.replace(`'${KEY}'`, "''").replace(/(brave api[\s\S]*?)inactive: false/, '$1inactive: true'), repo.replace(/\r\n/g, '\n'));
+  assert.match(renderSettings(repo, { coreKey: KEY, braveKey: KEY }), /core\.ac\.uk[\s\S]*inactive: false[\s\S]*brave api[\s\S]*inactive: false/);
+  assert.match(renderSettings(repo, {}), /X-Subscription-Token: ''\n {4}inactive: true/); // no key: off
+});
+
+test('a Brave key that could break the YAML or the sed is refused', () => {
+  for (const bad of ["abc'def123", 'abc def123', 'short', 'a$b{c}12345']) assert.throws(() => renderSettings(repo, { braveKey: bad }), /BRAVE_API_KEY has unexpected characters/, bad);
+});
+
+test('docker/fane-entrypoint.sh renders the same Brave block as renderSettings', { skip: spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh' }, () => {
+  const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
+  const sed = [...script.matchAll(/sed -i "([^"]+)"/g)].map(m => m[1]).find(s => s.includes('brave api')).replace('$BRAVE_API_KEY', KEY);
+  const r = spawnSync('sh', ['-c', `sed "${sed}"`], { input: repo.replace(/\r\n/g, '\n'), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trimEnd(), renderSettings(repo, { braveKey: KEY }).trimEnd());
+});
+
+test('a Tavily key goes into the tavily Authorization header after "Bearer ", and switches that engine on', () => {
+  const out = renderSettings(repo, { tavilyKey: KEY });
+  assert.match(out, new RegExp(`- name: tavily\n(?: {4}[^\n]*\n)*? {6}Authorization: 'Bearer ${KEY}'\n {4}inactive: false`));
+  assert.equal(out.split(KEY).length - 1, 1);
+  assert.equal(out.replace(`'Bearer ${KEY}'`, "''").replace(/(name: tavily[\s\S]*?)inactive: false/, '$1inactive: true'), repo.replace(/\r\n/g, '\n'));
+  assert.match(renderSettings(repo, {}), /Authorization: ''\n {4}inactive: true/); // no key: off
+  for (const bad of ["abc'def123", 'abc def123', 'short']) assert.throws(() => renderSettings(repo, { tavilyKey: bad }), /TAVILY_API_KEY has unexpected characters/, bad);
+});
+
+test('docker/fane-entrypoint.sh renders the same Tavily block as renderSettings', { skip: spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh' }, () => {
+  const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
+  const sed = [...script.matchAll(/sed -i "([^"]+)"/g)].map(m => m[1]).find(s => s.includes('name: tavily')).replace('$TAVILY_API_KEY', KEY);
+  const r = spawnSync('sh', ['-c', `sed "${sed}"`], { input: repo.replace(/\r\n/g, '\n'), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trimEnd(), renderSettings(repo, { tavilyKey: KEY }).trimEnd());
+});

@@ -28,6 +28,10 @@ services:
     environment:
       # Switches on the CORE academic engine (searxng/settings.yml); empty leaves it off.
       CORE_API_KEY: ${CORE_API_KEY:-}
+      # Switches on the Brave Search API engine (searxng/settings.yml); empty leaves it off.
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      # Switches on the Tavily engine (searxng/settings.yml); empty leaves it off.
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       # Spend limit in USD for one article, code or brainstorm run (cli/write/llm.mjs); empty is no limit.
       FANE_MAX_COST: ${FANE_MAX_COST:-}
       # Minutes one web request may run in total (cli/image/openrouter.mjs); empty is 30, 0 is no limit.
