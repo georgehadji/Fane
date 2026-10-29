@@ -73,17 +73,35 @@ ${SUBSETS.map(literata('italic')).join('\n')}
 .prose p,.prose li{line-height:1.55}
 .dark .prose{font-weight:370}
 .prose [role=status]{font-family:Commissioner,Montserrat,Arial,sans-serif}`;
-const TYPE = `/*fane:type-4*/\n${BASE}\n${PAGES}\n${LINKS}\n${SERIF}`;
+// The fourth version, with Literata.
+const TYPE_V4 = `/*fane:type-4*/\n${BASE}\n${PAGES}\n${LINKS}\n${SERIF}`;
+
+// Syne for the page titles of Discover and Library (the 48px h1 "Discover" / "Library", which Vane sets in PP Editorial)
+// and for Discover's story headings (the large h2 and the card h3, which were Commissioner at weights 300 and 600).
+// Syne, Copyright 2017 The Syne Project Authors (gitlab.com/bonjour-monde/fonderie/syne-typeface), SIL OFL 1.1
+// (patches/fonts/OFL-syne.txt): the latin, latin-ext and greek subsets of the variable font, weights 400 to 800 (400 is
+// used), as Google Fonts serves them. Bricolage Grotesque was tried first and has no Greek. PP Editorial stays second
+// for scripts Syne lacks (Cyrillic). Vane sets the family in an inline style on the h1, so the rule needs !important.
+const syne = ([name, range]) => {
+  const data = fs.readFileSync(path.join(__dirname, 'fonts', `syne-${name}.woff2`)).toString('base64');
+  return `@font-face{font-family:Syne;font-style:normal;font-weight:400 800;font-display:swap;src:url(data:font/woff2;base64,${data}) format("woff2");unicode-range:${range}}`;
+};
+const TITLES = String.raw`/* Syne, Copyright 2017 The Syne Project Authors (gitlab.com/bonjour-monde/fonderie/syne-typeface), SIL OFL 1.1 */
+${SUBSETS.map(syne).join('\n')}
+h1.text-5xl{font-family:Syne,"PP Editorial",serif!important;font-weight:400;letter-spacing:-.02em}
+h3.text-sm.line-clamp-2{font-family:Syne,Commissioner,Montserrat,Arial,sans-serif;font-weight:400}
+h2.text-3xl.line-clamp-3{font-family:Syne,Commissioner,Montserrat,Arial,sans-serif!important;font-weight:400;letter-spacing:-.01em}`;
+const TYPE = `/*fane:type-5*/\n${BASE}\n${PAGES}\n${LINKS}\n${SERIF}\n${TITLES}`;
 
 const TARGETS = [
   {
-    name: 'Commissioner, Literata answers, Discover and Library type',
+    name: 'Commissioner, Literata answers, Syne page titles, Discover and Library type',
     file: FILES.appCss,
     // an older block is replaced where it stands (patch-colors may sit between it and the stylesheet's last rule)
-    alts: [{ from: TYPE_V3, to: TYPE }, { from: TYPE_V2, to: TYPE }, { from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
-    marker: '/*fane:type-4*/',
+    alts: [{ from: TYPE_V4, to: TYPE }, { from: TYPE_V3, to: TYPE }, { from: TYPE_V2, to: TYPE }, { from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
+    marker: '/*fane:type-5*/',
   },
 ];
 
-module.exports = { TARGETS, TYPE, TYPE_V1, TYPE_V2, TYPE_V3 };
+module.exports = { TARGETS, TYPE, TYPE_V1, TYPE_V2, TYPE_V3, TYPE_V4 };
 if (require.main === module) run('patch-type', TARGETS);

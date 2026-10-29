@@ -130,23 +130,34 @@ h2.text-3xl.-mt-8{color:#1f1a14}
 // white arrow and is also a `data-fane-icon` button, so hovering it painted the arrow terracotta on terracotta.
 const FILLED = String.raw`:not(.bg-\[\#24A0ED\]):not(.bg-sky-500)`;
 const HOVER = ['html button[data-fane-icon]:hover,html a[data-fane-icon]:hover', 'html.dark button[data-fane-icon]:hover,html.dark a[data-fane-icon]:hover'];
-const COLORS = HOVER.reduce((css, rule) => {
+const COLORS_V3 = HOVER.reduce((css, rule) => {
   const next = css.replace(rule, () => rule.replace(/(?:button|a)\[data-fane-icon\]/g, m => `${m}${FILLED}`));
   if (next === css) throw new Error(`patch-colors: hover rule not found: ${rule}`);
   return next;
 }, COLORS_V2.replace('/*fane:colors-2*/', '/*fane:colors-3*/'));
+
+// Version 4: <html> gets the page color. Vane gives only <main> a background, so the browser's white canvas showed
+// wherever <main> did not reach: when the page is pulled past its end, and in the gap a phone's moving address bar
+// leaves. Both themes, so the gap is paper on light and charcoal on dark.
+// The follow-up bar of a chat also sits on a fade that Vane draws in white (light theme only, `dark:hidden`), which left a
+// white band under the bar on the paper page: the same fade, in the page color.
+const PAPER = '247 242 234';
+const FADE = [[1, 0], [1, 35], [.95, 45], [.85, 55], [.7, 65], [.5, 75], [.3, 85], [.1, 92], [0, 100]]
+  .map(([a, at]) => `${a === 1 ? '#f7f2ea' : `rgb(${PAPER}/${a})`} ${at}%`).join(',');
+const CANVAS = `html{background-color:#f7f2ea}\nhtml.dark{background-color:#110f0b}\nhtml:not(.dark) .pointer-events-none.absolute.-bottom-6.left-0.right-0{background-image:linear-gradient(to top,${FADE})!important}`; // Vane sets it in an inline style
+const COLORS = `${COLORS_V3.replace('/*fane:colors-3*/', '/*fane:colors-4*/')}\n${CANVAS}`;
 
 const TARGETS = [
   {
     name: 'warm palette, one accent, accessible colors',
     file: FILES.appCss,
     // an earlier version's block is replaced where it stands (other blocks may sit between it and the end)
-    alts: [{ from: COLORS_V2, to: COLORS }, { from: COLORS_V1, to: COLORS }, { from: END, to: `${END}
+    alts: [{ from: COLORS_V3, to: COLORS }, { from: COLORS_V2, to: COLORS }, { from: COLORS_V1, to: COLORS }, { from: END, to: `${END}
 ${COLORS}
 ` }],
-    marker: '/*fane:colors-3*/',
+    marker: '/*fane:colors-4*/',
   },
 ];
 
-module.exports = { TARGETS, COLORS, COLORS_V1, COLORS_V2 };
+module.exports = { TARGETS, COLORS, COLORS_V1, COLORS_V2, COLORS_V3 };
 if (require.main === module) run('patch-colors', TARGETS);
