@@ -39,6 +39,7 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
       say(providerMissing('Code writing', { free: true }));
+      track.finish({ ok: false }); // a run that ends early still leaves its summary line
       return true;
     }
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
@@ -50,6 +51,7 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
     });
     if (!chosen) {
       say(quiet([escapeHtml('No model has passed the coding trial: run node scripts/code-trial.mjs.')]));
+      track.finish({ ok: false }); // a run that ends early still leaves its summary line
       return true;
     }
     const retrieve = retryEmpty(research);

@@ -581,7 +581,7 @@ test('a draft that no model can write fails the run with the reasons; a 402 stop
   assert.match(f.error, /insufficient credits/);
 });
 
-test('a 402 in the fact-check waits for the critique running next to it before the run ends', async () => {
+test('a 402 in the fact-check waits for the critique running next to it, then the draft is finished and kept', async () => {
   const base = fake({ factcheck: new OpenRouterError('402 insufficient credits', 402) });
   let critiqueDone = false;
   const client = { ...base, chat: async (body) => {
@@ -589,8 +589,20 @@ test('a 402 in the fact-check waits for the critique running next to it before t
     return base.chat(body);
   } };
   const r = await run(client, { mode: 'balanced' });
-  assert.equal(r.fatal, true);
-  assert.equal(critiqueDone, true); // finished before the result, so its progress cannot overwrite the failure
+  assert.equal(critiqueDone, true); // finished before the result, so its progress cannot overwrite the answer
+  // the draft was written and paid for: it is the article, with the stop named, and nothing after it was asked
+  assert.equal(r.ok, true);
+  assert.deepEqual([r.stopped.status, /insufficient credits/.test(r.stopped.error)], [402, true]);
+  assert.ok(r.degraded.some(d => /stopped after the draft \(.*insufficient credits.*\): the article was not edited further/.test(d)));
+  assert.ok(r.article.length > 200 && /^# /m.test(r.article));
+  assert.ok(!r.phases.some(p => ['revise', 'polish', 'style', 'copy', 'audit'].includes(p.phase)));
+});
+
+test('a stop by the user (499) after the draft still ends the run without an article; a clean run has no stop', async () => {
+  const r = await run(fake({ factcheck: new OpenRouterError('stopped: the browser was closed', 499) }), { mode: 'balanced' });
+  assert.deepEqual([r.ok, r.fatal, r.status], [false, true, 499]);
+  const ok = await run(fake(), { mode: 'speed' });
+  assert.equal(ok.stopped, null);
 });
 
 test('no sources means no article; one failing search does not', async () => {

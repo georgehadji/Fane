@@ -48,7 +48,10 @@ export const chainsFor = (models) => Object.fromEntries(ROLES.map(r => [r, model
 
 const text = (s) => (typeof s === 'string' ? s.trim() : '');
 const strings = (a) => (Array.isArray(a) ? a.map(text).filter(Boolean) : []);
-const score = (x) => (Number.isFinite(Number(x)) ? Math.max(0, Math.min(10, Math.round(Number(x)))) : null);
+// A number from a model's JSON. Missing stays missing: Number(null), Number('') and Number(false) are 0, which would score an
+// idea the model left unjudged as the worst one (and tag a null probability as rare).
+const num = (x) => (x === null || x === '' || typeof x === 'boolean' || Array.isArray(x) ? NaN : Number(x));
+const score = (x) => (Number.isFinite(num(x)) ? Math.max(0, Math.min(10, Math.round(num(x)))) : null);
 const key = (title) => fold(title).replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const KEEP = new Set(['id', 'ids', 'recommended', 'url', 'tier']); // values the final text pass leaves alone
 
@@ -59,7 +62,7 @@ export function normalizeIdeas(data, round, seen = new Set()) {
     const title = text(i?.title);
     if (!title || seen.has(key(title))) continue;
     seen.add(key(title));
-    const p = Number(i.probability);
+    const p = num(i.probability);
     out.push({
       id: `R${round}I${out.length + 1}`, round, title, description: text(i.description), insight: text(i.insight),
       probability: Number.isFinite(p) && p >= 0 && p <= 1 ? p : null,
@@ -87,7 +90,7 @@ export function applyClusters(data, ideas, prior = []) {
       if (idea.feasibility != null && idea.novelty != null && idea.impact != null) {
         idea.score = Math.round((WEIGHTS.novelty * idea.novelty + WEIGHTS.impact * idea.impact + WEIGHTS.feasibility * idea.feasibility) * 10) / 10;
       }
-      const n = Number(s.exists);
+      const n = num(s.exists);
       if (Number.isInteger(n) && prior[n - 1]) idea.exists = { title: prior[n - 1].title, url: prior[n - 1].url };
       idea.theme = text(t.theme);
       ids.push(idea.id);

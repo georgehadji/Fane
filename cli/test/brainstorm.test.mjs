@@ -241,3 +241,29 @@ test('chains: every role answers JSON, so only models with a JSON pass; Greek fa
   assert.ok(!Object.values(chosen.chains).flat().includes('b/two'));
   assert.ok(selectBrainstormChains(catalogue, trial, { mode: 'balanced', lang: 'el' })); // nobody passed Greek: English models
 });
+
+test('a null, empty or boolean from the model is missing, not a score or a probability of 0', () => {
+  const [a] = normalizeIdeas({ ideas: [{ title: 'Null probability', probability: null }, { title: 'Empty', probability: '' }, { title: 'Flag', probability: false }] }, 1);
+  assert.equal(a.probability, null); // not 0, which would tag the idea as rare
+  assert.deepEqual(normalizeIdeas({ ideas: [{ title: 'Z', probability: 0 }, { title: 'Half', probability: '0.5' }] }, 1).map(i => i.probability), [0, 0.5]);
+  const ideas = [idea('R1I1', 'A'), idea('R1I2', 'B'), idea('R1I3', 'C')];
+  const r = applyClusters({ themes: [{ theme: 'T', ideas: [
+    { id: 'R1I1', feasibility: null, novelty: 9, impact: 9 }, // one score missing: the idea stays unscored, not 0
+    { id: 'R1I2', feasibility: '', novelty: false, impact: 5 },
+    { id: 'R1I3', feasibility: 0, novelty: 3, impact: '4' }, // a real 0 is still a score
+  ] }] }, ideas, []);
+  assert.deepEqual(r.ideas.map(i => [i.id, i.feasibility, i.score != null]), [['R1I1', null, false], ['R1I2', null, false], ['R1I3', 0, true]]);
+  assert.equal(r.unscored, 2);
+});
+
+test('hook: a run that ends early (no provider, no trial) still writes its summary line', async () => {
+  const ui = () => { const blocks = new Map(); let n = 0; return { blocks, emit: (x) => { const id = `b${++n}`; blocks.set(id, x); return id; }, update: (id, x) => blocks.set(id, x) }; };
+  const catalogue = [{ id: 'lab/writer', architecture: { output_modalities: ['text'] }, pricing: { prompt: '0.000001', completion: '0.000002' }, context_length: 128000, supported_parameters: ['response_format'] }];
+  const summaries = (run) => run.filter(l => /"feature":"brainstorm"/.test(l)).map(l => JSON.parse(l.slice(l.indexOf('{'))));
+  const noKey = [];
+  assert.equal(await handleBrainstormRequest('brainstorm names for a bakery', { ...ui(), readConfig: async () => '{"modelProviders":[]}', log: (m) => noKey.push(m) }), true);
+  assert.deepEqual(summaries(noKey).map(s => s.ok), [false]);
+  const noTrial = [];
+  assert.equal(await handleBrainstormRequest('brainstorm names for a bakery', { ...ui(), client: { models: async () => catalogue }, trial: {}, log: (m) => noTrial.push(m) }), true);
+  assert.deepEqual(summaries(noTrial).map(s => s.ok), [false]);
+});

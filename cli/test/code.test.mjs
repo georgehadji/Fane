@@ -114,6 +114,25 @@ test('code out of answers: one fenced file, several "File:" blocks, and a fence 
   assert.equal(languageOf('Dockerfile'), 'dockerfile');
 });
 
+test('a fence shown inside a generated file does not cut the file', () => {
+  const F = '```';
+  const readme = ['# Tool', '', 'Install:', '', `${F}bash`, 'npm i', F, '', 'Run it.'].join('\n');
+  // a README in its own fence, with a bash example inside
+  assert.equal(extractCode([`${F}markdown`, readme, F].join('\n')), `${readme}\n`);
+  // a Python file whose docstring holds a JSON example
+  const py = ['def f():', '    pass', '', 'DOC = """', `${F}json`, '{"a": 1}', F, '"""', '', 'print(DOC)'].join('\n');
+  assert.equal(extractCode(['Here:', `${F}python`, py, F, 'Done.'].join('\n')), `${py}\n`);
+  // two files, the first with a nested example, then a normal one
+  const files = parseFiles(['File: README.md', `${F}markdown`, readme, F, '', 'File: tests/a.py', `${F}python`, 'x = 1', F].join('\n'));
+  assert.deepEqual(files.map(x => x.path), ['README.md', 'tests/a.py']);
+  assert.equal(files[0].content, `${readme}\n`);
+  assert.equal(files[1].content, 'x = 1\n');
+  // plain cases are unchanged: two separate blocks, an unclosed block is no block, a span in a sentence is no fence
+  assert.equal(extractCode(`${F}js\na()\n${F}\ntext\n${F}js\nlonger_one()\n${F}`), 'longer_one()\n');
+  assert.equal(extractCode(`${F}js\nunclosed()`), `${F}js\nunclosed()\n`);
+  assert.equal(extractCode(`Use ${F}x${F} here\n${F}js\nreal()\n${F}`), 'real()\n');
+});
+
 test('fileChecks: empty files and syntax errors fail; stubs and secrets warn', () => {
   const items = fileChecks([
     { path: 'a.py', content: 'def f():\n    # TODO: implement\n    pass\n' },
@@ -330,6 +349,8 @@ test('syntax check: JavaScript with node --check, JSON in process, Python with a
     { path: 'cjs.js', content: "const fs = require('fs');\nmodule.exports = fs;\n" },
     { path: 'sub/data.json', content: '{"a": 1}' },
     { path: 'broken.json', content: '{a:1}' },
+    { path: 'tsconfig.json', content: '{\n  // comment\n  "compilerOptions": { "strict": true, },\n}' },
+    { path: 'package.json', content: '{"name": "x",}' },
     { path: 'x.rs', content: 'fn main() {}' },
     { path: 'never.mjs', content: "require('node:fs').writeFileSync('fane-must-not-exist.txt', 'ran');\n" },
   ]);
@@ -341,6 +362,8 @@ test('syntax check: JavaScript with node --check, JSON in process, Python with a
   assert.equal(by['cjs.js'].status, 'ok');
   assert.equal(by['sub/data.json'].status, 'ok');
   assert.equal(by['broken.json'].status, 'error');
+  assert.equal(by['tsconfig.json'].status, 'unchecked'); // JSON with comments is valid there
+  assert.equal(by['package.json'].status, 'error'); // a trailing comma in plain JSON is not
   assert.equal(by['x.rs'].status, 'unchecked');
   const { existsSync } = await import('node:fs');
   assert.equal(existsSync('fane-must-not-exist.txt'), false); // parsed, never run
@@ -484,4 +507,16 @@ test('the CLI writes generated files only inside a new or empty folder, never ov
     const fresh = join(dir, 'new');
     assert.equal(await codeDir({ 'out-dir': fresh, query: 'q' }), fresh);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('hook: a run that ends early (no provider, no trial) still writes its summary line', async () => {
+  const ui = () => { const blocks = new Map(); let n = 0; return { blocks, emit: (x) => { const id = `b${++n}`; blocks.set(id, x); return id; }, update: (id, x) => blocks.set(id, x) }; };
+  const catalogue = [{ id: 'lab/coder', architecture: { output_modalities: ['text'] }, pricing: { prompt: '0.000001', completion: '0.000002' }, context_length: 128000, supported_parameters: ['response_format'] }];
+  const summaries = (run) => run.filter(l => /"feature":"code"/.test(l)).map(l => JSON.parse(l.slice(l.indexOf('{'))));
+  const noKey = [];
+  assert.equal(await handleCodeRequest('write a Python script that sorts files', { ...ui(), readConfig: async () => '{"modelProviders":[]}', log: (m) => noKey.push(m) }), true);
+  assert.deepEqual(summaries(noKey).map(s => s.ok), [false]);
+  const noTrial = [];
+  assert.equal(await handleCodeRequest('write a Python script that sorts files', { ...ui(), client: { models: async () => catalogue }, trial: {}, log: (m) => noTrial.push(m) }), true);
+  assert.deepEqual(summaries(noTrial).map(s => s.ok), [false]);
 });

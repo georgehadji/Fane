@@ -37,6 +37,10 @@ export async function apiKey(fromVane) {
 // catalogue; estimate(model) is a candidate's rough cost, and the dearest are dropped until the total fits --budget.
 // --dry prints the candidates and exits.
 export async function pickCandidates(values, { code = false, paid, estimate }) {
+  // a count must be a whole number of at least 1: --concurrency 0 would start no worker and still overwrite trial.json
+  for (const name of ['concurrency', 'per-lab', 'max']) {
+    if (values[name] !== undefined && !(Number.isInteger(Number(values[name])) && Number(values[name]) >= 1)) throw new Error(`invalid --${name} "${values[name]}"`);
+  }
   const only = values.only ? new Set(values.only.split(',').map(s => s.trim())) : null;
   if (values.free) {
     const client = modelClientFor(await vaneProviders(), { freeBaseUrl: fromHost });
@@ -97,19 +101,23 @@ async function pool(items, n, fn) {
 export async function runTrial({ file, values, client, candidates, trialOne, parts, line }) {
   let saved = { models: {} };
   try { saved = JSON.parse(await readFile(file, 'utf8')); } catch { /* first run */ }
-  let spent = 0;
+  let spent = 0, tried = 0;
   try {
     await pool(candidates, Number(values.concurrency), async (m) => {
       const { out, unanswered } = await trialOne(client, m);
       if (unanswered && values.free) return console.log(`${m.id.padEnd(46)} not saved: a call got no answer (${parts(out).flatMap(x => x.problems || []).find(p => /^[1-5]\d\d [A-Z]/.test(p)) || 'no status'})`);
       spent += out.cost;
       saved.models[m.id] = out;
+      tried++;
       const problems = [...new Set(parts(out).flatMap(x => x.problems || []))];
       console.log(`${m.id.padEnd(46)} ${line(m, out)}  $${out.cost.toFixed(4)}${problems.length ? `  (${problems.join('; ')})` : ''}`);
     });
   } finally {
-    saved.updated = new Date().toISOString().slice(0, 10);
-    await writeFile(file, `${JSON.stringify(saved, null, 1)}\n`);
-    console.log(`\nspent $${spent.toFixed(4)}; wrote ${file}`);
+    if (!tried) console.log(`\nno model was tried; ${file} is unchanged`);
+    else {
+      saved.updated = new Date().toISOString().slice(0, 10);
+      await writeFile(file, `${JSON.stringify(saved, null, 1)}\n`);
+      console.log(`\nspent $${spent.toFixed(4)}; wrote ${file}`);
+    }
   }
 }

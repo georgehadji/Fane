@@ -37,6 +37,7 @@ export async function handleBrainstormRequest(query, { emit, update, configPath,
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) {
       say(providerMissing('Brainstorming', { free: true }));
+      track.finish({ ok: false }); // a run that ends early still leaves its summary line
       return true;
     }
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
@@ -48,6 +49,7 @@ export async function handleBrainstormRequest(query, { emit, update, configPath,
     });
     if (!chosen) {
       say(quiet([escapeHtml('No text model has passed the article trial: run node scripts/article-trial.mjs.')]));
+      track.finish({ ok: false }); // a run that ends early still leaves its summary line
       return true;
     }
     const retrieve = retryEmpty(research);

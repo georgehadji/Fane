@@ -12,6 +12,7 @@ import { clampPostWords, isPost } from '../core/formats.mjs';
 import { AUDIT_DIMENSIONS, MIN_CLAIM_SUPPORT, auditResult, claimLedger, claimSupportRatio } from './gate.mjs';
 import { countTells, detectLanguage, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
 import { createRoleCaller, noteOf, statusOf } from './llm.mjs';
+import { STOPPED_STATUS } from '../core/runlog.mjs';
 import { DEFAULT_MODE, MODES, PHASES, POST_PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
 import { postEditRule, prompts } from './prompts.mjs';
 
@@ -156,6 +157,12 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       if (!d.ok) return { ok: false, error: `the draft failed: ${d.errors.join('; ')}`, phases, language: lang, mode, calls, cost, sources };
       body = fix(d.text);
       phases.at(-1).words = wordCount(body);
+
+      // From here on an article exists. A refusal from the provider (bad key, no credits, the spend cap) ends the
+      // model calls but not the run: the draft is finished and shown with a note, because it was paid for. The
+      // user's own stop (499) still discards it.
+      let ledger = [], claimSupport = null, audit = null, stoppedBy = null;
+      try {
       await trim();
       emit({ phase: 'draft', status: 'preview', text: body, sources }); // lets a UI show the draft while the checks and edits run
 
@@ -169,7 +176,6 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const stopped = both.find(s => s.status === 'rejected');
       if (stopped) throw stopped.reason;
       const [f, c] = both.map(s => s.value);
-      let ledger = [], claimSupport = null;
       if (f) {
         if (f.ok) {
           ledger = claimLedger(f.data);
@@ -192,7 +198,6 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       for (const role of ['polish', 'style', 'copy']) if (plan.includes(role)) await edit(role, { tellsReport: tellsReport() });
 
       // 7. Final audit, with one retry (revise, style, copy, audit) when it fails.
-      let audit = null;
       const runAudit = async () => {
         const a = await step('audit', { article: body, ledger });
         if (!a.ok) { degraded.push('the final audit failed: no quality score'); return null; }
@@ -207,6 +212,12 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
           if (second) audit = { ...second, retried: true };
           if (audit && !audit.passes) degraded.push(`the final audit failed twice (${audit.failures.join('; ') || `score ${audit.score}`}): published as is`);
         }
+      }
+
+      } catch (err) {
+        if (!(err instanceof Stop) || err.status === STOPPED_STATUS) throw err;
+        stoppedBy = { status: err.status ?? null, error: err.message };
+        degraded.push(`stopped after the draft (${err.message}): the article was not edited further`);
       }
 
       // 8. Finish: cited sources numbered 1..n in order of appearance, a sources list written by code, checks.
@@ -239,6 +250,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
         repaired,
         calls,
         cost,
+        stopped: stoppedBy,
         ms: now() - t0,
       };
     } catch (err) {
