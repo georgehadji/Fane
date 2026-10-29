@@ -21,6 +21,8 @@ const TARGETS = [
     file: FILES.discoverRoute,
     from: FROM,
     to: `Response.json({blogs:(${ELLIPSIS})(e)},{status:200})`,
+    // patch-discover-translate rewrites the call's argument, so `to` no longer reads as it did
+    marker: 'function ELLIPSIS(',
   },
 ];
 

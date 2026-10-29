@@ -172,6 +172,22 @@ test('patch-discover-ellipsis: three periods at the end of a summary become a no
   assert.deepEqual(r.errors, []);
 });
 
+test('patch-discover-translate: stacks on patch-discover-ellipsis, only on the Discover page, and answers in English when the module is missing', async () => {
+  const ellipsis = require('../../patches/patch-discover-ellipsis.js');
+  const translate = require('../../patches/patch-discover-translate.js');
+  const route = '(async function GET(c){let e=[{content:"cut here..."}];return Response.json({blogs:e},{status:200})})';
+  let r = planPatch({ [FILES.discoverRoute]: route }, ellipsis.TARGETS);
+  r = planPatch(r.next, translate.TARGETS);
+  assert.deepEqual([r.errors, r.applied], [[], ['Discover summaries translated to Greek']]);
+  for (const t of [...ellipsis.TARGETS, ...translate.TARGETS]) assert.deepEqual(planPatch(r.next, [t]).applied, [], t.name); // file order, twice
+  const GET = eval(r.next[FILES.discoverRoute]);
+  const log = console.log;
+  console.log = () => {}; // "translation unavailable": /fane/image is not on this machine
+  try {
+    for (const mode of ['normal', 'preview']) assert.deepEqual((await (await GET(mode)).json()).blogs, [{ content: 'cut here …' }], mode);
+  } finally { console.log = log; }
+});
+
 test('patch-discover-greek: the Discover search adds every Greek site and query of the topic, in Greek; a failing one adds nothing', async () => {
   const { GREEK, TARGETS } = require('../../patches/patch-discover-greek.js');
   assert.deepEqual(Object.keys(GREEK), ['tech', 'finance', 'art', 'sports', 'entertainment']); // Vane's Discover topics
