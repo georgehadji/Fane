@@ -172,20 +172,23 @@ test('patch-discover-ellipsis: three periods at the end of a summary become a no
   assert.deepEqual(r.errors, []);
 });
 
-test('patch-discover-translate: stacks on patch-discover-ellipsis, only on the Discover page, and answers in English when the module is missing', async () => {
-  const ellipsis = require('../../patches/patch-discover-ellipsis.js');
-  const translate = require('../../patches/patch-discover-translate.js');
-  const route = '(async function GET(c){let e=[{content:"cut here..."}];return Response.json({blogs:e},{status:200})})';
-  let r = planPatch({ [FILES.discoverRoute]: route }, ellipsis.TARGETS);
-  r = planPatch(r.next, translate.TARGETS);
-  assert.deepEqual([r.errors, r.applied], [[], ['Discover summaries translated to Greek']]);
-  for (const t of [...ellipsis.TARGETS, ...translate.TARGETS]) assert.deepEqual(planPatch(r.next, [t]).applied, [], t.name); // file order, twice
-  const GET = eval(r.next[FILES.discoverRoute]);
-  const log = console.log;
-  console.log = () => {}; // "translation unavailable": /fane/image is not on this machine
-  try {
-    for (const mode of ['normal', 'preview']) assert.deepEqual((await (await GET(mode)).json()).blogs, [{ content: 'cut here …' }], mode);
-  } finally { console.log = log; }
+test('patch-discover-summary-greek: every Discover and home news link asks for a Greek summary, in an ASCII bundle', () => {
+  const { TARGETS, ASK } = require('../../patches/patch-discover-summary-greek.js');
+  // one fake bundle per file, holding each of its links as Vane writes them
+  const files = {};
+  for (const t of TARGETS) {
+    const v = /\$\{(\w)\.url\}/.exec(t.from)[1];
+    files[t.file] = `${files[t.file] || ''}links.push((${v})=>({href:\`/?${t.from} x"}));`;
+  }
+  const r = planPatch(files, TARGETS);
+  assert.deepEqual([r.errors, r.applied.length], [[], 6]);
+  assert.deepEqual(planPatch(r.next, TARGETS).applied, []);
+  for (const [file, text] of Object.entries(r.next)) {
+    assert.ok(/^[\x20-\x7e]*$/.test(text), file);
+    const links = [];
+    new Function('links', text)(links);
+    for (const make of links) assert.equal(make({ url: 'https://x.test/a' }).href, `/?q=${ASK}https://x.test/a`, file);
+  }
 });
 
 test('patch-discover-greek: the Discover search adds every Greek site and query of the topic, in Greek; a failing one adds nothing', async () => {
