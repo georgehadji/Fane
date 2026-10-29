@@ -4,15 +4,7 @@
 // "el" when their text has more Greek letters than Latin ones; anything else keeps the page's "en". A browser chunk,
 // served with max-age=0, so a normal reload picks the change up.
 const { run } = require('./lib/apply-targets');
-const { FILES } = require('./lib/vane');
-
-// Injected as-is (no imports, no closure): "el" for mostly Greek text, else undefined (the attribute is left out).
-function LANG(text) {
-  const s = typeof text === 'string' ? text : '';
-  const greek = (s.match(/[Ͱ-Ͽἀ-῿]/g) || []).length;
-  const latin = (s.match(/[A-Za-z]/g) || []).length;
-  return greek > latin ? 'el' : undefined;
-}
+const { FILES, LANG } = require('./lib/vane');
 
 // `e.message.query` is the question; `h` is the answer text, the children of Vane's Markdown component, which passes
 // its other props to the element it renders.

@@ -15,56 +15,29 @@ done
 key=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
 sed "s/^\([[:space:]]*secret_key:\).*/\1 '$key'/" /fane/searxng/settings.yml > /etc/searxng/settings.yml
 
-# The CORE academic engine is switched on only with a key (same rule as scripts/searxng-settings.mjs).
-# Only [A-Za-z0-9._-], 8 to 200 long, so the key cannot break the YAML line or this sed. A case pattern, not
-# grep: grep tests one line at a time and let a key with a newline through.
-# A pasted or CRLF-edited key is trimmed at both ends, as scripts/apply.mjs does with .trim().
-CORE_API_KEY=${CORE_API_KEY:-}
-CORE_API_KEY=${CORE_API_KEY#"${CORE_API_KEY%%[![:space:]]*}"}
-CORE_API_KEY=${CORE_API_KEY%"${CORE_API_KEY##*[![:space:]]}"}
-if [ -n "$CORE_API_KEY" ]; then
-  case "$CORE_API_KEY" in
+# Keyed engines: switched on only with a key, by the rules of scripts/searxng-settings.mjs (renderSettings).
+# switch_on <key> <variable> <label> <engine name> <field> <value prefix>; one call per KEYED_ENGINES entry there.
+# A pasted or CRLF-edited key is trimmed at both ends, as scripts/apply.mjs does with .trim(). Only [A-Za-z0-9._-],
+# 8 to 200 long, so the key cannot break the YAML line or this sed. A case pattern, not grep: grep tests one line at
+# a time and let a key with a newline through.
+switch_on() {
+  key=$1
+  key=${key#"${key%%[![:space:]]*}"}
+  key=${key%"${key##*[![:space:]]}"}
+  [ -n "$key" ] || return 0
+  case "$key" in
     *[!A-Za-z0-9._-]*) ok=no ;;
-    *) if [ "${#CORE_API_KEY}" -ge 8 ] && [ "${#CORE_API_KEY}" -le 200 ]; then ok=yes; else ok=no; fi ;;
+    *) if [ "${#key}" -ge 8 ] && [ "${#key}" -le 200 ]; then ok=yes; else ok=no; fi ;;
   esac
   if [ "$ok" = yes ]; then
-    sed -i "/- name: core\.ac\.uk/,/inactive:/{s/api_key:.*/api_key: '$CORE_API_KEY'/;s/inactive:.*/inactive: false/}" /etc/searxng/settings.yml
+    sed -i "/- name: $4/,/inactive:/{s/$5:.*/$5: '$6$key'/;s/inactive:.*/inactive: false/}" /etc/searxng/settings.yml
   else
-    echo "fane: WARNING: CORE_API_KEY has unexpected characters; the CORE engine stays off" >&2
+    echo "fane: WARNING: $2 has unexpected characters; the $3 engine stays off" >&2
   fi
-fi
-
-# The Brave Search API engine is switched on only with a key, by the same rules as CORE_API_KEY above.
-BRAVE_API_KEY=${BRAVE_API_KEY:-}
-BRAVE_API_KEY=${BRAVE_API_KEY#"${BRAVE_API_KEY%%[![:space:]]*}"}
-BRAVE_API_KEY=${BRAVE_API_KEY%"${BRAVE_API_KEY##*[![:space:]]}"}
-if [ -n "$BRAVE_API_KEY" ]; then
-  case "$BRAVE_API_KEY" in
-    *[!A-Za-z0-9._-]*) ok=no ;;
-    *) if [ "${#BRAVE_API_KEY}" -ge 8 ] && [ "${#BRAVE_API_KEY}" -le 200 ]; then ok=yes; else ok=no; fi ;;
-  esac
-  if [ "$ok" = yes ]; then
-    sed -i "/- name: brave api/,/inactive:/{s/X-Subscription-Token:.*/X-Subscription-Token: '$BRAVE_API_KEY'/;s/inactive:.*/inactive: false/}" /etc/searxng/settings.yml
-  else
-    echo "fane: WARNING: BRAVE_API_KEY has unexpected characters; the Brave engine stays off" >&2
-  fi
-fi
-
-# The Tavily engine, by the same rules; its key goes in an Authorization header after "Bearer ".
-TAVILY_API_KEY=${TAVILY_API_KEY:-}
-TAVILY_API_KEY=${TAVILY_API_KEY#"${TAVILY_API_KEY%%[![:space:]]*}"}
-TAVILY_API_KEY=${TAVILY_API_KEY%"${TAVILY_API_KEY##*[![:space:]]}"}
-if [ -n "$TAVILY_API_KEY" ]; then
-  case "$TAVILY_API_KEY" in
-    *[!A-Za-z0-9._-]*) ok=no ;;
-    *) if [ "${#TAVILY_API_KEY}" -ge 8 ] && [ "${#TAVILY_API_KEY}" -le 200 ]; then ok=yes; else ok=no; fi ;;
-  esac
-  if [ "$ok" = yes ]; then
-    sed -i "/- name: tavily/,/inactive:/{s/Authorization:.*/Authorization: 'Bearer $TAVILY_API_KEY'/;s/inactive:.*/inactive: false/}" /etc/searxng/settings.yml
-  else
-    echo "fane: WARNING: TAVILY_API_KEY has unexpected characters; the Tavily engine stays off" >&2
-  fi
-fi
+}
+switch_on "${BRAVE_API_KEY:-}" BRAVE_API_KEY Brave 'brave api' X-Subscription-Token ''
+switch_on "${TAVILY_API_KEY:-}" TAVILY_API_KEY Tavily 'tavily' Authorization 'Bearer '
+switch_on "${CORE_API_KEY:-}" CORE_API_KEY CORE 'core.ac.uk' api_key ''
 chown searxng:searxng /etc/searxng/settings.yml
 
 exec docker-entrypoint.sh "$@"

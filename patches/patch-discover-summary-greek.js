@@ -5,10 +5,10 @@
 // Server-rendered pages and their browser chunks both carry the link (the browser chunks are served with max-age=0;
 // the server pages need Vane restarted). Greek is written as \u escapes, so the bundles stay ASCII.
 const { run } = require('./lib/apply-targets');
-const { FILES } = require('./lib/vane');
+const { FILES, ascii } = require('./lib/vane');
 
 const ASK = 'Περίληψη στα ελληνικά: ';
-const escaped = ASK.replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+const escaped = ascii(ASK);
 
 // `v` is the story's variable in that bundle; `rest` tells apart two links in one file.
 const link = (name, file, v, rest) => ({

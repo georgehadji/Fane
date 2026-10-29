@@ -172,6 +172,19 @@ test('patch-discover-ellipsis: three periods at the end of a summary become a no
   assert.deepEqual(r.errors, []);
 });
 
+test('the README, and the project page\'s count and apply output, name every patch in patches/', () => {
+  const names = readdirSync(new URL('../../patches/', import.meta.url)).filter(f => /^patch-.*\.js$/.test(f)).map(f => f.slice(0, -3)).sort();
+  const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
+  for (const n of names) assert.ok(readme.includes(`patches/${n}.js`), `README.md does not mention patches/${n}.js`);
+  const page = readFileSync(new URL('../../docs/index.html', import.meta.url), 'utf8');
+  assert.deepEqual(page.match(/^ok {4}patch-[a-z-]+(?= applied)/gm).map(l => l.slice(6)), names);
+  const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty'];
+  const words = tens[Math.floor(names.length / 10)] + (names.length % 10 ? `-${ones[names.length % 10]}` : '');
+  assert.ok(page.includes(`${words} patches`), `docs/index.html should say "${words} patches"`);
+  assert.ok(page.includes(`${words[0].toUpperCase()}${words.slice(1)} patches fix`), 'the page sentence');
+});
+
 test('patch-sources-required: with no search result and no widget, the first question gets "nothing was found" and a follow-up a rule', async () => {
   const quality = require('../../patches/patch-quality-check.js');
   const required = require('../../patches/patch-sources-required.js');

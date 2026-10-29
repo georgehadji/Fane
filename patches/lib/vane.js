@@ -57,6 +57,20 @@ module.exports = {
   FANE_BRAINSTORM_DIR: '/fane/brainstorm',
   // The Fane project page (docs/ served by GitHub Pages), linked from Vane's menu by patch-fane-link.
   FANE_PAGE_URL: 'https://georgehadji.github.io/Fane/',
+  // Google Fonts' greek subset range: patch-type's Commissioner face and patch-editorial-greek's face.
+  GREEK_RANGE: 'U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF',
+  // Text to put inside a JavaScript string or template literal of a bundle: non-ASCII as \u escapes.
+  ascii: (s) => s.replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`),
+};
+
+// "el" when a text has more Greek letters than Latin ones, else undefined. Injected as-is into bundles
+// (`(${LANG})(text)`: no imports, no closure) by patch-greek-lang and patch-sources-required. Its source text is in
+// patched containers: changing it needs an upgrade target in patch-greek-lang.
+module.exports.LANG = function LANG(text) {
+  const s = typeof text === 'string' ? text : '';
+  const greek = (s.match(/[Ͱ-Ͽἀ-῿]/g) || []).length;
+  const latin = (s.match(/[A-Za-z]/g) || []).length;
+  return greek > latin ? 'el' : undefined;
 };
 
 // Target shared by patch-scholarly-sources and patch-social-sources (whichever runs first

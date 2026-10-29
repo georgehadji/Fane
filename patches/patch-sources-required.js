@@ -8,7 +8,7 @@
 // Wraps the writer call that patch-quality-check already wrapped, so it runs after it (file order) and that patch
 // carries a marker. In Quality the fixed answer has no citations, so the check leaves it alone.
 const { run } = require('./lib/apply-targets');
-const { FILES } = require('./lib/vane');
+const { FILES, LANG, ascii } = require('./lib/vane');
 
 const NOTHING = {
   en: 'Nothing was found for this question, so there is no answer from sources. Try other words, or ask again: the search engines sometimes miss on the first try.',
@@ -16,10 +16,9 @@ const NOTHING = {
 };
 const FOLLOW_UP_RULE = '\n\n### No sources\nThe search found nothing for this message. Answer only from the conversation above. If the conversation does not hold the answer, say that nothing was found. Never answer from your own memory.';
 
-// Non-ASCII as \u escapes, so the bundles stay ASCII.
-const js = (s) => JSON.stringify(s).replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
-// Greek when Greek letters outnumber Latin ones in the question (as patch-greek-lang decides).
-const NOTHING_FOR_QUESTION = `((b.followUp.match(/[\\u0370-\\u03ff\\u1f00-\\u1fff]/g)||[]).length>(b.followUp.match(/[a-z]/gi)||[]).length?${js(NOTHING.el)}:${js(NOTHING.en)})`;
+const js = (s) => ascii(JSON.stringify(s));
+// Greek when the question is (the same rule as patch-greek-lang's lang attribute).
+const NOTHING_FOR_QUESTION = `("el"===(${LANG})(b.followUp)?${js(NOTHING.el)}:${js(NOTHING.en)})`;
 
 const writer = (system) => `b.config.llm.streamText({messages:[{role:"system",content:${system}},...b.chatHistory,{role:"user",content:b.followUp}]})`;
 // findings: the research's search results; widgets: the widget results; system: the writer prompt.

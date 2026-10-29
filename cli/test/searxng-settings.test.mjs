@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-const { renderSettings } = await import('../../scripts/searxng-settings.mjs');
+const { KEYED_ENGINES, renderSettings } = await import('../../scripts/searxng-settings.mjs');
 const repo = readFileSync(new URL('../../searxng/settings.yml', import.meta.url), 'utf8');
 const KEY = 'AbC123def456GhI789';
 
@@ -25,39 +27,6 @@ test('a key that could break the YAML or the sed is refused', () => {
 });
 
 // The container entrypoint does the same with sed. Skipped where there is no sh (Windows without Git Bash).
-test('docker/fane-entrypoint.sh renders the same CORE block as renderSettings', { skip: spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh' }, () => {
-  const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
-  const sed = /sed -i "([^"]+)"/.exec(script)[1].replace('$CORE_API_KEY', KEY);
-  const r = spawnSync('sh', ['-c', `sed "${sed}"`], { input: repo.replace(/\r\n/g, '\n'), encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trimEnd(), renderSettings(repo, { coreKey: KEY }).trimEnd());
-});
-
-test('docker/fane-entrypoint.sh refuses the same keys as renderSettings, a newline included', { skip: spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh' }, () => {
-  const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
-  const check = /case "\$CORE_API_KEY" in[\s\S]*?\n {2}esac/.exec(script)[0];
-  const accepts = (key) => spawnSync('sh', ['-c', `${check}\necho "$ok"`], { env: { ...process.env, CORE_API_KEY: key }, encoding: 'utf8' }).stdout.trim() === 'yes';
-  assert.equal(accepts(KEY), true);
-  for (const bad of ["abc'def123", 'abc def123', 'short', 'a'.repeat(201), `${KEY}\nx: y`, `${KEY}\n`]) assert.equal(accepts(bad), false, JSON.stringify(bad));
-});
-
-test('docker/fane-entrypoint.sh trims a pasted key like apply.mjs does, and still refuses a space inside it', { skip: spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh' }, () => {
-  const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
-  const trim = script.split('\n').filter(l => l.startsWith('CORE_API_KEY=')).join('\n');
-  assert.equal(trim.split('\n').length, 3);
-  const check = /case "\$CORE_API_KEY" in[\s\S]*?\n {2}esac/.exec(script)[0];
-  const sh = (key, tail) => spawnSync('sh', ['-c', `${trim}\n${tail}`], { env: { ...process.env, CORE_API_KEY: key }, encoding: 'utf8' }).stdout;
-  const trimmed = (key) => sh(key, 'printf "%s" "$CORE_API_KEY"');
-  const accepts = (key) => sh(key, `${check}\necho "$ok"`).trim() === 'yes';
-  for (const messy of [`${KEY} `, `${KEY}\r\n`, ` \t${KEY}\r`, `\n${KEY}`, `  ${KEY}  `]) {
-    assert.equal(trimmed(messy), KEY, JSON.stringify(messy));
-    assert.equal(accepts(messy), true, JSON.stringify(messy)); // the same settings as the clean key
-  }
-  assert.equal(trimmed('abc def123'), 'abc def123');
-  for (const bad of ['abc def123', `${KEY}\nx: y`, 'short ']) assert.equal(accepts(bad), false, JSON.stringify(bad));
-  assert.equal(trimmed(''), ''); // no key: nothing to render
-});
-
 test('a Brave key goes into the brave api header only, and switches that engine on', () => {
   const out = renderSettings(repo, { braveKey: KEY });
   assert.match(out, new RegExp(`- name: brave api\n(?: {4}[^\n]*\n)*? {6}X-Subscription-Token: '${KEY}'\n {4}inactive: false`));
@@ -71,14 +40,6 @@ test('a Brave key that could break the YAML or the sed is refused', () => {
   for (const bad of ["abc'def123", 'abc def123', 'short', 'a$b{c}12345']) assert.throws(() => renderSettings(repo, { braveKey: bad }), /BRAVE_API_KEY has unexpected characters/, bad);
 });
 
-test('docker/fane-entrypoint.sh renders the same Brave block as renderSettings', { skip: spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh' }, () => {
-  const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
-  const sed = [...script.matchAll(/sed -i "([^"]+)"/g)].map(m => m[1]).find(s => s.includes('brave api')).replace('$BRAVE_API_KEY', KEY);
-  const r = spawnSync('sh', ['-c', `sed "${sed}"`], { input: repo.replace(/\r\n/g, '\n'), encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trimEnd(), renderSettings(repo, { braveKey: KEY }).trimEnd());
-});
-
 test('a Tavily key goes into the tavily Authorization header after "Bearer ", and switches that engine on', () => {
   const out = renderSettings(repo, { tavilyKey: KEY });
   assert.match(out, new RegExp(`- name: tavily\n(?: {4}[^\n]*\n)*? {6}Authorization: 'Bearer ${KEY}'\n {4}inactive: false`));
@@ -88,10 +49,46 @@ test('a Tavily key goes into the tavily Authorization header after "Bearer ", an
   for (const bad of ["abc'def123", 'abc def123', 'short']) assert.throws(() => renderSettings(repo, { tavilyKey: bad }), /TAVILY_API_KEY has unexpected characters/, bad);
 });
 
-test('docker/fane-entrypoint.sh renders the same Tavily block as renderSettings', { skip: spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh' }, () => {
-  const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
-  const sed = [...script.matchAll(/sed -i "([^"]+)"/g)].map(m => m[1]).find(s => s.includes('name: tavily')).replace('$TAVILY_API_KEY', KEY);
-  const r = spawnSync('sh', ['-c', `sed "${sed}"`], { input: repo.replace(/\r\n/g, '\n'), encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trimEnd(), renderSettings(repo, { tavilyKey: KEY }).trimEnd());
+// The container entrypoint does the same with sed (switch_on). Skipped where there is no sh (Windows without Git Bash).
+const NO_SH = spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh';
+const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
+const SWITCH_ON = /^switch_on\(\) \{\n[\s\S]*?\n\}\n/m.exec(script)[0];
+const CALLS = script.match(/^switch_on ".*$/gm);
+// Runs the entrypoint's switch_on calls on a copy of the repo file, with only `env`'s keys set.
+// `eol`: Compose mounts searxng/ from the checkout, which has CRLF on Windows.
+function entrypoint(env, eol = '\n') {
+  const dir = mkdtempSync(join(tmpdir(), 'fane-'));
+  const file = join(dir, 'settings.yml').replace(/\\/g, '/');
+  try {
+    writeFileSync(file, repo.replace(/\r?\n/g, eol));
+    const keys = Object.fromEntries(KEYED_ENGINES.map(e => [e.env, '']));
+    const r = spawnSync('sh', ['-c', `${SWITCH_ON.replaceAll('/etc/searxng/settings.yml', file)}${CALLS.join('\n')}`], { env: { ...process.env, ...keys, ...env }, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    return { out: readFileSync(file, 'utf8'), err: r.stderr };
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+test('docker/fane-entrypoint.sh has one switch_on call per KEYED_ENGINES entry, with the same engine, field and prefix', () => {
+  const calls = CALLS.map(l => /^switch_on "\$\{(\w+):-\}" (\w+) (\w+) '([^']*)' (\S+) '([^']*)'$/.exec(l).slice(1));
+  assert.deepEqual(calls, KEYED_ENGINES.map(e => [e.env, e.env, e.label, e.name, e.field, e.prefix]));
+});
+
+test('docker/fane-entrypoint.sh renders the same blocks as renderSettings, one key or all of them', { skip: NO_SH }, () => {
+  for (const e of KEYED_ENGINES) assert.equal(entrypoint({ [e.env]: KEY }).out.trimEnd(), renderSettings(repo, { [e.opt]: KEY }).trimEnd(), e.env);
+  const all = Object.fromEntries(KEYED_ENGINES.map(e => [e.opt, KEY]));
+  assert.equal(entrypoint(Object.fromEntries(KEYED_ENGINES.map(e => [e.env, KEY]))).out.trimEnd(), renderSettings(repo, all).trimEnd());
+  assert.equal(entrypoint({}).out, repo.replace(/\r\n/g, '\n')); // no key: nothing changes
+  const crlf = entrypoint(Object.fromEntries(KEYED_ENGINES.map(e => [e.env, KEY])), '\r\n').out;
+  assert.equal(crlf.replace(/\r\n/g, '\n').trimEnd(), renderSettings(repo, all).trimEnd());
+});
+
+test('docker/fane-entrypoint.sh trims a pasted key like apply.mjs does, and refuses the keys renderSettings refuses', { skip: NO_SH }, () => {
+  const clean = renderSettings(repo, { coreKey: KEY }).trimEnd();
+  for (const messy of [`${KEY} `, `${KEY}\r\n`, ` \t${KEY}\r`, `\n${KEY}`, `  ${KEY}  `]) assert.equal(entrypoint({ CORE_API_KEY: messy }).out.trimEnd(), clean, JSON.stringify(messy));
+  for (const bad of ["abc'def123", 'abc def123', 'short', 'short ', 'a'.repeat(201), `${KEY}\nx: y`, 'a$b{c}12345']) {
+    const r = entrypoint({ CORE_API_KEY: bad });
+    assert.equal(r.out, repo.replace(/\r\n/g, '\n'), JSON.stringify(bad));
+    assert.match(r.err, /CORE_API_KEY has unexpected characters; the CORE engine stays off/, JSON.stringify(bad));
+    assert.throws(() => renderSettings(repo, { coreKey: bad.trim() }), /unexpected characters/, JSON.stringify(bad));
+  }
 });

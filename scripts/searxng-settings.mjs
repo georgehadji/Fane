@@ -8,15 +8,17 @@ export const SECRET_KEY_LINE = /^(\s*secret_key:).*$/m;
 // API keys are letters and digits; anything else could break the YAML line or the sed in the entrypoint.
 export const CORE_KEY_PATTERN = /^[A-Za-z0-9._-]{8,200}$/;
 
-// The field that holds the key, inside an engine block that ends with `inactive:`.
-const block = (name, field) => new RegExp(`(- name: ${name}\\n(?:[ \\t]+[^\\n]*\\n)*?[ \\t]+${field}:)[^\\n]*\\n([ \\t]+inactive:)[^\\n]*`);
-
-// opt: the renderSettings option; env: the variable the installers read; value: what goes in the field.
+// opt: the renderSettings option; env: the variable the installers read; name: the engine; field: the line that gets
+// prefix + key. docker/fane-entrypoint.sh has one switch_on call per entry, and a test compares them.
 export const KEYED_ENGINES = [
-  { opt: 'braveKey', env: 'BRAVE_API_KEY', label: 'Brave', name: 'brave api', re: block('brave api', 'X-Subscription-Token'), value: (k) => k },
-  { opt: 'tavilyKey', env: 'TAVILY_API_KEY', label: 'Tavily', name: 'tavily', re: block('tavily', 'Authorization'), value: (k) => `Bearer ${k}` },
-  { opt: 'coreKey', env: 'CORE_API_KEY', label: 'CORE', name: 'core.ac.uk', re: block('core\\.ac\\.uk', 'api_key'), value: (k) => k },
+  { opt: 'braveKey', env: 'BRAVE_API_KEY', label: 'Brave', name: 'brave api', field: 'X-Subscription-Token', prefix: '' },
+  { opt: 'tavilyKey', env: 'TAVILY_API_KEY', label: 'Tavily', name: 'tavily', field: 'Authorization', prefix: 'Bearer ' },
+  { opt: 'coreKey', env: 'CORE_API_KEY', label: 'CORE', name: 'core.ac.uk', field: 'api_key', prefix: '' },
 ];
+
+// The field that holds the key, inside an engine block that ends with `inactive:`.
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const block = (e) => new RegExp(`(- name: ${escape(e.name)}\\n(?:[ \\t]+[^\\n]*\\n)*?[ \\t]+${escape(e.field)}:)[^\\n]*\\n([ \\t]+inactive:)[^\\n]*`);
 
 export function renderSettings(text, { secretKey, ...keys } = {}) {
   let out = text.replace(/\r\n/g, '\n');
@@ -25,8 +27,9 @@ export function renderSettings(text, { secretKey, ...keys } = {}) {
     const key = keys[e.opt];
     if (!key) continue;
     if (!CORE_KEY_PATTERN.test(key)) throw new Error(`${e.env} has unexpected characters (expected letters, digits, ".", "_" or "-")`);
-    if (!e.re.test(out)) throw new Error(`searxng/settings.yml has no ${e.name} engine block to put the key in`);
-    out = out.replace(e.re, (_, field, inactive) => `${field} '${e.value(key)}'\n${inactive} false`);
+    const re = block(e);
+    if (!re.test(out)) throw new Error(`searxng/settings.yml has no ${e.name} engine block to put the key in`);
+    out = out.replace(re, (_, field, inactive) => `${field} '${e.prefix}${key}'\n${inactive} false`);
   }
   return out;
 }

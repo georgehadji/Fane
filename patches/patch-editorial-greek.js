@@ -10,14 +10,13 @@
 const fs = require('fs');
 const path = require('path');
 const { run } = require('./lib/apply-targets');
-const { APP_CSS_END: END, FILES } = require('./lib/vane');
+const { APP_CSS_END: END, FILES, GREEK_RANGE } = require('./lib/vane');
 
-const GREEK = 'U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF';
 const data = fs.readFileSync(path.join(__dirname, 'fonts', 'noto-serif-display-greek.woff2')).toString('base64');
 
 const EDITORIAL_GREEK = `/*fane:editorial-greek*/
 /* Noto Serif Display, Copyright 2016 Google Inc., SIL OFL 1.1 */
-@font-face{font-family:PP Editorial;font-style:normal;font-weight:300;font-display:swap;src:url(data:font/woff2;base64,${data}) format("woff2");unicode-range:${GREEK}}`;
+@font-face{font-family:PP Editorial;font-style:normal;font-weight:300;font-display:swap;src:url(data:font/woff2;base64,${data}) format("woff2");unicode-range:${GREEK_RANGE}}`;
 
 const TARGETS = [
   {
