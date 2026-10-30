@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { TARGETS, CHIP, CITE_ITEMS } = require('../../patches/patch-source-cards.js');
 const { TARGETS: CODE_TARGETS } = require('../../patches/patch-code-chat.js');
-const { planPatch } = require('../../patches/lib/apply-targets.js');
+const { planPatch, appliedNeedles } = require('../../patches/lib/apply-targets.js');
 const { FILES } = require('../../patches/lib/vane.js');
 
 const src = (url, title = 'T', content = '') => ({ content, metadata: { url, title } });
@@ -64,7 +64,7 @@ test('message code: the patched chip and its props parse, and the injected code 
   const r = planPatch({ [FILES.messageClient]: bundle }, TARGETS.filter(t => t.file === FILES.messageClient));
   assert.deepEqual(r.errors, []);
   assert.ok(r.next[FILES.messageClient].includes('citation:{component:ee,props:{sources:p}}'));
-  for (const t of TARGETS) assert.ok(/^[\x09\x0a\x20-\x7e]*$/.test(t.to), t.name);
+  for (const t of TARGETS) for (const n of appliedNeedles(t)) assert.ok(/^[\x09\x0a\x20-\x7e]*$/.test(n), t.name); // the engine strips a CRLF checkout's \r
 });
 
 // A stand-in for React: hooks return their initial state (`open` forced by the test), jsx builds plain objects.
