@@ -2,6 +2,7 @@
 // Split out of vane.mjs so the feature runners (runners.mjs) and the command line (vane.mjs) share it without importing each other.
 import { execFileSync } from 'node:child_process';
 import { OPENROUTER_BASE_URL, OPENROUTER_HOST, createOpenRouterClient } from './image/openrouter.mjs';
+import { MODES } from './core/effort.mjs';
 
 // The defaults for every Fane tool (scripts/ import this object).
 export const DEFAULTS = {
@@ -18,7 +19,7 @@ export const DEFAULTS = {
   mode: process.env.VANE_MODE || 'speed',
 };
 export const VALID_SOURCES = ['web', 'academic', 'discussions'];
-export const VALID_MODES = ['speed', 'balanced', 'quality'];
+export const VALID_MODES = MODES;
 const STARTUP_WAIT_MS = 90_000;
 const SEARCH_RETRIES = 1; // retried only on HTTP 5xx / connection reset, never on timeout (that would double the wait)
 const SLUG_RE = /^[\w.~-]+\/[\w.:~-]+$/; // vendor/model[:variant], the OpenRouter id shape

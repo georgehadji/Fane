@@ -11,6 +11,7 @@ import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { MAX_FILE_CHARS, extractCode, fileChecks, parseFiles, safePath, sameFile } from './files.mjs';
 import { CODE_JSON_ROLES, CODE_PHASES, CONCURRENCY, MAX_FILES, codeChainsFor, codeTokensFor } from './models.mjs';
+import { resolveEffort } from '../core/effort.mjs';
 import { codePrompts } from './prompts.mjs';
 
 export const MAX_DOCS = 8;
@@ -120,11 +121,12 @@ function refuse(prev, next) {
 
 class Stop extends Error {}
 
-export function createCodePipeline({ client, retrieve, checkSyntax = notChecked, log = () => {}, now = Date.now }) {
-  const call = createRoleCaller({ client, log });
+export function createCodePipeline({ client, retrieve, checkSyntax = notChecked, log = () => {}, now = Date.now, maxCost }) {
+  const call = createRoleCaller({ client, log, maxCost });
 
-  return async function writeCode({ request, mode = DEFAULT_MODE, lang, models, chains, prices, onProgress = () => {} }) {
+  return async function writeCode({ request, mode = DEFAULT_MODE, effort, lang, models, chains, prices, onProgress = () => {} }) {
     if (!MODES.includes(mode)) throw new Error(`unknown mode "${mode}"`);
+    effort ??= resolveEffort(mode);
     const t0 = now();
     const today = new Date(t0).toISOString().slice(0, 10);
     lang = LANGUAGE_NAMES[lang] ? lang : detectLanguage(request);
@@ -133,13 +135,13 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
     const phases = [], degraded = [];
     let cost = 0, calls = 0;
     const emit = (e) => { try { onProgress(e); } catch { /* a throwing listener must not stop the run */ } };
-    const fail = (error) => ({ ok: false, error, phases, language: lang, mode, calls, cost });
+    const fail = (error) => ({ ok: false, error, phases, language: lang, mode, reasoning: effort.reasoning, calls, cost });
 
     async function step(role, ctx) {
       emit({ phase: role, status: 'running', file: ctx.file?.path });
       const started = now();
       const r = await call(role, codePrompts[role]({ text: request, lang, today, ...ctx }), {
-        chain: chains[role] || chains.generate, maxTokens: codeTokensFor(role), temperature: 0.2, prices, json: CODE_JSON_ROLES.has(role), code: true,
+        chain: chains[role] || chains.generate, maxTokens: codeTokensFor(role, effort.headroom), reasoning: effort.reasoning, temperature: 0.2, prices, json: CODE_JSON_ROLES.has(role), code: true,
       });
       calls += r.attempts.length;
       cost += r.cost;
@@ -268,7 +270,7 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
       for (const c of checks) if (c.level === 'fail') degraded.push(`check "${c.name}" failed: ${c.detail}`);
       const readme = buildReadme({ request, spec, files, tests, review, fixes, open, mode, lang });
       emit({ phase: 'done', status: 'done' });
-      return { ok: true, request, language: lang, mode, spec, files, tests, readme, review, fixes, open, docs, cve, checks, phases, degraded, calls, cost, ms: now() - t0 };
+      return { ok: true, request, language: lang, mode, reasoning: effort.reasoning, spec, files, tests, readme, review, fixes, open, docs, cve, checks, phases, degraded, calls, cost, ms: now() - t0 };
     } catch (err) {
       if (err instanceof Stop) return { ...fail(err.message), fatal: true, status: err.status };
       throw err;

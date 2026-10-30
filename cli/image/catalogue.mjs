@@ -3,6 +3,7 @@
 // infrastructure/llm/image_model_catalogue.py. Intent picks the family, the tier picks
 // best value (default), cheapest (budget) or most capable (premium), and primaries come
 // from distinct labs, each with its own fallback chain.
+import { EFFORT, MODES } from '../core/effort.mjs';
 
 // OpenRouter prices image models two ways: a flat `image` price per generated image
 // (pure generators), or `image_output` per output-image token. 1290 tokens is a 1024px
@@ -13,7 +14,7 @@ export const FAMILIES = ['vector', 'photoreal', 'text_in_image', 'design', 'gene
 export const TIERS = ['value', 'budget', 'premium'];
 export const DEFAULT_TIER = 'value';
 // Vane's optimization mode picks the tier: Speed -> budget, Balanced -> value, Quality -> premium.
-export const TIER_FOR_MODE = { speed: 'budget', balanced: 'value', quality: 'premium' };
+export const TIER_FOR_MODE = Object.fromEntries(MODES.map(m => [m, EFFORT[m].tier])); // core/effort.mjs
 export const FALLBACKS_PER_IMAGE = 4;
 // Aspect ratios Fane accepts, with the words that describe them to a model that ignores image_config.
 export const ASPECT_WORDS = { '1:1': 'square', '16:9': 'wide landscape', '9:16': 'tall portrait', '4:3': 'landscape', '3:4': 'portrait', '3:2': 'landscape', '2:3': 'portrait', '21:9': 'ultra-wide panorama' };

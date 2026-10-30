@@ -14,6 +14,7 @@ import { countTells, detectLanguage, repairFinalNu, repairHomoglyphs, wordCount 
 import { createRoleCaller, noteOf, statusOf } from './llm.mjs';
 import { STOPPED_STATUS } from '../core/runlog.mjs';
 import { DEFAULT_MODE, MODES, PHASES, POST_PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
+import { resolveEffort } from '../core/effort.mjs';
 import { postEditRule, prompts } from './prompts.mjs';
 
 // The passes that write the whole text back; on a post each gets the shape it must keep.
@@ -36,12 +37,13 @@ const titleOf = (text) => /^\s*#\s+(.+)$/m.exec(text)?.[1].trim() || '';
 
 class Stop extends Error {}
 
-export function createArticlePipeline({ client, retrieve, log = () => {}, now = Date.now }) {
-  const call = createRoleCaller({ client, log });
+export function createArticlePipeline({ client, retrieve, log = () => {}, now = Date.now, maxCost }) {
+  const call = createRoleCaller({ client, log, maxCost });
 
   // format: 'article', or a platform of formats.mjs POSTS ('linkedin', 'facebook') for a social post.
-  return async function writeArticle({ topic, mode = DEFAULT_MODE, lang, words, models, chains, prices, format = 'article', onProgress = () => {} }) {
+  return async function writeArticle({ topic, mode = DEFAULT_MODE, effort, lang, words, models, chains, prices, format = 'article', onProgress = () => {} }) {
     if (!MODES.includes(mode)) throw new Error(`unknown mode "${mode}"`);
+    effort ??= resolveEffort(mode);
     const post = isPost(format);
     if (!post && format !== 'article') throw new Error(`unknown format "${format}"`);
     const t0 = now();
@@ -62,7 +64,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const size = Math.max(words, ctx.article ? wordCount(ctx.article) : 0);
       const prompt = prompts[role]({ topic, lang, words, today, format, ...ctx });
       if (post && EDITORS.has(role)) prompt.user += postEditRule(format);
-      const r = await call(role, prompt, { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, size, lang), prices });
+      const r = await call(role, prompt, { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, size, lang, effort.headroom), prices, reasoning: effort.reasoning });
       calls += r.attempts.length;
       cost += r.cost;
       const rec = { phase: role, model: r.model || null, status: statusOf(r), ms: now() - started, note: noteOf(r) };
@@ -140,7 +142,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       emit({ phase: 'sources', status: 'done', note: `${sources.length} sources` });
       if (!sources.length) {
         const why = found.find(f => f.status === 'rejected')?.reason?.message;
-        return { ok: false, error: `no sources found for this topic${why ? ` (${why})` : ''}; an article without sources would be unchecked`, phases, language: lang, mode, calls, cost };
+        return { ok: false, error: `no sources found for this topic${why ? ` (${why})` : ''}; an article without sources would be unchecked`, phases, language: lang, mode, reasoning: effort.reasoning, calls, cost };
       }
       if (sources.length < THIN_SOURCES) degraded.push(`only ${sources.length} source${sources.length === 1 ? '' : 's'} found: thinly sourced`);
 
@@ -154,7 +156,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
 
       // 3. Draft (required).
       const d = await step('draft', { sources, outline });
-      if (!d.ok) return { ok: false, error: `the draft failed: ${d.errors.join('; ')}`, phases, language: lang, mode, calls, cost, sources };
+      if (!d.ok) return { ok: false, error: `the draft failed: ${d.errors.join('; ')}`, phases, language: lang, mode, reasoning: effort.reasoning, calls, cost, sources };
       body = fix(d.text);
       phases.at(-1).words = wordCount(body);
 
@@ -238,6 +240,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
         title: post ? '' : titleOf(text),
         language: lang,
         mode,
+        reasoning: effort.reasoning,
         words: post ? wordCount(published.post) : checks.words,
         targetWords: words,
         sources: used,
@@ -254,7 +257,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
         ms: now() - t0,
       };
     } catch (err) {
-      if (err instanceof Stop) return { ok: false, fatal: true, status: err.status, error: err.message, phases, language: lang, mode, calls, cost };
+      if (err instanceof Stop) return { ok: false, fatal: true, status: err.status, error: err.message, phases, language: lang, mode, reasoning: effort.reasoning, calls, cost };
       throw err;
     }
   };

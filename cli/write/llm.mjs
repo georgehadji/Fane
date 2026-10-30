@@ -8,7 +8,8 @@
 // Errors 401/402 (bad key, no credits) hit every model alike and stop the chain.
 import { FATAL_STATUS, FREE_PREFIX, STOPPED_STATUS, isFreeModel } from '../image/openrouter.mjs';
 import { THINKING_LEAK } from './checks.mjs';
-import { REASONING, isJsonRole } from './models.mjs';
+import { isJsonRole } from './models.mjs';
+import { DEFAULT_REASONING, costCap } from '../core/effort.mjs';
 
 const textOf = (content) => (Array.isArray(content) ? content.map(p => p?.text || '').join('') : String(content ?? '')).trim();
 const stripThinking = (s) => s.replace(/<(think|thinking)>[\s\S]*?<\/\1>/gi, '').trim();
@@ -42,10 +43,7 @@ export const NETWORK_WAIT_MS = 10_000;
 
 // FANE_MAX_COST (USD) stops a run once the calls of one pipeline have cost that much; unset is no limit.
 // It is checked before each model call, so the call in flight when it is reached still finishes.
-export const maxCostFromEnv = (env = process.env) => {
-  const n = Number(env.FANE_MAX_COST);
-  return n > 0 ? n : Infinity;
-};
+export const maxCostFromEnv = (env = process.env) => costCap(env.FANE_MAX_COST);
 const isNetworkError = (err) => err.status === 429 || (!err.status && err.name !== 'TimeoutError' && err.name !== 'AbortError');
 
 export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new Promise(r => setTimeout(r, ms)), maxCost = maxCostFromEnv() }) {
@@ -55,7 +53,8 @@ export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new P
   let paidOut = null;
   // `json`: whether the role answers JSON; the coding roles (code/models.mjs) say so here, the article roles by name.
   // `code`: the answer is code, which may contain think tags of its own (see stripLeadingThinking).
-  return async function call(role, { system, user }, { chain, maxTokens, temperature, prices, json = isJsonRole(role), code = false }) {
+  // `reasoning`: OpenRouter's reasoning.effort for this call, from the run's profile (core/effort.mjs resolveEffort).
+  return async function call(role, { system, user }, { chain, maxTokens, temperature, prices, json = isJsonRole(role), code = false, reasoning = DEFAULT_REASONING }) {
     const attempts = [];
     let cost = 0, offline = 0;
     for (const [i, model] of chain.entries()) {
@@ -67,7 +66,7 @@ export function createRoleCaller({ client, log = () => {}, sleep = (ms) => new P
         max_tokens: maxTokens,
         temperature: temperature ?? (json ? 0.2 : 0.7),
         usage: { include: true },
-        reasoning: REASONING,
+        reasoning: { effort: reasoning },
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
         ...(json ? { response_format: { type: 'json_object' } } : {}),
       };

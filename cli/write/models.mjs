@@ -4,9 +4,9 @@
 //   plus one or two trim calls whenever a text ends up more than a quarter over its target (pipeline.mjs MAX_OVER);
 //   a Greek or other non-English topic adds one cheap call to write English search queries.
 import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
+import { HEADROOM } from '../core/effort.mjs';
 
-export const MODES = ['speed', 'balanced', 'quality'];
-export const DEFAULT_MODE = 'balanced';
+export { MODES, DEFAULT_MODE } from '../core/effort.mjs';
 export const ROLES = ['queries', 'outline', 'draft', 'factcheck', 'critique', 'revise', 'polish', 'style', 'copy', 'audit'];
 
 export const PHASES = {
@@ -22,11 +22,6 @@ export const POST_PHASES = {
   balanced: ['queries', 'draft', 'factcheck', 'revise', 'polish'],
   quality: ['queries', 'draft', 'factcheck', 'revise', 'polish'],
 };
-
-// Sent with every call. The first model trial found thinking models (Mistral Large, Qwen Max, Cohere ...)
-// spending the whole token budget on reasoning and returning no text (finish_reason "length", 0 words);
-// models without reasoning ignore the parameter. The trial (scripts/article-trial.mjs) uses the same value.
-export const REASONING = { effort: 'low' };
 
 export const DEFAULT_WORDS = 900;
 export const MIN_WORDS = 300;
@@ -50,12 +45,12 @@ const JSON_TOKENS = { queries: 800, outline: 3000, factcheck: 4000, critique: 35
 // Room for thinking on top of the answer, even at low effort: the first live run in Vane's web UI had an
 // outline cut off at 3880 tokens by three models in a row, and a Quality copy edit cut off at 4975 tokens
 // (qwen3.8-max-prime; its fallback took 79 s). A cap is not a spend: only generated tokens are paid.
-export const THINKING_HEADROOM = 8000;
+export const THINKING_HEADROOM = HEADROOM.low; // the headroom of reasoning effort `low` (core/effort.mjs)
 
-export function tokensFor(role, words, lang) {
+export function tokensFor(role, words, lang, headroom = THINKING_HEADROOM) {
   const k = TOKENS_PER_WORD[lang] || TOKENS_PER_WORD.en;
-  if (PROSE.has(role)) return Math.ceil(words * k * 1.3) + THINKING_HEADROOM;
-  return Math.ceil((JSON_TOKENS[role] || 1500) * (lang === 'el' ? 1.6 : 1)) + THINKING_HEADROOM;
+  if (PROSE.has(role)) return Math.ceil(words * k * 1.3) + headroom;
+  return Math.ceil((JSON_TOKENS[role] || 1500) * (lang === 'el' ? 1.6 : 1)) + headroom;
 }
 
 export const JSON_ROLES = new Set(Object.keys(JSON_TOKENS));

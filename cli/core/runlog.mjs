@@ -10,13 +10,14 @@ export const STOPPED_STATUS = 499;
 export const promptVersion = (prompts) => createHash('sha1').update(Object.values(prompts).map(String).join('|')).digest('hex').slice(0, 8);
 
 // One JSON line for a finished run: the feature, how it ended, what it cost and how long each phase took.
-// `r` is a pipeline result ({ ok, status, mode, calls, cost, phases }); a stopped run (browser closed, time limit) says so.
+// `r` is a pipeline result ({ ok, status, mode, reasoning, calls, cost, phases }); a stopped run (browser closed, time limit) says so.
 export const runSummary = (feature, r, { id, ms, prompts } = {}) => JSON.stringify({
   run: id,
   feature,
   ok: !!r.ok,
   ...(r.status === STOPPED_STATUS && { stopped: true }),
   ...(r.mode && { mode: r.mode }),
+  ...(r.reasoning && { reasoning: r.reasoning }),
   ms,
   ...(r.calls != null && { calls: r.calls }),
   ...(typeof r.cost === 'number' && { cost: Number(r.cost.toFixed(4)) }),

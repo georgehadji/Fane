@@ -7,7 +7,6 @@ import { DEFAULTS } from '../cli/vane.mjs';
 import { getModelProviders } from '../cli/client.mjs';
 import { OpenRouterError, createOpenRouterClient, findOpenRouterKey, fromHost, modelClientFor } from '../cli/image/openrouter.mjs';
 import { freeTrialCandidates } from '../cli/write/catalogue.mjs';
-import { REASONING } from '../cli/write/models.mjs';
 
 export const TRIAL_OPTIONS = {
   'key-from-vane': { type: 'boolean', default: false },
@@ -66,6 +65,10 @@ export async function pickCandidates(values, { code = false, paid, estimate }) {
   return { client: createOpenRouterClient({ apiKey: await apiKey(values['key-from-vane']) }), candidates };
 }
 
+// A trial asks whether a model can do the job at the cheapest reasoning effort, so it stays at `low` whatever a
+// mode's profile says (cli/core/effort.mjs): more effort only adds tokens.
+const TRIAL_REASONING = { effort: 'low' };
+
 // One call, as the pipelines make it. A failure is a value (finish 'error'), except 401/402, which stop the trial.
 export async function ask(client, model, { system, user }, { json = false, temperature = 0.2 } = {}) {
   const started = Date.now();
@@ -75,7 +78,7 @@ export async function ask(client, model, { system, user }, { json = false, tempe
       max_tokens: MAX_TOKENS,
       temperature,
       usage: { include: true },
-      reasoning: REASONING,
+      reasoning: TRIAL_REASONING,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
       ...(json ? { response_format: { type: 'json_object' } } : {}),
     }, 150_000);

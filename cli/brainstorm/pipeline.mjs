@@ -12,6 +12,7 @@ import { createRoleCaller, statusOf } from '../write/llm.mjs';
 import { selectChains, selectFreeChains } from '../write/catalogue.mjs';
 import { LANGUAGE_NAMES, detectLanguage, fold, repairFinalNu, repairHomoglyphs } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES, THINKING_HEADROOM } from '../write/models.mjs';
+import { resolveEffort } from '../core/effort.mjs';
 import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
 import { brainstormPrompts } from './prompts.mjs';
 
@@ -31,7 +32,7 @@ const MIN_FEASIBILITY = 3; // a brilliant idea nobody can build is not developed
 
 const TOKENS = { generate: 2500, cluster: 4000, develop: 5000, synthesis: 3000 };
 const PER_LANGUAGE = { en: 1, el: 2.4 }; // Greek takes ~2.4x the tokens (write/models.mjs)
-export const tokensFor = (role, lang) => Math.round(TOKENS[role] * (PER_LANGUAGE[lang] || 1)) + THINKING_HEADROOM;
+export const tokensFor = (role, lang, headroom = THINKING_HEADROOM) => Math.round(TOKENS[role] * (PER_LANGUAGE[lang] || 1)) + headroom;
 const TEMPERATURE = { generate: 1, cluster: 0.2, develop: 0.5, synthesis: 0.5 };
 
 // Default chains: the models that passed the article trial (cli/write/trial.json: prose in the language and JSON),
@@ -122,11 +123,12 @@ export function pickIdeas(ideas, themes, n) {
   return out;
 }
 
-export function createBrainstormPipeline({ client, retrieve, log = () => {}, now = Date.now }) {
-  const call = createRoleCaller({ client, log });
+export function createBrainstormPipeline({ client, retrieve, log = () => {}, now = Date.now, maxCost }) {
+  const call = createRoleCaller({ client, log, maxCost });
 
-  return async function brainstorm({ request, mode = DEFAULT_MODE, lang, models, chains, prices, onProgress = () => {} }) {
+  return async function brainstorm({ request, mode = DEFAULT_MODE, effort, lang, models, chains, prices, onProgress = () => {} }) {
     if (!MODES.includes(mode)) throw new Error(`unknown mode "${mode}"`);
+    effort ??= resolveEffort(mode);
     const t0 = now();
     lang = LANGUAGE_NAMES[lang] ? lang : detectLanguage(request);
     chains ||= chainsFor(models);
@@ -134,12 +136,12 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
     const phases = [], degraded = [];
     let cost = 0, calls = 0;
     const emit = (e) => { try { onProgress(e); } catch { /* a throwing listener must not stop the run */ } };
-    const fail = (error, extra = {}) => ({ ok: false, error, phases, language: lang, mode, calls, cost, ...extra });
+    const fail = (error, extra = {}) => ({ ok: false, error, phases, language: lang, mode, reasoning: effort.reasoning, calls, cost, ...extra });
 
     async function step(role, ctx, note = '') {
       emit({ phase: role, status: 'running', note });
       const started = now();
-      const r = await call(role, brainstormPrompts[role]({ text: request, lang, ...ctx }), { chain: chains[role] || chains.generate, maxTokens: tokensFor(role, lang), temperature: TEMPERATURE[role], prices, json: true });
+      const r = await call(role, brainstormPrompts[role]({ text: request, lang, ...ctx }), { chain: chains[role] || chains.generate, maxTokens: tokensFor(role, lang, effort.headroom), temperature: TEMPERATURE[role], prices, json: true, reasoning: effort.reasoning });
       calls += r.attempts.length;
       cost += r.cost;
       const rec = { phase: role, note, model: r.model || null, status: statusOf(r), ms: now() - started };
@@ -236,6 +238,6 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
       : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, KEEP.has(k) ? x : tidy(x)])) : v);
 
     emit({ phase: 'done', status: 'done' });
-    return { ok: true, request, language: lang, mode, prior, rounds, ideas: tidy(ideas), themes: tidy(themes), picked: picked.map(i => i.id), synthesis: tidy(synthesis), phases, degraded, calls, cost, ms: now() - t0 };
+    return { ok: true, request, language: lang, mode, reasoning: effort.reasoning, prior, rounds, ideas: tidy(ideas), themes: tidy(themes), picked: picked.map(i => i.id), synthesis: tidy(synthesis), phases, degraded, calls, cost, ms: now() - t0 };
   };
 }

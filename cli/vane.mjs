@@ -16,6 +16,7 @@ import { LANGUAGES, fold } from './core/language.mjs';
 import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
 import { isCodeRequest } from './core/intent-code.mjs';
 import { isBrainstormRequest } from './core/intent-brainstorm.mjs';
+import { REASONING_LEVELS, resolveEffort } from './core/effort.mjs';
 import { DEFAULTS, UsageError, VALID_MODES, VALID_SOURCES, addOpenRouterModel, findOpenRouterProvider, getProviders, getProvidersStartingVane, listOpenRouter, openRouterBaseUrlWarning, resolveModel, search, vaneModelRequest } from './client.mjs';
 import { modeOf, listArticleModels, listCodeModels, listImageModels, runArticle, runArticleEdit, runBrainstorm, runCode, runImage } from './runners.mjs';
 export { DEFAULTS, findOpenRouterProvider, resolveModel } from './client.mjs';
@@ -123,9 +124,19 @@ Brainstorm (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; existing wo
       --lang <l>         ${LANGUAGES.join('|')} (default: the request's language)
       --out <file>       Also save the Markdown to a file
 
+Articles, posts, edits, code and brainstorm:
+      --reasoning <r>    ${REASONING_LEVELS.join(' | ')}: how much the models think before answering (default: the
+                         mode's, low); more means more tokens, so more time and cost
+      --max-cost <usd>   Stop the run before the next model call once its calls cost this much (overrides
+                         FANE_MAX_COST)
+
 Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURCES, VANE_MODE,
-     OPENROUTER_API_KEY, VANE_IMAGE_TEXT_MODEL (prompt enhancement/intent, default ${IMAGE_TEXT_MODEL})
+     OPENROUTER_API_KEY, VANE_IMAGE_TEXT_MODEL (prompt enhancement/intent, default ${IMAGE_TEXT_MODEL}), FANE_MAX_COST
 Exit codes: 0 ok, 1 runtime error (or no sources with --require-sources, or support below --min-support), 2 usage error`;
+
+// The options of the text pipelines' profile (core/effort.mjs), which a search or an image run has no use for.
+const TEXT_ONLY = '--reasoning and --max-cost apply only to --article, --post, --edit-article, --code and --brainstorm';
+const usesEffortFlags = (o) => o.reasoning !== undefined || o['max-cost'] !== undefined;
 
 export function parseCli(argv) {
   const { values, positionals } = parseArgs({
@@ -181,6 +192,8 @@ export function parseCli(argv) {
       brainstorm: { type: 'boolean', default: false },
       'brainstorm-model': { type: 'string', multiple: true, default: [] },
       'no-auto-brainstorm': { type: 'boolean', default: false },
+      reasoning: { type: 'string' },
+      'max-cost': { type: 'string' },
       url: { type: 'string', default: DEFAULTS.url },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -189,7 +202,13 @@ export function parseCli(argv) {
   const bad = sources.filter(s => !VALID_SOURCES.includes(s));
   if (bad.length) throw new UsageError(`Invalid source(s): ${bad.join(', ')}. Use: ${VALID_SOURCES.join(', ')}`);
   if (!VALID_MODES.includes(values.mode)) throw new UsageError(`Invalid mode "${values.mode}". Use: ${VALID_MODES.join(', ')}`);
-  values.timeout ??= modeOf(values) === 'quality' ? '600' : '180'; // --tier premium researches in quality mode
+  // The run's profile: --reasoning and --max-cost win over FANE_MAX_COST, which wins over the mode's row.
+  try {
+    values.effort = resolveEffort(modeOf(values), { reasoning: values.reasoning, maxCost: values['max-cost'] }, process.env);
+  } catch (err) {
+    throw new UsageError(`Invalid ${values.reasoning !== undefined && !REASONING_LEVELS.includes(values.reasoning) ? '--reasoning' : '--max-cost'}: ${err.message}`);
+  }
+  values.timeout ??= String(values.effort.cliTimeoutS); // --tier premium researches in quality mode
   const timeoutSec = Number(values.timeout);
   if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) throw new UsageError(`Invalid timeout "${values.timeout}"`);
   if (values.stream && values.json) throw new UsageError('--stream cannot be combined with --json');
@@ -205,6 +224,7 @@ export function parseCli(argv) {
   if (feature) {
     if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
     if (values.stream) throw new UsageError(`--stream does not apply to --${feature}`);
+    if (feature === 'image' && usesEffortFlags(values)) throw new UsageError(TEXT_ONLY);
   }
   if ((article || values.brainstorm) && values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
   if (values.image) {
@@ -534,6 +554,7 @@ async function main() {
       : 'vane: this asks for an article, so it goes to article writing (same as --article; --no-auto-article to search instead).\n');
     return runArticle(routed);
   }
+  if (usesEffortFlags(opts)) throw new UsageError(TEXT_ONLY); // a search: Vane's /api/search has no field for them
   const providers = await getProvidersStartingVane(opts.url, DEFAULTS.container);
   if (opts['list-models']) return printModels(providers, opts.json);
   printResult(await search(opts, providers), opts);

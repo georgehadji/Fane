@@ -24,7 +24,7 @@ export const CONCURRENCY = 4;
 
 // reasoner's budgets per role (1536 cut real modules off mid-file), plus room for thinking as in the article roles.
 const TOKENS = { spec: 4096, generate: 8192, review: 4096, fix: 8192, tests: 8192 };
-export const codeTokensFor = (role) => (TOKENS[role] || 4096) + THINKING_HEADROOM;
+export const codeTokensFor = (role, headroom = THINKING_HEADROOM) => (TOKENS[role] || 4096) + headroom;
 
 // --code-model a,b,c: one chain for every role.
 export const codeChainsFor = (models) => {
