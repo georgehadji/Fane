@@ -5,8 +5,8 @@
 //     Reddit blocks (JSON API 403, "access denied"): every Social-only answer had 0 sources.
 //     -> search Hacker News, Lemmy posts/comments, Stack Overflow, Super User, Ask Ubuntu.
 //  2. Reddit itself through web engines: each query also runs as "site:reddit.com ..."
-//     on Yandex/Google/DuckDuckGo/Brave/Startpage (Bing ignores site: and is left out),
-//     and only reddit.com results are kept.
+//     on the Brave Search API, Tavily and Yandex (REDDIT_ENGINES; Bing ignores site: and is
+//     left out), and only reddit.com results are kept.
 //  3. The tool also needed the classifier's discussionSearch flag. -> the Social toggle
 //     alone enables it.
 //  4. Tool description taught sentence queries; forum engines return 0 for those.
@@ -24,7 +24,13 @@ const REDDIT_URL = String.raw`/^https?:\/\/(?:[\w-]+\.)*reddit\.com(?:[\/?#]|$)/
 // Platform/date prefix for forum and Reddit results.
 const SOCIAL = String.raw`r=>{let N={hackernews:"Hacker News","lemmy posts":"Lemmy","lemmy comments":"Lemmy comment",stackoverflow:"Stack Overflow",superuser:"Super User",askubuntu:"Ask Ubuntu"}[String(r.engine||"")]||(${REDDIT_URL}.test(String(r.url||""))?"Reddit":"");if(!N)return r;let D=r.publishedDate?String(r.publishedDate).slice(0,10):"";return{...r,fane_text:r.fane_text||r.content||r.title,content:"["+[N,D].filter(Boolean).join(" | ")+"] "+(r.content||r.title)}}`;
 
-const SEARCH = String.raw`return{type:"search_results",results:await(async()=>{let o={llm:b.llm,embedding:b.embedding,mode:b.mode,researchBlock:c,session:b.session},[F,R]=await Promise.all([(0,e.k)({...o,queries:a.queries,searchConfig:{engines:["hackernews","lemmy posts","lemmy comments","stackoverflow","superuser","askubuntu"]}}),(0,e.k)({...o,queries:a.queries.map(x=>"site:reddit.com "+x),searchConfig:{engines:["yandex","google","duckduckgo","brave","startpage"]}})]);return[...F,...R.filter(x=>${REDDIT_URL}.test(String(x.metadata&&x.metadata.url)))]})()}`;
+// Engines for the site:reddit.com searches. The two keyed ones (searxng/settings.yml) are not loaded without their
+// key, and SearXNG then drops their names, so Yandex alone is left. Google, DuckDuckGo, Brave and Startpage, named
+// by the first version, are blocked from this network and only added waiting time.
+const REDDIT_ENGINES = ['brave api', 'tavily', 'yandex'];
+const search = (engines) => String.raw`return{type:"search_results",results:await(async()=>{let o={llm:b.llm,embedding:b.embedding,mode:b.mode,researchBlock:c,session:b.session},[F,R]=await Promise.all([(0,e.k)({...o,queries:a.queries,searchConfig:{engines:["hackernews","lemmy posts","lemmy comments","stackoverflow","superuser","askubuntu"]}}),(0,e.k)({...o,queries:a.queries.map(x=>"site:reddit.com "+x),searchConfig:{engines:${JSON.stringify(engines)}}})]);return[...F,...R.filter(x=>${REDDIT_URL}.test(String(x.metadata&&x.metadata.url)))]})()}`;
+const SEARCH = search(REDDIT_ENGINES);
+const SEARCH_V1 = search(['yandex', 'google', 'duckduckgo', 'brave', 'startpage']);
 
 // A target may list alternative from/to pairs (with and without the scholarly patch).
 const TARGETS = [
@@ -35,8 +41,10 @@ const TARGETS = [
   },
   {
     name: 'forum engines + Reddit via site search',
-    from: 'return{type:"search_results",results:await (0,e.k)({llm:b.llm,embedding:b.embedding,mode:b.mode,queries:a.queries,researchBlock:c,session:b.session,searchConfig:{engines:["reddit"]}})}',
-    to: SEARCH,
+    alts: [
+      { from: 'return{type:"search_results",results:await (0,e.k)({llm:b.llm,embedding:b.embedding,mode:b.mode,queries:a.queries,researchBlock:c,session:b.session,searchConfig:{engines:["reddit"]}})}', to: SEARCH },
+      { from: SEARCH_V1, to: SEARCH }, // a container patched with the first engine list
+    ],
   },
   {
     name: 'keyword-style social queries',

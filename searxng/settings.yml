@@ -106,8 +106,6 @@ engines:
   # Disabled: blocked or empty on this network (2026-10-27, scripts/engine-check.mjs).
   # SearXNG waits for every enabled engine on each query, so dead ones add latency.
   # Vane never calls wolframalpha itself. Re-check with engine-check on a new network.
-  # (patch-social-sources still names some of these explicitly for site:reddit.com
-  # searches; an explicitly named engine runs even when disabled here.)
   - name: brave
     disabled: true
   - name: duckduckgo
