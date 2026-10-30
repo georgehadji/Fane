@@ -23,6 +23,7 @@ const TARGETS = [
     file: FILES.messageClient,
     from: ANSWER,
     to: ANSWER.replace('children:h', `lang:(${LANG})(h),children:h`),
+    marker: '}}},lang:(function LANG(', // patch-source-cards later adds props to the citation override
   },
 ];
 
