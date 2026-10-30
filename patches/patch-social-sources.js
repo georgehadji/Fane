@@ -6,7 +6,8 @@
 //     -> search Hacker News, Lemmy posts/comments, Stack Overflow, Super User, Ask Ubuntu.
 //  2. Reddit itself through web engines: each query also runs as "site:reddit.com ..."
 //     on the Brave Search API, Tavily and Yandex (REDDIT_ENGINES; Bing ignores site: and is
-//     left out), and only reddit.com results are kept.
+//     left out), and only reddit.com results are kept. X (Twitter) the same way: "site:x.com ...",
+//     keeping only post URLs (x.com or twitter.com /<handle>/status/<id>).
 //  3. The tool also needed the classifier's discussionSearch flag. -> the Social toggle
 //     alone enables it.
 //  4. Tool description taught sentence queries; forum engines return 0 for those.
@@ -20,17 +21,25 @@ const { FILES, RANK_ON_ORIGINAL_TEXT } = require('./lib/vane');
 // Injected code below must contain no backticks; ${...} is only used to splice these constants.
 // A reddit.com URL (any subdomain), as a JS regex literal.
 const REDDIT_URL = String.raw`/^https?:\/\/(?:[\w-]+\.)*reddit\.com(?:[\/?#]|$)/`;
+// An X post (profiles, searches and hashtag pages say little on their own), as a JS regex literal.
+const X_URL = String.raw`/^https?:\/\/(?:(?:www|mobile)\.)?(?:x|twitter)\.com\/\w+\/status\/\d+/`;
 
-// Platform/date prefix for forum and Reddit results.
-const SOCIAL = String.raw`r=>{let N={hackernews:"Hacker News","lemmy posts":"Lemmy","lemmy comments":"Lemmy comment",stackoverflow:"Stack Overflow",superuser:"Super User",askubuntu:"Ask Ubuntu"}[String(r.engine||"")]||(${REDDIT_URL}.test(String(r.url||""))?"Reddit":"");if(!N)return r;let D=r.publishedDate?String(r.publishedDate).slice(0,10):"";return{...r,fane_text:r.fane_text||r.content||r.title,content:"["+[N,D].filter(Boolean).join(" | ")+"] "+(r.content||r.title)}}`;
+// Platform/date prefix for forum, Reddit and X results; `byHost` labels a web engine's result by its URL.
+const social = (byHost) => String.raw`r=>{let N={hackernews:"Hacker News","lemmy posts":"Lemmy","lemmy comments":"Lemmy comment",stackoverflow:"Stack Overflow",superuser:"Super User",askubuntu:"Ask Ubuntu"}[String(r.engine||"")]||${byHost};if(!N)return r;let D=r.publishedDate?String(r.publishedDate).slice(0,10):"";return{...r,fane_text:r.fane_text||r.content||r.title,content:"["+[N,D].filter(Boolean).join(" | ")+"] "+(r.content||r.title)}}`;
+const SOCIAL = social(String.raw`(${REDDIT_URL}.test(String(r.url||""))?"Reddit":${X_URL}.test(String(r.url||""))?"X":"")`);
+const SOCIAL_V1 = social(String.raw`(${REDDIT_URL}.test(String(r.url||""))?"Reddit":"")`); // before X
 
-// Engines for the site:reddit.com searches. The two keyed ones (searxng/settings.yml) are not loaded without their
-// key, and SearXNG then drops their names, so Yandex alone is left. Google, DuckDuckGo, Brave and Startpage, named
-// by the first version, are blocked from this network and only added waiting time.
+// Engines for the site:reddit.com and site:x.com searches. The two keyed ones (searxng/settings.yml) are not loaded
+// without their key, and SearXNG then drops their names, so Yandex alone is left. Google, DuckDuckGo, Brave and
+// Startpage, named by the first version, are blocked from this network and only added waiting time.
 const REDDIT_ENGINES = ['brave api', 'tavily', 'yandex'];
-const search = (engines) => String.raw`return{type:"search_results",results:await(async()=>{let o={llm:b.llm,embedding:b.embedding,mode:b.mode,researchBlock:c,session:b.session},[F,R]=await Promise.all([(0,e.k)({...o,queries:a.queries,searchConfig:{engines:["hackernews","lemmy posts","lemmy comments","stackoverflow","superuser","askubuntu"]}}),(0,e.k)({...o,queries:a.queries.map(x=>"site:reddit.com "+x),searchConfig:{engines:${JSON.stringify(engines)}}})]);return[...F,...R.filter(x=>${REDDIT_URL}.test(String(x.metadata&&x.metadata.url)))]})()}`;
-const SEARCH = search(REDDIT_ENGINES);
-const SEARCH_V1 = search(['yandex', 'google', 'duckduckgo', 'brave', 'startpage']);
+// One site search per entry, in parallel with the forum engines; `v` names its results, `re` keeps that site's URLs.
+const REDDIT = { v: 'R', site: 'reddit.com', re: REDDIT_URL };
+const X = { v: 'X', site: 'x.com', re: X_URL };
+const search = (engines, sites) => String.raw`return{type:"search_results",results:await(async()=>{let o={llm:b.llm,embedding:b.embedding,mode:b.mode,researchBlock:c,session:b.session},[F,${sites.map(s => s.v)}]=await Promise.all([(0,e.k)({...o,queries:a.queries,searchConfig:{engines:["hackernews","lemmy posts","lemmy comments","stackoverflow","superuser","askubuntu"]}}),${sites.map(s => String.raw`(0,e.k)({...o,queries:a.queries.map(x=>"site:${s.site} "+x),searchConfig:{engines:${JSON.stringify(engines)}}})`)}]);return[...F,${sites.map(s => String.raw`...${s.v}.filter(x=>${s.re}.test(String(x.metadata&&x.metadata.url)))`)}]})()}`;
+const SEARCH = search(REDDIT_ENGINES, [REDDIT, X]);
+const SEARCH_V2 = search(REDDIT_ENGINES, [REDDIT]); // before X
+const SEARCH_V1 = search(['yandex', 'google', 'duckduckgo', 'brave', 'startpage'], [REDDIT]);
 
 // A target may list alternative from/to pairs (with and without the scholarly patch).
 const TARGETS = [
@@ -44,6 +53,7 @@ const TARGETS = [
     alts: [
       { from: 'return{type:"search_results",results:await (0,e.k)({llm:b.llm,embedding:b.embedding,mode:b.mode,queries:a.queries,researchBlock:c,session:b.session,searchConfig:{engines:["reddit"]}})}', to: SEARCH },
       { from: SEARCH_V1, to: SEARCH }, // a container patched with the first engine list
+      { from: SEARCH_V2, to: SEARCH }, // a container patched before X was searched
     ],
   },
   {
@@ -56,6 +66,9 @@ const TARGETS = [
     alts: [
       { from: 'c=(b.results||[]).map(r=>{let A=', to: `c=(b.results||[]).map(${SOCIAL}).map(r=>{let A=` },
       { from: 'let b=await a.json(),c=b.results,d=b.suggestions;', to: `let b=await a.json(),c=(b.results||[]).map(${SOCIAL}),d=b.suggestions;` },
+      // a container patched before X results were labelled
+      { from: `c=(b.results||[]).map(${SOCIAL_V1}).map(r=>{let A=`, to: `c=(b.results||[]).map(${SOCIAL}).map(r=>{let A=` },
+      { from: `c=(b.results||[]).map(${SOCIAL_V1}),d=b.suggestions;`, to: `c=(b.results||[]).map(${SOCIAL}),d=b.suggestions;` },
     ],
   },
   RANK_ON_ORIGINAL_TEXT, // shared with patch-scholarly-sources; a no-op when that ran first
@@ -66,5 +79,5 @@ const TARGETS = [
   },
 ].map(t => ({ file: FILES.research, ...t }));
 
-module.exports = { TARGETS, SOCIAL, REDDIT_URL };
+module.exports = { TARGETS, SOCIAL, REDDIT_URL, X_URL };
 if (require.main === module) run('patch-social-sources', TARGETS);
