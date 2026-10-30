@@ -99,7 +99,7 @@ Closing the tab stops the paid calls of a run: the next one is refused and the o
 
 ## 2. SearXNG engines
 
-`searxng/settings.yml` enables Bing, Yandex and Bing News, plus OpenAlex and Crossref for academic search and Hacker News for social search. Reddit's own engine is blocked by Reddit, so the Social source reaches Reddit through `site:reddit.com` searches on the Brave Search API, Tavily and Yandex (the first two only with their keys; Google, DuckDuckGo, Brave and Startpage honour `site:` too but are blocked on this network). Which engines work depends on your IP address. Check the whole set (one query per engine, so don't loop it):
+`searxng/settings.yml` enables Bing, Yandex and Bing News, plus OpenAlex and Crossref for academic search and Hacker News for social search. With their API keys it also enables the Brave Search API, Tavily and Perplexity for web search, and CORE for academic search (see below). Reddit's own engine is blocked by Reddit, so the Social source reaches Reddit through `site:reddit.com` searches on the Brave Search API, Tavily and Yandex (the first two only with their keys; Google, DuckDuckGo, Brave and Startpage honour `site:` too but are blocked on this network). Which engines work depends on your IP address. Check the whole set (one query per engine, so don't loop it):
 
 ```bash
 node scripts/engine-check.mjs
@@ -119,17 +119,19 @@ node scripts/apply.mjs          # or: docker compose up -d (passes CORE_API_KEY 
 - **Checking it:** `vane --doctor` runs one CORE query, and warns when the container has a `CORE_API_KEY` but the engine is off (the key was refused).
 - **Rate limit:** CORE allows 5 requests per 10 seconds. When a research sends more, SearXNG suspends the engine for a while.
 
-**Brave Search API and Tavily (optional).** Both are web indexes of their own behind an API key, so they are not blocked by IP the way the scraping engines are. They are installed the same way as CORE, with `BRAVE_API_KEY` (https://brave.com/search/api) and `TAVILY_API_KEY` (https://tavily.com):
+**Brave Search API, Tavily and Perplexity (optional).** All three are web indexes of their own behind an API key, so they are not blocked by IP the way the scraping engines are. They are installed the same way as CORE, with `BRAVE_API_KEY` (https://brave.com/search/api), `TAVILY_API_KEY` (https://tavily.com) and `PERPLEXITY_API_KEY` (https://docs.perplexity.ai, the Search API):
 
 ```bash
 export BRAVE_API_KEY=...        # PowerShell: $env:BRAVE_API_KEY = Read-Host "Brave key"
 export TAVILY_API_KEY=...       # PowerShell: $env:TAVILY_API_KEY = Read-Host "Tavily key"
-node scripts/apply.mjs          # prints e.g. "Brave on, Tavily on, CORE off"
-node scripts/engine-check.mjs --engines "brave api,tavily"
+export PERPLEXITY_API_KEY=...   # PowerShell: $env:PERPLEXITY_API_KEY = Read-Host "Perplexity key"
+node scripts/apply.mjs          # prints e.g. "Brave on, Tavily on, Perplexity on, CORE off"
+node scripts/engine-check.mjs --engines "brave api,tavily,perplexity"
 ```
 
 - **Every run of `apply.mjs` needs the keys again:** it renders the settings from its own environment, so running it without a key switches that engine off.
-- **Free limits:** every web search a research sends goes to both. Brave's free plan allows one request a second (a refused request gives no results instead of suspending the engine); Tavily's gives 1000 searches a month.
+- **Free limits:** every web search a research sends goes to each engine that has a key. Brave's free plan allows one request a second (a refused request gives no results instead of suspending the engine); Tavily's gives 1000 searches a month.
+- **Perplexity is paid per request:** each query is one request at $1 per 1000 (`search_type: "fast"`; `"web"` would be $5). A Quality answer runs about 10 research rounds of a few queries each, so roughly 3 to 5 cents of Perplexity per answer.
 
 If an engine reports `CAPTCHA` or `too many requests`, the engine has flagged your IP (shared VPN ranges often are). Restart the container to clear SearXNG's suspension timers after changing network.
 

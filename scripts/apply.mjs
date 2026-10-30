@@ -23,7 +23,7 @@ const SETTINGS_PATH = '/etc/searxng/settings.yml';
 const PATCH_DIR = '/tmp/fane-patches'; // the whole folder: patches share patches/lib/
 
 if (process.argv.includes('-h') || process.argv.includes('--help')) {
-  console.log(`Usage: node scripts/apply.mjs [--no-searxng]\nEnv: VANE_CONTAINER (default ${DEFAULTS.container}), VANE_URL (default ${DEFAULTS.url}),\n     CORE_API_KEY (switches on the CORE academic engine; never printed),\n     BRAVE_API_KEY (switches on the Brave Search API engine; never printed),\n     TAVILY_API_KEY (switches on the Tavily engine; never printed)`);
+  console.log(`Usage: node scripts/apply.mjs [--no-searxng]\nEnv: VANE_CONTAINER (default ${DEFAULTS.container}), VANE_URL (default ${DEFAULTS.url}),\n     CORE_API_KEY (switches on the CORE academic engine; never printed),\n     BRAVE_API_KEY (switches on the Brave Search API engine; never printed),\n     TAVILY_API_KEY (switches on the Tavily engine; never printed),\n     PERPLEXITY_API_KEY (switches on the Perplexity Search API engine; never printed)`);
   process.exit(0);
 }
 const withSearxng = !process.argv.includes('--no-searxng');

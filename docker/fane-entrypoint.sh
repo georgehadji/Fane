@@ -37,6 +37,7 @@ switch_on() {
 }
 switch_on "${BRAVE_API_KEY:-}" BRAVE_API_KEY Brave 'brave api' X-Subscription-Token ''
 switch_on "${TAVILY_API_KEY:-}" TAVILY_API_KEY Tavily 'tavily' Authorization 'Bearer '
+switch_on "${PERPLEXITY_API_KEY:-}" PERPLEXITY_API_KEY Perplexity 'perplexity' Authorization 'Bearer '
 switch_on "${CORE_API_KEY:-}" CORE_API_KEY CORE 'core.ac.uk' api_key ''
 chown searxng:searxng /etc/searxng/settings.yml
 

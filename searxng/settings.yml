@@ -95,6 +95,30 @@ engines:
       Authorization: ''
     inactive: true
 
+  # Perplexity Search API (https://docs.perplexity.ai): ranked web results from Perplexity's own index. Same rules as
+  # tavily: the installers write PERPLEXITY_API_KEY into the Authorization header and switch the engine on; never put
+  # the key in this file. Each query is one request, $1 per 1000 with search_type "fast" ($5 with "web"). json_engine
+  # puts the query into the body unescaped, so a query with a double quote or backslash is invalid JSON: the 400 gives
+  # no results. 429 is the rate limit.
+  - name: perplexity
+    engine: json_engine
+    shortcut: pplx
+    categories: general
+    search_url: https://api.perplexity.ai/search
+    method: POST
+    request_body: >-
+      {{"query": "{query}", "max_results": 10, "search_type": "fast"}}
+    results_query: results
+    url_query: url
+    title_query: title
+    content_query: snippet
+    no_result_for_http_status: [400, 429]
+    timeout: 8.0
+    headers:
+      Content-Type: application/json
+      Authorization: ''
+    inactive: true
+
   # Disabled: hard failures (access denied / HTTP error)
   - name: aol
     disabled: true
