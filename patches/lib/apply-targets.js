@@ -7,7 +7,10 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const altsOf = (t) => t.alts || [{ from: t.from, to: t.to }];
+// Injected function source (Function#toString) keeps the file's line endings, and a Windows checkout (core.autocrlf,
+// or the Compose mount of it) has CRLF: the bundles never do, so \r is dropped here, for apply and the doctor alike.
+const lf = (s) => (typeof s === 'string' ? s.replace(/\r/g, '') : s);
+const altsOf = (t) => (t.alts || [{ from: t.from, to: t.to }]).map(a => ({ from: lf(a.from), to: lf(a.to) }));
 const count = (s, needle) => s.split(needle).length - 1;
 
 // Strings whose presence proves a target is applied (used here and by `vane --doctor`).

@@ -37,6 +37,13 @@ test('all or nothing: one bad target means no changes at all', () => {
   assert.ok(planPatch({ [F]: 'a=1;a=1;' }, [T({ from: 'a=1', to: 'a=2' })]).errors[0].includes('found 2'));
 });
 
+test('a CRLF checkout: injected function source loses its \\r, and an LF-patched bundle counts as applied', () => {
+  const t = T({ from: 'a=1', to: 'a=(function f(){\r\n  return 2;\r\n})()' });
+  const one = planPatch({ [F]: 'var a=1;' }, [t]);
+  assert.deepEqual([one.errors, one.next[F]], [[], 'var a=(function f(){\n  return 2;\n})();']);
+  assert.ok(isApplied(one.next[F], t));
+});
+
 test('optional targets are skipped, not failed, when absent', () => {
   const r = planPatch({ [F]: 'var a=1;' }, [T({ from: 'zzz', to: 'q', optional: 'needs other patch' })]);
   assert.deepEqual([r.errors, r.skipped], [[], ['t (needs other patch)']]);
