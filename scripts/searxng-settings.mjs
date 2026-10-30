@@ -13,6 +13,7 @@ export const CORE_KEY_PATTERN = /^[A-Za-z0-9._-]{8,200}$/;
 export const KEYED_ENGINES = [
   { opt: 'braveKey', env: 'BRAVE_API_KEY', label: 'Brave', name: 'brave api', field: 'X-Subscription-Token', prefix: '' },
   { opt: 'tavilyKey', env: 'TAVILY_API_KEY', label: 'Tavily', name: 'tavily', field: 'Authorization', prefix: 'Bearer ' },
+  { opt: 'perplexityKey', env: 'PERPLEXITY_API_KEY', label: 'Perplexity', name: 'perplexity', field: 'Authorization', prefix: 'Bearer ' },
   { opt: 'coreKey', env: 'CORE_API_KEY', label: 'CORE', name: 'core.ac.uk', field: 'api_key', prefix: '' },
 ];
 

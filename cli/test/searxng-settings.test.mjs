@@ -49,6 +49,16 @@ test('a Tavily key goes into the tavily Authorization header after "Bearer ", an
   for (const bad of ["abc'def123", 'abc def123', 'short']) assert.throws(() => renderSettings(repo, { tavilyKey: bad }), /TAVILY_API_KEY has unexpected characters/, bad);
 });
 
+test('a Perplexity key goes into the perplexity Authorization header after "Bearer ", and switches only that engine on', () => {
+  const out = renderSettings(repo, { perplexityKey: KEY });
+  assert.match(out, new RegExp(`- name: perplexity\n(?: {4}[^\n]*\n)*? {6}Authorization: 'Bearer ${KEY}'\n {4}inactive: false`));
+  assert.match(out, /- name: tavily\n(?: {4}[^\n]*\n)*? {6}Authorization: ''\n {4}inactive: true/);
+  assert.equal(out.split(KEY).length - 1, 1);
+  assert.equal(out.replace(`'Bearer ${KEY}'`, "''").replace(/(name: perplexity[\s\S]*?)inactive: false/, '$1inactive: true'), repo.replace(/\r\n/g, '\n'));
+  assert.match(repo, /"search_type": "fast"/); // $1 per 1000 requests; "web" is $5
+  for (const bad of ["abc'def123", 'abc def123', 'short']) assert.throws(() => renderSettings(repo, { perplexityKey: bad }), /PERPLEXITY_API_KEY has unexpected characters/, bad);
+});
+
 // The container entrypoint does the same with sed (switch_on). Skipped where there is no sh (Windows without Git Bash).
 const NO_SH = spawnSync('sh', ['-c', 'true']).status !== 0 && 'no sh';
 const script = readFileSync(new URL('../../docker/fane-entrypoint.sh', import.meta.url), 'utf8');
