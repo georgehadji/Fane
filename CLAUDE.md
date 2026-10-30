@@ -38,6 +38,10 @@ Pieces that run in different places:
     - The benchmark saves the judge's failed claims per article (`judgeFailed`).
     - `HUMAN_RULES` forbid writing about the sources ("the source does not say …"), and `countTells` counts that as `source-talk`. It was in 3 of 6 baseline articles; `bench/articles-baseline.json` was recounted with that entry.
     - The fact-check and the critique run in parallel (`Promise.all`).
+  - JSON roles ask for `response_format: { type: 'json_object' }`, not a strict `json_schema`. Strict schemas were measured and not built (2026-10-30):
+    - `docker logs vane` (13,264 lines): no "gave a bad answer (not JSON)" line and no `degraded` note. The two brainstorm runs made 8 JSON calls, all answered by the first model. The one bad answer was a `polish` (text role) cut off at its token limit.
+    - The trials (2026-10-28): 3 of 106 model entries answered "not the requested JSON" (article: aion-3.5-mini, schematron-v2-turbo; code: schematron-v2-small). `selectChains` keeps only models whose `json.ok` is true in a JSON role's chain, so those models never get one.
+    - Measure again before building: grep the logs for "not JSON" after a week of article and code runs. The catalogue already reads `supported_parameters` (`buildTextCatalogue`'s `json` flag), so a `structured_outputs` set could be passed down like `prices`; the normalizers stay the trust boundary.
   - Social posts (`cli/core/formats.mjs` `POSTS`, one table for limits, fold, hashtags and word ranges) run the same pipeline:
     - The pipeline takes `format: 'linkedin' | 'facebook'` and uses `POST_PHASES` (no outline, critique or audit) and the post branch of `prompts.draft`.
     - Every editing pass gets `postEditRule`.
