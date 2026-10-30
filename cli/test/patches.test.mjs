@@ -25,6 +25,15 @@ test('a marker proves a target applied after a later patch edited its output', (
   assert.deepEqual(planPatch({ [F]: 'var a=3/*m*/;' }, [t]).errors, []);
 });
 
+test('a CRLF checkout writes the same text as an LF one, so its run does not apply a target twice', () => {
+  const crlf = T({ from: 'a=1', to: 'a=function(){\r\nreturn 2\r\n}()' });
+  const lf = T({ from: 'a=1', to: 'a=function(){\nreturn 2\n}()' });
+  const one = planPatch({ [F]: 'var a=1;' }, [crlf]);
+  assert.equal(one.next[F], 'var a=function(){\nreturn 2\n}();');
+  assert.deepEqual(planPatch(one.next, [lf]).applied, []);
+  assert.deepEqual(planPatch(planPatch({ [F]: 'var a=1;' }, [lf]).next, [crlf]).applied, []);
+});
+
 test('alternatives: the first from that matches exactly once is used', () => {
   const t = T({ alts: [{ from: 'x()', to: 'X()' }, { from: 'y()', to: 'Y()' }] });
   assert.equal(planPatch({ [F]: 'y();' }, [t]).next[F], 'Y();');
@@ -35,13 +44,6 @@ test('all or nothing: one bad target means no changes at all', () => {
   assert.deepEqual(r.errors, ['bad: expected 1 match, found 0']);
   assert.equal(r.next[F], 'var a=2;'); // planned only; run() writes nothing when errors exist
   assert.ok(planPatch({ [F]: 'a=1;a=1;' }, [T({ from: 'a=1', to: 'a=2' })]).errors[0].includes('found 2'));
-});
-
-test('a CRLF checkout: injected function source loses its \\r, and an LF-patched bundle counts as applied', () => {
-  const t = T({ from: 'a=1', to: 'a=(function f(){\r\n  return 2;\r\n})()' });
-  const one = planPatch({ [F]: 'var a=1;' }, [t]);
-  assert.deepEqual([one.errors, one.next[F]], [[], 'var a=(function f(){\n  return 2;\n})();']);
-  assert.ok(isApplied(one.next[F], t));
 });
 
 test('optional targets are skipped, not failed, when absent', () => {
