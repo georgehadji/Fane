@@ -91,7 +91,7 @@ On Windows Git Bash, prefix with `export MSYS_NO_PATHCONV=1` and write the temp 
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `FANE_MAX_COST` | USD one article, code or brainstorm run may spend; the next model call is refused once it is reached (images have their own count limit) | none |
+| `FANE_MAX_COST` | USD one article, code or brainstorm run may spend; the next model call is refused once it is reached (images have their own count limit; the CLI's `--max-cost` overrides it) | none |
 | `FANE_DEADLINE_MIN` | Minutes one chat request may run in total; `0` turns it off | 30 |
 | `FANE_IMAGE_STORE_MB` | Megabytes the stored images may take; the oldest are removed first, so an old answer's link to one can go dead | 1024 |
 
@@ -161,6 +161,8 @@ On Windows PowerShell, `npm` may be blocked by the execution policy. Use `npm.cm
 | `--min-support <0-1>` | With `--verify`: exit 1 if the supported share of cited sentences is lower |
 | `-t, --timeout` | `180` seconds, `600` with `--mode quality` |
 | `--doctor` | Check Docker, container, models, patches and SearXNG; exit 1 on a failed check |
+| `--reasoning <r>` | With `--article`, `--post`, `--edit-article`, `--code` or `--brainstorm`: `minimal`, `low`, `medium` or `high`, how much the models think before answering (default: the mode's, `low`) |
+| `--max-cost <usd>` | With the same: stop before the next model call once the run has cost this much; overrides `FANE_MAX_COST` |
 
 Environment overrides: `VANE_URL`, `VANE_CHAT_MODEL`, `VANE_EMBEDDING_MODEL`, `VANE_CONTAINER`, `VANE_SOURCES`, `VANE_MODE`.
 

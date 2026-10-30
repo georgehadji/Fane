@@ -267,3 +267,13 @@ test('hook: a run that ends early (no provider, no trial) still writes its summa
   assert.equal(await handleBrainstormRequest('brainstorm names for a bakery', { ...ui(), client: { models: async () => catalogue }, trial: {}, log: (m) => noTrial.push(m) }), true);
   assert.deepEqual(summaries(noTrial).map(s => s.ok), [false]);
 });
+
+test('pipeline: the run\'s profile sets every call\'s reasoning effort and token headroom (core/effort.mjs)', async () => {
+  const { resolveEffort, HEADROOM } = await import('../core/effort.mjs');
+  const low = fakeClient(), medium = fakeClient();
+  await createBrainstormPipeline({ client: low })({ request: 'names for a bakery', mode: 'speed' });
+  await createBrainstormPipeline({ client: medium })({ request: 'names for a bakery', mode: 'speed', effort: resolveEffort('speed', { reasoning: 'medium' }) });
+  assert.ok(low.calls.every(c => c.body.reasoning.effort === 'low'));
+  assert.ok(medium.calls.every(c => c.body.reasoning.effort === 'medium'));
+  assert.equal(medium.calls[0].body.max_tokens - low.calls[0].body.max_tokens, HEADROOM.medium - HEADROOM.low);
+});

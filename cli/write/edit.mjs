@@ -8,6 +8,7 @@ import { namesPost } from '../core/intent-article.mjs';
 import { detectLanguage, fold, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
 import { createRoleCaller } from './llm.mjs';
 import { DEFAULT_MODE, tokensFor } from './models.mjs';
+import { resolveEffort } from '../core/effort.mjs';
 import { prompts } from './prompts.mjs';
 
 // The verbs that start an edit request. Questions ("why", "what", "explain"), anything with a question mark
@@ -70,9 +71,9 @@ export const MAX_NEW_SOURCES = 8;
 // -> { ok, article, language, mode, words, sources, degraded, checks, calls, cost, ms } | { ok: false, error }
 // Same shape as the article pipeline's result, so renderArticleResult shows it. `retrieve(query)` (Vane's
 // research, optional) is used when the request asks for something new; found pages are added after the old sources.
-export function createArticleEditor({ client, log = () => {}, now = Date.now }) {
-  const call = createRoleCaller({ client, log });
-  return async function editArticle({ body, sources, instruction, lang, mode = DEFAULT_MODE, chains, prices, retrieve, onProgress = () => {} }) {
+export function createArticleEditor({ client, log = () => {}, now = Date.now, maxCost }) {
+  const call = createRoleCaller({ client, log, maxCost });
+  return async function editArticle({ body, sources, instruction, lang, mode = DEFAULT_MODE, effort = resolveEffort(mode), chains, prices, retrieve, onProgress = () => {} }) {
     const t0 = now();
     lang ||= detectLanguage(body);
     const emit = (e) => { try { onProgress(e); } catch { /* a throwing listener must not stop the edit */ } };
@@ -91,9 +92,9 @@ export function createArticleEditor({ client, log = () => {}, now = Date.now }) 
     const all = [...sources, ...fresh];
     emit({ phase: 'edit', status: 'running' });
     // "longer" can grow the text: room for half as much again.
-    const r = await call('rewrite', prompts.rewrite({ lang, article: body, sources: all, instruction, newFacts: fresh.length > 0 }), { chain: chains.draft, maxTokens: tokensFor('draft', Math.ceil(wordCount(body) * 1.5), lang), prices });
+    const r = await call('rewrite', prompts.rewrite({ lang, article: body, sources: all, instruction, newFacts: fresh.length > 0 }), { chain: chains.draft, maxTokens: tokensFor('draft', Math.ceil(wordCount(body) * 1.5), lang, effort.headroom), reasoning: effort.reasoning, prices });
     emit({ phase: 'edit', status: r.ok ? 'ok' : 'failed' });
-    const base = { language: lang, mode, calls: r.attempts.length, cost: r.cost };
+    const base = { language: lang, mode, reasoning: effort.reasoning, calls: r.attempts.length, cost: r.cost };
     if (!r.ok) return { ok: false, fatal: r.fatal, status: r.status, error: `the edit failed: ${r.errors.join('; ')}`, ...base };
     sources = all;
 

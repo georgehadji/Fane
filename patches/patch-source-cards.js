@@ -193,7 +193,8 @@ const TARGETS = [
     from: 'citation:{component:ee}',
     to: 'citation:{component:ee,props:{sources:p}}',
   },
-  { name: 'chip with site name and source card', file: FILES.messageClient, from: VANE_CHIP, to: `ee=((F,I)=>P=>F(P,r,c,I))(${CHIP},${CITE_ITEMS})` },
+  // Function source keeps the file's line endings: a CRLF checkout (Windows, mounted by Compose) would put \r in the bundle.
+  { name: 'chip with site name and source card', file: FILES.messageClient, from: VANE_CHIP, to: `ee=((F,I)=>P=>F(P,r,c,I))(${CHIP},${CITE_ITEMS})`.replace(/\r/g, '') },
   { name: 'source card styles', file: FILES.appCss, from: END, to: `${END}\n${STYLE}\n`, marker: '/*fane:source-cards*/' },
 ];
 

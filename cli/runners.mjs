@@ -104,7 +104,7 @@ export async function runArticle(opts) {
   const { createArticlePipeline } = await import('./write/pipeline.mjs');
   const mode = modeOf(opts);
   const retrieve = vaneRetrieve(opts, mode);
-  const write = createArticlePipeline({ client, retrieve, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
+  const write = createArticlePipeline({ client, retrieve, maxCost: opts.effort?.maxCost, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
   const post = opts.post; // a platform of formats.mjs, or undefined for an article
   const topic = post ? postTopic(opts.query) : articleTopic(opts.query);
   // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
@@ -114,6 +114,7 @@ export async function runArticle(opts) {
   const r = await write({
     topic,
     mode,
+    effort: opts.effort,
     lang,
     format: post || 'article',
     words: opts.words ?? parseArticleOptions(opts.query, { post: !!post }).words,
@@ -157,8 +158,8 @@ export async function runArticleEdit(opts) {
   // Vane is started only when the change needs a search.
   const retrieve = vaneRetrieve(opts, mode);
   const log = (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); };
-  const edit = createArticleEditor({ client, log });
-  const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: opts.query, lang, mode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: (e) => { if (e.status !== 'running') log(`${e.phase} ${e.status}${e.note ? `: ${e.note}` : ''}`); } });
+  const edit = createArticleEditor({ client, log, maxCost: opts.effort?.maxCost });
+  const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: opts.query, lang, mode, effort: opts.effort, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: (e) => { if (e.status !== 'running') log(`${e.phase} ${e.status}${e.note ? `: ${e.note}` : ''}`); } });
   await writeArticleResult(r, opts);
 }
 
@@ -241,10 +242,11 @@ export async function runCode(opts) {
   // Documentation is Vane's own research (Balanced, Quality); Vane is started only then.
   const retrieve = vaneRetrieve(opts, mode);
   const log = (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); };
-  const write = createCodePipeline({ client, retrieve, checkSyntax: createSyntaxChecker(), log });
+  const write = createCodePipeline({ client, retrieve, checkSyntax: createSyntaxChecker(), log, maxCost: opts.effort?.maxCost });
   const r = await write({
     request: opts.query,
     mode,
+    effort: opts.effort,
     lang: opts.lang,
     chains: chosen.chains,
     prices: chosen.prices,
@@ -280,9 +282,9 @@ export async function runBrainstorm(opts) {
   // Existing work is Vane's own research (Balanced, Quality); Vane is started only then.
   const retrieve = vaneRetrieve(opts, mode);
   const log = (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); };
-  const run = createBrainstormPipeline({ client, retrieve, log });
+  const run = createBrainstormPipeline({ client, retrieve, log, maxCost: opts.effort?.maxCost });
   const r = await run({
-    request: opts.query, mode, lang, chains: chosen.chains, prices: chosen.prices,
+    request: opts.query, mode, effort: opts.effort, lang, chains: chosen.chains, prices: chosen.prices,
     onProgress: (e) => { if (!opts.json && e.status !== 'running' && e.status !== 'preview' && e.phase !== 'done') log(`${e.phase}${e.note ? ` ${e.note}` : ''} ${e.status}${e.model ? ` (${e.model}, ${(e.ms / 1000).toFixed(0)} s)` : ''}`); },
   });
   if (!r.ok) throw new Error(r.error);
