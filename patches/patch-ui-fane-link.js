@@ -14,7 +14,7 @@ const LINK = 'o(),{href:e.href,';
 const OPEN_NEW_TAB = 'target:e.external?"_blank":void 0,rel:e.external?"noopener":void 0,';
 
 const TARGETS = [
-  { name: 'fane link icon', file: FILES.layoutClient, from: THEME_TOGGLE, to: ICON + THEME_TOGGLE },
+  { name: 'fane link icon', file: FILES.layoutClient, from: THEME_TOGGLE, to: ICON + THEME_TOGGLE, marker: 'fane_icon=(' },
   {
     name: 'fane link nav item',
     file: FILES.layoutClient,

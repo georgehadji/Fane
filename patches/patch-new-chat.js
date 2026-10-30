@@ -21,6 +21,7 @@ const TARGETS = [
     file: FILES.chatClient,
     from: CHAT_ID_EFFECT,
     to: CHAT_ID_EFFECT + '(0,s.useEffect)(()=>{"/"===location.pathname&&S.length>0&&(document.title="Chat - Vane",g(void 0),M([]),N.current=[],C([]),E([]),B(!1),D(!1),f(!1))}),',
+    marker: '"/"===location.pathname&&',
   },
 ];
 

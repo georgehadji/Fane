@@ -63,6 +63,7 @@ const TARGETS = [
     name: 'writer treats posts as opinions',
     from: '\n\n    ### Citation Requirements',
     to: '\n\n    ### Community sources\n    - Some sources start with a bracket such as [Reddit], [Hacker News | 2025-03-14] or [Stack Overflow]. These are posts by individuals: opinions, anecdotes and advice, not established facts.\n    - Report what most posters agree on and where they disagree, attribute claims ("several Hacker News commenters report ..."), and give dates when opinions may be outdated.\n    - Never present a single post as fact, and say so when the discussion sources are few or one-sided.\n\n    ### Citation Requirements',
+    marker: 'Never present a single post as fact',
   },
 ].map(t => ({ file: FILES.research, ...t }));
 
