@@ -186,7 +186,7 @@ const STYLE = String.raw`/*fane:source-cards*/
 @media (prefers-reduced-motion:reduce){.fane-cite-card{animation:none}.prose a.fane-cite-chip,a.fane-cite-chip{transition:none}}`;
 
 const TARGETS = [
-  { name: 'one chip per citation group', file: FILES.chatClient, from: CHIP_HTML, to: CHIP_HTML + MERGE },
+  { name: 'one chip per citation group', file: FILES.chatClient, from: CHIP_HTML, to: CHIP_HTML + MERGE, marker: MERGE.slice(0, MERGE.indexOf('href')) },
   {
     name: 'chips get the answer\'s sources',
     file: FILES.messageClient,

@@ -336,6 +336,8 @@ test('every patch declares well-formed targets on known Vane files', () => {
       for (const a of t.alts || [{ from: t.from, to: t.to }]) {
         assert.ok(a.from && a.to && a.from !== a.to, `${f}: ${t.name}`);
         assert.ok(!a.from.includes(a.to), `${f}: ${t.name}: to is inside from, so it would always look applied`);
+        // Its from survives patching: a to that no longer matches exactly (an edit, line endings) would insert it again.
+        if (a.to.includes(a.from)) assert.ok(t.marker && a.to.includes(t.marker) && !a.from.includes(t.marker), `${f}: ${t.name}: to keeps its from, so it needs a marker from the added text`);
       }
       names.add(`${f}:${t.name}`);
     }

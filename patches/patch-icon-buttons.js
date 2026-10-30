@@ -55,7 +55,7 @@ button[data-fane-icon]:not(.flex):not(.hidden):not(.lg\:hidden){display:inline-f
 @media (pointer:coarse){button[data-fane-icon],a[data-fane-icon]{min-width:2.75rem;min-height:2.75rem}}`;
 
 const TARGETS = [
-  { name: 'icon buttons named from their icon', file: FILES.layoutClient, from: LAYOUT_END, to: `${LAYOUT_END};(${LABEL_ICONS})();` },
+  { name: 'icon buttons named from their icon', file: FILES.layoutClient, from: LAYOUT_END, to: `${LAYOUT_END};(${LABEL_ICONS})();`, marker: 'window.faneIconLabels' },
   { name: 'mode button named', file: FILES.messageClient, from: MODE, to: named(MODE, 'Answer mode') },
   { name: 'sources button named', file: FILES.messageClient, from: SOURCES, to: named(SOURCES, 'Sources') },
   { name: 'model button named', file: FILES.messageClient, from: MODEL, to: named(MODEL, 'Chat model') },

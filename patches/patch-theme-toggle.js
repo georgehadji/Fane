@@ -32,6 +32,7 @@ const TARGETS = [
     file: FILES.layoutClient,
     from: NEXT_TO,
     to: TOGGLE + NEXT_TO,
+    marker: 'fane_theme=()=>',
   },
   {
     name: 'theme toggle above settings',
@@ -45,6 +46,7 @@ TARGETS.push({
   file: FILES.layoutClient,
   from: GEAR,
   to: GEAR_KEYS + GEAR,
+  marker: '"aria-label":"Settings",onKeyDown',
 });
 
 // Phones: the home page's gear (lg:hidden, top right, an 18px button with no name) gets the same toggle beside it, and

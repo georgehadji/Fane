@@ -76,8 +76,9 @@ const TARGETS = [
     name: 'pages seen across rounds',
     from: 'for(let g=0;g<d;g++){let l=(0,f.b)(i,b.config.mode,g,d,b.config.fileIds)',
     to: 'let faneSeen=new Set,faneStale=0;for(let g=0;g<d;g++){let l=(0,f.b)(i,b.config.mode,g,d,b.config.fileIds)',
+    marker: 'let faneSeen=new Set',
   },
-  { name: 'stop after two rounds without a new page', from: LOOP_END, to: STOP + LOOP_END },
+  { name: 'stop after two rounds without a new page', from: LOOP_END, to: STOP + LOOP_END, marker: 'if(faneStale>=2)' },
 ].map(t => ({ file: FILES.research, ...t }));
 
 module.exports = { TARGETS, STOP };

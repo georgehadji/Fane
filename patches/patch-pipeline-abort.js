@@ -16,6 +16,7 @@ const hook = (fn) => ({
   file: FILES.chatRoute,
   from: `${fn}(b.followUp,{`,
   to: `${fn}(b.followUp,{signal:a.faneSignal,`,
+  marker: `${fn}(b.followUp,{signal:a.faneSignal`,
   optional: `${fn} hook not installed`,
 });
 
