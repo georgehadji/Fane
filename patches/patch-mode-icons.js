@@ -3,7 +3,8 @@
 // #2196f3 blue, and the Quality star alone was filled, so the colors said nothing and the set looked borrowed. Quality
 // also carried a sky-blue "Beta" pill. Now the icons are signal bars (one, two, three) in the text's grey, the selected mode's icon and the
 // one on the question box's button take the accent of patch-colors (terracotta), the selected row gets a 2px accent
-// edge and aria-pressed (it was marked by a background tint only), and Quality has no "Beta" tag.
+// edge and aria-pressed (it was marked by a background tint only), and Quality has no "Beta" tag. The three one-line
+// descriptions say what each mode does (MODE_COPY); Vane's ended only Speed's with a full stop and said nothing of the work.
 // A browser chunk and the stylesheet, served with max-age=0, so a normal reload picks the change up.
 const { run } = require('./lib/apply-targets');
 const { APP_CSS_END: END, FILES } = require('./lib/vane');
@@ -39,6 +40,21 @@ const bars = (filled) => '(0,r.jsxs)("svg",{width:16,height:16,viewBox:"0 0 16 1
     .join(',')
   + ']})';
 
+// The menu is in the browser chunk and in the server chunk that renders the home page (homeNews), so both change
+// together, or React reports a hydration mismatch. No time in seconds: it depends on the model. Balanced researches
+// up to 6 rounds and reads pages, Quality adds the citation check (cli/core/effort.mjs, patch-quality-check).
+const MODE_COPY = [
+  ['speed', 'Speed', 'Prioritize speed and get the quickest possible answer.', 'Searches quickly and answers from the results.'],
+  ['balanced', 'Balanced', 'Find the right balance between speed and accuracy', 'Searches a few rounds and reads the top pages.'],
+  ['quality', 'Quality', 'Get the most thorough and accurate answer', 'Researches in depth and checks each citation.'],
+];
+const COPY = [['browser', FILES.messageClient], ['server', FILES.homeNews]].flatMap(([where, file]) => MODE_COPY.map(([key, title, from, to]) => ({
+  name: `${key} description (${where})`,
+  file,
+  from: `key:"${key}",title:"${title}",description:"${from}"`,
+  to: `key:"${key}",title:"${title}",description:"${to}"`,
+})));
+
 const TARGETS = [
   ...ICONS.map(([mode, from], i) => ({
     name: `${mode} icon as ${i + 1} signal bar${i ? 's' : ''}`,
@@ -54,7 +70,8 @@ const TARGETS = [
     to: ROW.replace('(h.ut,{onClick', '(h.ut,{"aria-pressed":e===a.key,onClick').replace('"bg-light-secondary dark:bg-dark-secondary":', '"bg-light-secondary dark:bg-dark-secondary fane-mode-on":'),
   },
   { name: 'mode icon colors', file: FILES.appCss, from: END, to: `${END}\n${STYLE}\n`, marker: '/*fane:mode-icons*/' },
+  ...COPY,
 ];
 
-module.exports = { TARGETS };
+module.exports = { TARGETS, MODE_COPY };
 if (require.main === module) run('patch-mode-icons', TARGETS);

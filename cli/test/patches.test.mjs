@@ -355,6 +355,19 @@ test('patch-quality-mode: Balanced and Quality researchers see trimmed results, 
   assert.deepEqual([old.errors, old.applied.length, old.next[t.file]], [[], 1, out.next[t.file]]);
 });
 
+test('patch-mode-icons: each mode says what it does, with a full stop, in the browser chunk and the server chunk alike', () => {
+  const { TARGETS, MODE_COPY } = require('../../patches/patch-mode-icons.js');
+  const copy = TARGETS.filter(t => / description [(]/.test(t.name));
+  assert.deepEqual(copy.map(t => t.file), [...MODE_COPY.map(() => FILES.messageClient), ...MODE_COPY.map(() => FILES.homeNews)]);
+  for (const [, , from, to] of MODE_COPY) assert.ok(to.endsWith('.') && !/[0-9]/.test(to) && !to.includes(from), to); // no seconds: they depend on the model
+  const menu = '[' + MODE_COPY.map(([key, title, from]) => `{key:"${key}",title:"${title}",description:"${from}",icon:1}`).join(',') + ']';
+  const files = { [FILES.messageClient]: menu, [FILES.homeNews]: `x;${menu};y` };
+  const out = planPatch(files, copy);
+  assert.deepEqual([out.errors, out.applied.length], [[], 6]);
+  for (const file of [FILES.messageClient, FILES.homeNews]) for (const [, , from, to] of MODE_COPY) assert.ok(out.next[file].includes(`description:"${to}"`) && !out.next[file].includes(from), file);
+  assert.deepEqual(planPatch(out.next, copy).applied, []);
+});
+
 test('every patch declares well-formed targets on known Vane files', () => {
   const dir = new URL('../../patches/', import.meta.url);
   const known = new Set(Object.values(FILES));

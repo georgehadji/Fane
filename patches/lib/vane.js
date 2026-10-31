@@ -11,7 +11,7 @@ module.exports = {
     uploadsRoute: `${SERVER}/app/api/uploads/route.js`,
     discoverRoute: `${SERVER}/app/api/discover/route.js`,
     discoverPage: `${SERVER}/app/discover/page.js`, // the Discover page, server-rendered
-    homeNews: `${SERVER}/chunks/400.js`, // the home page's news card, server-rendered
+    homeNews: `${SERVER}/chunks/400.js`, // the home page's news card, server-rendered; the answer-mode menu is in it too (patch-mode-icons)
     // Browser chunk with the Discover page; fixed by the pinned digest.
     discoverClient: '/home/vane/public/_next/static/chunks/app/discover/page-f0ca5ef8609da6a0.js',
     // Browser chunk with ChatProvider (the chat state: messages, chat id); fixed by the pinned digest.
