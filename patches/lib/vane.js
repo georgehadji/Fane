@@ -62,6 +62,10 @@ module.exports = {
   // How much of one search result the researcher model sees each round (the writer still gets all of it): a snippet,
   // or a page the Balanced reader added facts to (patch-quality-mode, patch-web-search).
   RESEARCHER_CHARS: { snippet: 1500, read: 2500 },
+  // Balanced's page reader (patch-web-search READ_PAGES): how many of the top results it reads, how many chunks of
+  // each page it sends to the model (chunkChars with overlap characters shared), and how long one scrape may take.
+  // Vane's scraper takes no timeout of its own (its navigation limit is 20 s) and no signal.
+  PAGE_READ: { top: 3, chunks: 2, chunkChars: 4000, overlap: 500, timeoutMs: 8000 },
   // The Fane project page (docs/ served by GitHub Pages), linked from Vane's menu by patch-fane-link.
   FANE_PAGE_URL: 'https://georgehadji.github.io/Fane/',
   // Files under here are served to the browser from disk (max-age=0): a reload picks a change up, no restart needed.
