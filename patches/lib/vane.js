@@ -58,7 +58,7 @@ module.exports = {
   // Vane's research loop per mode and the rounds in a row with no new page URL that end it (cli/core/effort.mjs
   // EFFORT.researchRounds and .staleRounds, which have no early stop for speed; a test keeps the copies equal).
   RESEARCH_ROUNDS: { speed: 2, balanced: 6, quality: 10 },
-  STALE_ROUNDS: { balanced: 1, quality: 2 },
+  STALE_ROUNDS: { balanced: 2, quality: 2 },
   // How much of one search result the researcher model sees each round (the writer still gets all of it): a snippet,
   // or a page the Balanced reader added facts to (patch-quality-mode, patch-web-search).
   RESEARCHER_CHARS: { snippet: 1500, read: 2500 },

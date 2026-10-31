@@ -21,14 +21,18 @@
 //     -> the budget line now agrees with 4-7 calls.
 //  7. Nothing stops a loop whose searches keep returning pages it already has.
 //     -> STALE_ROUNDS rounds in a row with no new page (URL) end the research:
-//        1 in Balanced, 2 in Quality, none in Speed (cli/core/effort.mjs).
+//        2 in Balanced and in Quality, none in Speed (cli/core/effort.mjs).
 const { run } = require('./lib/apply-targets');
 const { FILES, RESEARCH_ROUNDS, STALE_ROUNDS, RESEARCHER_CHARS } = require('./lib/vane');
 
 // Runs at the end of each research round, where `r` is the round's tool results and `b` the research input.
 // STOP_V1 (Quality only, two stale rounds) stays as it was written: containers patched with it are upgraded in place.
 const STOP_V1 = String.raw`;if("quality"===b.config.mode){let N=0;r.forEach(x=>{x&&"search_results"===x.type&&(x.results||[]).forEach(y=>{let u=y.metadata?.url;u&&!faneSeen.has(u)&&(faneSeen.add(u),N++)})});faneStale=faneSeen.size&&!N?faneStale+1:0;if(faneStale>=2){console.log("fane: quality research stopped after round "+(g+1)+", two rounds found no new page");break}}`;
-const STOP = String.raw`;{let L=${JSON.stringify(STALE_ROUNDS)}[b.config.mode];if(L){let N=0;r.forEach(x=>{x&&"search_results"===x.type&&(x.results||[]).forEach(y=>{let u=y.metadata?.url;u&&!faneSeen.has(u)&&(faneSeen.add(u),N++)})});faneStale=faneSeen.size&&!N?faneStale+1:0;if(faneStale>=L){console.log("fane: "+b.config.mode+" research stopped after round "+(g+1)+", "+L+" round(s) found no new page");break}}}/*fane:stop-2*/`;
+// The stop for a table of stale rounds; the marker names the version, so a changed table upgrades in place.
+const stopFor = (rounds, marker) => String.raw`;{let L=${JSON.stringify(rounds)}[b.config.mode];if(L){let N=0;r.forEach(x=>{x&&"search_results"===x.type&&(x.results||[]).forEach(y=>{let u=y.metadata?.url;u&&!faneSeen.has(u)&&(faneSeen.add(u),N++)})});faneStale=faneSeen.size&&!N?faneStale+1:0;if(faneStale>=L){console.log("fane: "+b.config.mode+" research stopped after round "+(g+1)+", "+L+" round(s) found no new page");break}}}${marker}`;
+// STOP_V2: Balanced stopped after one stale round, which cut its sources by a third in the bench (2026-10-31).
+const STOP_V2 = stopFor({ balanced: 1, quality: 2 }, '/*fane:stop-2*/');
+const STOP = stopFor(STALE_ROUNDS, '/*fane:stop-3*/');
 const LOOP_END = '}let l=c.filter(a=>"search_results"===a.type).flatMap(a=>a.results),m=new Map,n=l.map(';
 
 const COMPACT_FROM = 'r.forEach((a,b)=>{k.push({role:"tool",id:q[b].id,name:q[b].name,content:JSON.stringify(a)})})';
@@ -91,10 +95,10 @@ const TARGETS = [
   {
     name: 'stop after rounds without a new page',
     // The upgrade first: LOOP_END also follows STOP_V1, so the plain insertion would add a second stop.
-    alts: [{ from: STOP_V1 + LOOP_END, to: STOP + LOOP_END }, { from: LOOP_END, to: STOP + LOOP_END }],
-    marker: '/*fane:stop-2*/',
+    alts: [{ from: STOP_V2 + LOOP_END, to: STOP + LOOP_END }, { from: STOP_V1 + LOOP_END, to: STOP + LOOP_END }, { from: LOOP_END, to: STOP + LOOP_END }],
+    marker: '/*fane:stop-3*/',
   },
 ].map(t => ({ file: FILES.research, ...t }));
 
-module.exports = { TARGETS, STOP, STOP_V1, COMPACT, COMPACT_V1 };
+module.exports = { TARGETS, STOP, STOP_V1, STOP_V2, COMPACT, COMPACT_V1 };
 if (require.main === module) run('patch-quality-mode', TARGETS);

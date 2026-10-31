@@ -306,8 +306,8 @@ test('patch-greek-lang: mostly Greek text is marked "el", anything else keeps th
   assert.equal(LANG(undefined), undefined);
 });
 
-test('patch-quality-mode: research stops after the rounds without a new page the table names (Balanced 1, Quality 2, Speed never)', () => {
-  const { TARGETS, STOP_V1 } = require('../../patches/patch-quality-mode.js');
+test('patch-quality-mode: research stops after the rounds without a new page the table names (Balanced 2, Quality 2, Speed never)', () => {
+  const { TARGETS, STOP_V1, STOP_V2 } = require('../../patches/patch-quality-mode.js');
   const loop = TARGETS.filter(t => /pages seen|without a new page/.test(t.name));
   // Vane's research loop, cut down to the lines the two targets edit.
   const fake = 'var research=(rounds,b,console)=>{let used=0,c=[],d=rounds.length,f={b:()=>""},i=0;for(let g=0;g<d;g++){let l=(0,f.b)(i,b.config.mode,g,d,b.config.fileIds);used++;let r=rounds[g];c.push(...r)}let l=c.filter(a=>"search_results"===a.type).flatMap(a=>a.results),m=new Map,n=l.map(a=>a);return used};';
@@ -322,17 +322,20 @@ test('patch-quality-mode: research stops after the rounds without a new page the
   assert.equal(run('quality', [found('a'), found('a'), found('b'), found('b'), found('b')]), 5); // a new page resets the count
   assert.equal(run('quality', [[], [], found('a'), found('b')]), 4); // rounds before the first search do not count
   assert.equal(run('balanced', [found('a'), found('b'), found('c'), found('d')]), 4);
-  assert.equal(run('balanced', [found('a'), found('a'), found('a'), found('a')]), 2); // one round without a new page is enough
+  assert.equal(run('balanced', [found('a'), found('a'), found('a'), found('a')]), 3);
+  assert.equal(run('balanced', [found('a'), found('a'), found('b'), found('b'), found('b')]), 5); // a new page resets the count
   assert.equal(run('speed', [found('a'), found('a'), found('a'), found('a')]), 4);
-  // A container patched with the Quality-only stop is upgraded in place: one stop afterwards, not two.
+  // A container patched with an earlier stop (Quality only, or Balanced after one round) is upgraded in place: one stop afterwards, not two.
   const stopTarget = loop[1];
   const seen = planPatch({ [loop[0].file]: fake }, [loop[0]]).next;
-  const old = { [loop[0].file]: seen[loop[0].file].replace(stopTarget.alts[1].from, STOP_V1 + stopTarget.alts[1].from) };
-  const up = planPatch(old, [stopTarget]);
-  assert.deepEqual([up.errors, up.applied.length], [[], 1]);
-  assert.equal(up.next[loop[0].file].split('/*fane:stop-2*/').length, 2);
-  assert.ok(!up.next[loop[0].file].includes('two rounds found no new page'));
-  assert.deepEqual(planPatch(up.next, [stopTarget]).applied, []);
+  for (const before of [STOP_V1, STOP_V2]) {
+    const old = { [loop[0].file]: seen[loop[0].file].replace(stopTarget.alts[2].from, before + stopTarget.alts[2].from) };
+    const up = planPatch(old, [stopTarget]);
+    assert.deepEqual([up.errors, up.applied.length], [[], 1]);
+    assert.equal(up.next[loop[0].file].split('/*fane:stop-3*/').length, 2);
+    assert.ok(!up.next[loop[0].file].includes('two rounds found no new page') && !up.next[loop[0].file].includes('/*fane:stop-2*/'));
+    assert.deepEqual(planPatch(up.next, [stopTarget]).applied, []);
+  }
 });
 
 test('patch-quality-mode: Balanced and Quality researchers see trimmed results, longer for a page the reader added facts to', () => {

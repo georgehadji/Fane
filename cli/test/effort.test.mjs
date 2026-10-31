@@ -16,7 +16,7 @@ test('the table holds the values the copies had: tiers, low reasoning, 2/6/10 re
   assert.equal(VALID_MODES, MODES);
   assert.equal(THINKING_HEADROOM, 8000);
   assert.deepEqual(MODES.map(m => [EFFORT[m].reasoning, EFFORT[m].researchRounds, EFFORT[m].cliTimeoutS]), [['low', 2, 180], ['low', 6, 180], ['low', 10, 600]]);
-  assert.deepEqual(MODES.map(m => EFFORT[m].staleRounds), [null, 1, 2]);
+  assert.deepEqual(MODES.map(m => EFFORT[m].staleRounds), [null, 2, 2]);
 });
 
 test('the copies of the research numbers in patches/lib/vane.js equal the table (a null staleRounds is absent there)', async () => {

@@ -22,7 +22,7 @@ export const HEADROOM = Object.freeze({ minimal: 4000, low: 8000, medium: 16000,
 // holds a copy of researchRounds and staleRounds; a test keeps both equal.
 export const EFFORT = Object.freeze({
   speed: Object.freeze({ tier: 'budget', reasoning: DEFAULT_REASONING, researchRounds: 2, staleRounds: null, cliTimeoutS: 180 }),
-  balanced: Object.freeze({ tier: 'value', reasoning: DEFAULT_REASONING, researchRounds: 6, staleRounds: 1, cliTimeoutS: 180 }),
+  balanced: Object.freeze({ tier: 'value', reasoning: DEFAULT_REASONING, researchRounds: 6, staleRounds: 2, cliTimeoutS: 180 }),
   quality: Object.freeze({ tier: 'premium', reasoning: DEFAULT_REASONING, researchRounds: 10, staleRounds: 2, cliTimeoutS: 600 }),
 });
 
