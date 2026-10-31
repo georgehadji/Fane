@@ -66,6 +66,7 @@ test('citation number without a source is reported', () => {
 test('uncited sentences are counted but do not change the rate; short fragments are ignored', () => {
   const v = verifyCitations('This framing sentence summarises results without giving any citation. Node.js 24 Krypton entered Active LTS in October 2025[1]. Short one.', sources);
   assert.equal(v.uncited, 1);
+  assert.deepEqual(v.uncitedSentences, ['This framing sentence summarises results without giving any citation.']);
   assert.equal(v.sentences, 2);
   assert.equal(v.supportRate, 1);
 });

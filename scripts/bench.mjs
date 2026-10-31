@@ -57,6 +57,10 @@ export function measure(out) {
   };
 }
 
+// --samples: the uncited sentences of a run, and how many carry a number. Only numbers are worth a check pass
+// (plans/balanced-mode.md item 8), so this is the number that decides whether to build one.
+export const uncitedSamples = (sentences = []) => ({ uncitedSentences: sentences, uncitedWithNumbers: sentences.filter(x => /[0-9]/.test(x)).length });
+
 const METRICS = ['secs', 'words', 'sources', 'hosts', 'citesUsed', 'supportRate', 'weak', 'numbersMissing', 'invalidCitations', 'uncited', 'nonLatin'];
 
 // Runs -> one summary row per question and mode (medians; failed runs counted, not averaged).
@@ -135,12 +139,13 @@ async function main() {
       questions: { type: 'string', default: join(ROOT, 'bench', 'questions.json') },
       out: { type: 'string' },
       baseline: { type: 'string' },
+      samples: { type: 'boolean', default: false },
       'fail-on-regression': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
   });
   if (values.help) {
-    console.log('Usage: node scripts/bench.mjs [--modes speed,balanced,quality] [--runs N] [-m model] [--only id,id]\n                            [--questions file] [--out file] [--baseline file] [--fail-on-regression]');
+    console.log('Usage: node scripts/bench.mjs [--modes speed,balanced,quality] [--runs N] [-m model] [--only id,id]\n                            [--questions file] [--out file] [--baseline file] [--fail-on-regression] [--samples]');
     return;
   }
   const modes = values.modes.split(',').map(s => s.trim()).filter(Boolean);
@@ -161,7 +166,7 @@ async function main() {
         const timeoutMs = (mode === 'quality' ? 660 : 240) * 1000; // CLI timeout + margin
         const r = await runCli(args, timeoutMs);
         let row = { id: q.id, mode, run, secs: r.secs, exit: r.code };
-        try { row = { ...row, ...measure(JSON.parse(r.out)) }; } catch { row.error = (r.err || `exit ${r.code}`).trim().split('\n').pop().slice(0, 200); }
+        try { const out = JSON.parse(r.out); row = { ...row, ...measure(out), ...(values.samples ? uncitedSamples(out.verification?.uncitedSentences) : {}) }; } catch { row.error = (r.err || `exit ${r.code}`).trim().split('\n').pop().slice(0, 200); }
         results.push(row);
         console.log(`[${n}/${total}] ${q.id}/${mode} run ${run}: ${row.error ? `FAILED (${row.error})` : `${row.secs}s, ${row.sources} sources, support ${fmt(row.supportRate)}`}`);
       }

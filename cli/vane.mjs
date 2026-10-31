@@ -320,14 +320,14 @@ export function verifyCitations(message, sources, { threshold = THRESHOLD } = {}
   const srcTok = srcText.map(tokenize);
   // lookahead, so "1,250,000" loses both commas (consuming the digit left "1250,000")
   const srcNum = srcText.map(t => t.replace(/(\d),(?=\d{3})/g, '$1'));
-  const r = { sentences: 0, cited: 0, supported: 0, uncited: 0, supportRate: null, weak: [], numbersMissing: [], invalidCitations: [] };
+  const r = { sentences: 0, cited: 0, supported: 0, uncited: 0, uncitedSentences: [], supportRate: null, weak: [], numbersMissing: [], invalidCitations: [] };
   for (const sentence of splitSentences(message)) {
     const cites = [...sentence.matchAll(CITE_RE)].flatMap(m => m[1].split(',').map(Number));
     const body = sentence.replace(CITE_RE, ' ');
     const tok = tokenize(body);
     if (tok.size < 4) continue; // headings, labels, fragments
     r.sentences++;
-    if (!cites.length) { r.uncited++; continue; }
+    if (!cites.length) { r.uncited++; r.uncitedSentences.push(sentence); continue; }
     r.cited++;
     const valid = [...new Set(cites)].filter(n => n >= 1 && n <= sources.length);
     const invalid = [...new Set(cites)].filter(n => !(n >= 1 && n <= sources.length));

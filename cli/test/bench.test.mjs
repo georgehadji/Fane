@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { median, measure, aggregate, compare } = await import('../../scripts/bench.mjs');
+const { median, measure, aggregate, compare, uncitedSamples } = await import('../../scripts/bench.mjs');
 
 test('median ignores nulls', () => {
   assert.equal(median([3, null, 1, 2]), 2);
@@ -16,6 +16,11 @@ test('measure: counts, hosts, citations, non-Latin titles', () => {
     verification: { supportRate: 0.5, weak: [{}], numbersMissing: [], invalidCitations: [], uncited: 2 },
   });
   assert.deepEqual(m, { words: 4, sources: 3, hosts: 2, citesUsed: 2, supportRate: 0.5, weak: 1, numbersMissing: 0, invalidCitations: 0, uncited: 2, nonLatin: 0.333 });
+});
+
+test('uncitedSamples keeps the sentences and counts those with a number', () => {
+  assert.deepEqual(uncitedSamples(['Prices start at 120 dollars.', 'It depends on the use.']), { uncitedSentences: ['Prices start at 120 dollars.', 'It depends on the use.'], uncitedWithNumbers: 1 });
+  assert.deepEqual(uncitedSamples(), { uncitedSentences: [], uncitedWithNumbers: 0 });
 });
 
 test('aggregate: medians per question/mode, failed runs excluded', () => {
