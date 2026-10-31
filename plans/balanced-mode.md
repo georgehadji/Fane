@@ -207,3 +207,16 @@ CI applies every patch twice in the pinned image and runs `node --check` on ever
 - A cheaper model for page extraction. Vane passes one `llm` to the search tool, and adding a second model would mean a provider lookup inside the research chunk.
 - Streaming while checking (showing the answer, then correcting it). Vane's chat stream has no way to replace text it has already sent.
 - Changing Speed. Its snippet-only answers are what the mode promises.
+
+---
+
+## Results (2026-10-31)
+
+Bench: `claude-haiku-5-5`, Balanced, against `bench/results/2026-10-29T11-50-57-200Z.json` (results folder is gitignored).
+
+- Items 1-6 and 9 are applied. Item 7 dropped (Vane sorts by similarity before it drops near-duplicates). Item 8: not built.
+- **8a:** 145 uncited sentences in 8 runs, 19 with a number. The rest are framing, linking and conclusion lines, so the number-only check (8b) is not worth building.
+- One stale round for Balanced (first run) cut sources by a third (laptop 38 to 20, rust-go 33 to 19.5) and rust-go support fell to 0.59. `staleRounds` for Balanced is now 2.
+- With two stale rounds: sources 28/38/33/36/26 to 29.5/39.5/28/39/56, support 0.94/0.93/0.98/1.0/0.89, one 180 s timeout (coffee).
+- **Not met:** the 20% time drop. Median time is 37/59/57/67/52 s against 39/43/47/50/41 s. The changes can only shorten a run (a stop rule, an 8 s scrape limit, a cache), so the likely cause is the network that day (SearXNG's academic engines returned 500 and timed out, also in Speed). A same-hour comparison is needed to settle it: restore the `*.bak` files, apply the old patch set from `63efc48`, bench, then re-apply.
+- Long-context (academic engines) timed out in every run, in Speed too: not caused by these changes.
