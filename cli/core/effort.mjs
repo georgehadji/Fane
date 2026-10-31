@@ -17,11 +17,13 @@ export const DEFAULT_REASONING = 'low';
 export const HEADROOM = Object.freeze({ minimal: 4000, low: 8000, medium: 16000, high: 24000 });
 
 // tier: the price band of images and of the text models' default chains. researchRounds: Vane's research loop
-// (module 87044, set by patch-quality-mode). cliTimeoutS: the CLI's default request timeout.
+// (module 87044, set by patch-quality-mode). staleRounds: rounds in a row with no new page URL before that loop ends
+// (null: no early stop; patch-quality-mode). cliTimeoutS: the CLI's default request timeout. patches/lib/vane.js
+// holds a copy of researchRounds and staleRounds; a test keeps both equal.
 export const EFFORT = Object.freeze({
-  speed: Object.freeze({ tier: 'budget', reasoning: DEFAULT_REASONING, researchRounds: 2, cliTimeoutS: 180 }),
-  balanced: Object.freeze({ tier: 'value', reasoning: DEFAULT_REASONING, researchRounds: 6, cliTimeoutS: 180 }),
-  quality: Object.freeze({ tier: 'premium', reasoning: DEFAULT_REASONING, researchRounds: 10, cliTimeoutS: 600 }),
+  speed: Object.freeze({ tier: 'budget', reasoning: DEFAULT_REASONING, researchRounds: 2, staleRounds: null, cliTimeoutS: 180 }),
+  balanced: Object.freeze({ tier: 'value', reasoning: DEFAULT_REASONING, researchRounds: 6, staleRounds: 1, cliTimeoutS: 180 }),
+  quality: Object.freeze({ tier: 'premium', reasoning: DEFAULT_REASONING, researchRounds: 10, staleRounds: 2, cliTimeoutS: 600 }),
 });
 
 // A spend cap in USD from the environment: a positive number, else no limit (FANE_MAX_COST).

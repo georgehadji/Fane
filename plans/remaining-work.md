@@ -44,7 +44,7 @@ Commit and push only when asked.
 
 ## 3. Research rounds read from the effort table
 
-Folded into `plans/balanced-mode.md` item 1, which adds the stop rule to the same table.
+Done in `plans/balanced-mode.md` items 1-3 (the table also holds `staleRounds`; `RESEARCH_ROUNDS` and `STALE_ROUNDS` in `patches/lib/vane.js`, a test keeps them equal).
 
 **Now.** `patch-quality-mode` writes `"balanced"===b.config.mode?6:10` over Vane's `?6:25`; speed's 2 is Vane's own. `EFFORT.researchRounds` (2/6/10) in `cli/core/effort.mjs` is documented as "not yet read by the patch".
 

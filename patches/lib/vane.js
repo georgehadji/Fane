@@ -55,6 +55,13 @@ module.exports = {
   // Where Fane's brainstorming modules (cli/brainstorm) live in the container, mounted or copied like FANE_IMAGE_DIR.
   // They read the article trial from FANE_WRITE_DIR (../write/trial.json).
   FANE_BRAINSTORM_DIR: '/fane/brainstorm',
+  // Vane's research loop per mode and the rounds in a row with no new page URL that end it (cli/core/effort.mjs
+  // EFFORT.researchRounds and .staleRounds, which have no early stop for speed; a test keeps the copies equal).
+  RESEARCH_ROUNDS: { speed: 2, balanced: 6, quality: 10 },
+  STALE_ROUNDS: { balanced: 1, quality: 2 },
+  // How much of one search result the researcher model sees each round (the writer still gets all of it): a snippet,
+  // or a page the Balanced reader added facts to (patch-quality-mode, patch-web-search).
+  RESEARCHER_CHARS: { snippet: 1500, read: 2500 },
   // The Fane project page (docs/ served by GitHub Pages), linked from Vane's menu by patch-fane-link.
   FANE_PAGE_URL: 'https://georgehadji.github.io/Fane/',
   // Files under here are served to the browser from disk (max-age=0): a reload picks a change up, no restart needed.

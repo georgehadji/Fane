@@ -16,6 +16,17 @@ test('the table holds the values the copies had: tiers, low reasoning, 2/6/10 re
   assert.equal(VALID_MODES, MODES);
   assert.equal(THINKING_HEADROOM, 8000);
   assert.deepEqual(MODES.map(m => [EFFORT[m].reasoning, EFFORT[m].researchRounds, EFFORT[m].cliTimeoutS]), [['low', 2, 180], ['low', 6, 180], ['low', 10, 600]]);
+  assert.deepEqual(MODES.map(m => EFFORT[m].staleRounds), [null, 1, 2]);
+});
+
+test('the copies of the research numbers in patches/lib/vane.js equal the table (a null staleRounds is absent there)', async () => {
+  const { RESEARCH_ROUNDS, STALE_ROUNDS } = (await import('node:module')).createRequire(import.meta.url)('../../patches/lib/vane.js');
+  assert.deepEqual(Object.keys(RESEARCH_ROUNDS), [...MODES]);
+  for (const m of MODES) {
+    assert.equal(RESEARCH_ROUNDS[m], EFFORT[m].researchRounds, m);
+    assert.equal(STALE_ROUNDS[m] ?? null, EFFORT[m].staleRounds, m);
+  }
+  assert.deepEqual(Object.keys(STALE_ROUNDS), MODES.filter(m => EFFORT[m].staleRounds !== null));
 });
 
 test('every feature\'s phase table has exactly the modes of the table', () => {

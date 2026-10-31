@@ -306,14 +306,14 @@ test('patch-greek-lang: mostly Greek text is marked "el", anything else keeps th
   assert.equal(LANG(undefined), undefined);
 });
 
-test('patch-quality-mode: Quality research stops after two rounds that found no new page', () => {
-  const { TARGETS } = require('../../patches/patch-quality-mode.js');
+test('patch-quality-mode: research stops after the rounds without a new page the table names (Balanced 1, Quality 2, Speed never)', () => {
+  const { TARGETS, STOP_V1 } = require('../../patches/patch-quality-mode.js');
   const loop = TARGETS.filter(t => /pages seen|without a new page/.test(t.name));
   // Vane's research loop, cut down to the lines the two targets edit.
   const fake = 'var research=(rounds,b,console)=>{let used=0,c=[],d=rounds.length,f={b:()=>""},i=0;for(let g=0;g<d;g++){let l=(0,f.b)(i,b.config.mode,g,d,b.config.fileIds);used++;let r=rounds[g];c.push(...r)}let l=c.filter(a=>"search_results"===a.type).flatMap(a=>a.results),m=new Map,n=l.map(a=>a);return used};';
   const out = planPatch({ [loop[0].file]: fake }, loop);
   assert.deepEqual([out.errors, out.applied.length, planPatch(out.next, loop).applied], [[], 2, []]);
-  const research = new Function(`${out.next[loop[0].file]}return research`)();
+  const research = new Function(out.next[loop[0].file] + 'return research')();
   const quiet = { log() {} };
   const found = (...urls) => [{ type: 'search_results', results: urls.map(url => ({ metadata: { url } })) }];
   const run = (mode, rounds) => research(rounds, { config: { mode } }, quiet);
@@ -321,7 +321,38 @@ test('patch-quality-mode: Quality research stops after two rounds that found no 
   assert.equal(run('quality', [found('a', 'b'), found('a'), found('b'), found('c')]), 3);
   assert.equal(run('quality', [found('a'), found('a'), found('b'), found('b'), found('b')]), 5); // a new page resets the count
   assert.equal(run('quality', [[], [], found('a'), found('b')]), 4); // rounds before the first search do not count
-  assert.equal(run('balanced', [found('a'), found('a'), found('a'), found('a')]), 4);
+  assert.equal(run('balanced', [found('a'), found('b'), found('c'), found('d')]), 4);
+  assert.equal(run('balanced', [found('a'), found('a'), found('a'), found('a')]), 2); // one round without a new page is enough
+  assert.equal(run('speed', [found('a'), found('a'), found('a'), found('a')]), 4);
+  // A container patched with the Quality-only stop is upgraded in place: one stop afterwards, not two.
+  const stopTarget = loop[1];
+  const seen = planPatch({ [loop[0].file]: fake }, [loop[0]]).next;
+  const old = { [loop[0].file]: seen[loop[0].file].replace(stopTarget.alts[1].from, STOP_V1 + stopTarget.alts[1].from) };
+  const up = planPatch(old, [stopTarget]);
+  assert.deepEqual([up.errors, up.applied.length], [[], 1]);
+  assert.equal(up.next[loop[0].file].split('/*fane:stop-2*/').length, 2);
+  assert.ok(!up.next[loop[0].file].includes('two rounds found no new page'));
+  assert.deepEqual(planPatch(up.next, [stopTarget]).applied, []);
+});
+
+test('patch-quality-mode: Balanced and Quality researchers see trimmed results, longer for a page the reader added facts to', () => {
+  const { TARGETS, COMPACT_V1 } = require('../../patches/patch-quality-mode.js');
+  const { RESEARCHER_CHARS } = require('../../patches/lib/vane.js');
+  const t = TARGETS.find(x => x.name === 'compact researcher context');
+  const fake = 'var f=(r,q,b)=>{let k=[];' + t.alts[1].from + ';return k};';
+  const results = [{ metadata: { title: 'T', url: 'u1' }, content: 'x'.repeat(4000) }, { metadata: { title: 'R', url: 'u2' }, content: 'y'.repeat(4000), fane_read: true }];
+  const input = [{ type: 'search_results', results }, { type: 'done' }];
+  const out = planPatch({ [t.file]: fake }, [t]);
+  assert.deepEqual([out.errors, out.applied.length, planPatch(out.next, [t]).applied], [[], 1, []]);
+  const f = new Function(out.next[t.file] + 'return f')();
+  const seen = (mode) => f(input, [{ id: 1, name: 'a' }, { id: 2, name: 'b' }], { config: { mode } }).map(m => JSON.parse(m.content));
+  assert.deepEqual(seen('balanced')[0].results.map(x => x.content.length), [RESEARCHER_CHARS.snippet, RESEARCHER_CHARS.read]);
+  assert.deepEqual(seen('quality')[0].results.map(x => x.content.length), [RESEARCHER_CHARS.snippet, RESEARCHER_CHARS.read]);
+  assert.deepEqual(seen('speed')[0].results.map(x => x.content.length), [4000, 4000]);
+  assert.deepEqual(seen('balanced')[1], { type: 'done' }); // only search results are cut
+  // The Quality-only version (1500 for every result) is upgraded in place.
+  const old = planPatch({ [t.file]: fake.replace(t.alts[1].from, COMPACT_V1) }, [t]);
+  assert.deepEqual([old.errors, old.applied.length, old.next[t.file]], [[], 1, out.next[t.file]]);
 });
 
 test('every patch declares well-formed targets on known Vane files', () => {
