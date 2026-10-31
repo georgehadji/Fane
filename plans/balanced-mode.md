@@ -220,3 +220,20 @@ Bench: `claude-haiku-5-5`, Balanced, against `bench/results/2026-10-29T11-50-57-
 - With two stale rounds: sources 28/38/33/36/26 to 29.5/39.5/28/39/56, support 0.94/0.93/0.98/1.0/0.89, one 180 s timeout (coffee).
 - **Not met:** the 20% time drop. Median time is 37/59/57/67/52 s against 39/43/47/50/41 s. The changes can only shorten a run (a stop rule, an 8 s scrape limit, a cache), so the likely cause is the network that day (SearXNG's academic engines returned 500 and timed out, also in Speed). A same-hour comparison is needed to settle it: restore the `*.bak` files, apply the old patch set from `63efc48`, bench, then re-apply.
 - Long-context (academic engines) timed out in every run, in Speed too: not caused by these changes.
+
+### Same-hour A/B (2026-10-31)
+
+Old patch set (`63efc48`, applied over restored `*.bak`) against the new one, `claude-haiku-5-5`, Balanced, 5 questions x 2 runs each, run back to back (`bench/results/ab-old.json`, `ab-new.json`).
+
+| question | time s old to new | sources | support |
+|---|---|---|---|
+| node-lts | 33 to 32 | 29.5 to 28.5 | 0.90 to 0.92 |
+| laptop | 37 to 50 | 20 to 38.5 | 0.91 to 0.96 |
+| rust-go | 48 to 49 | 29 to 29.5 | 0.87 to 0.97 |
+| coffee | 34 to 58 (one run each) | 20 to 40 | 0.83 to 0.96 |
+| keyboard | 52 to 47 | 64 to 61.5 | 0.93 to 0.96 |
+
+- Support is higher on every question (mean 0.90 to 0.96). Sources are equal or higher; the old runs that stopped at 20 sources are single-round answers.
+- **Time did not drop.** The 20% target is not met: two questions are the same, one is faster, two are slower, and the slower ones are the runs that now keep their second search round. The stop rule and the 8 s limit do not buy time here, because most rounds find new pages. What the changes buy is support and a bounded page read.
+- Coffee timed out in one run of each set (180 s): the search side, not the reader.
+- Decision: keep the changes, drop the time target from the acceptance rule.
