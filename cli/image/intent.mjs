@@ -26,9 +26,13 @@ const DRAW_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:draw|paint|sk
 // εικόνα-ρεκόρ ...» is rare, «φτιάξε μια εικονική μηχανή» is not a picture).
 const GREEK_IMAGE_REQUEST = /^\s*(?:παρακαλω\s+)?(?:μπορεις\s+να\s+)?(?:δημιουργησε|δημιουργηστε|φτιαξε|φτιαξτε|παρηγαγε|ζωγραφισε|σχεδιασε)\s+(?:μου\s+)?(?:(?:μια|ενα|\d+|δυο|τρεις|τεσσερις)\s+)?(?:(?!(?:με|του|της|των|για|που|οπου|οπωσ|στην|στο|σε|απο|ενοσ|μιασ)(?![\p{L}]))[\p{L}-]+\s+){0,6}?(?:εικονα|εικονεσ|φωτογραφια|φωτογραφιεσ|ζωγραφια|ζωγραφιεσ|εικονογραφηση|λογοτυπο|αφισα)(?![\p{L}])(?=\s*[.,:;!?]*\s*$|[.,:;!?]|\s+(?:με|του|της|των|για|που|οπου|οπωσ|στην|στο|σε|απο|ενοσ|μιασ)(?![\p{L}]))/u;
 
+// No verb: "an image of a bear holding an LP", "a picture of ...". Only the picture nouns, and not when the subject is
+// an explanation ("a picture of how inflation works", "an image of what ...", "a photo of the history of ...").
+const BARE_IMAGE = /^\s*(?:an?|one|\d+)\s+(?:\w+\s+){0,3}?(?:image|picture|photo|photograph|illustration|drawing|painting|render(?:ing)?)\s+(?:of|showing)\s+(?!(?:how|what|why|when|where|who|which|the\s+(?:history|difference|meaning|process|concept)|your|my\b)\b)\S/i;
+
 export const isImageRequest = (text) => {
   const s = String(text || '');
-  return IMAGE_REQUEST.test(s) || DRAW_REQUEST.test(s) || GREEK_IMAGE_REQUEST.test(fold(s));
+  return IMAGE_REQUEST.test(s) || DRAW_REQUEST.test(s) || BARE_IMAGE.test(s) || GREEK_IMAGE_REQUEST.test(fold(s));
 };
 // The subject without the request words, for file names: "create an image of a fox" -> "a fox".
 export const imageSubject = (text) => String(text || '').replace(IMAGE_REQUEST, '').replace(/^\s*(?:please\s+|can you\s+|could you\s+)*(?:draw|paint|sketch|illustrate)\s+(?:me\s+|us\s+)?/i, '').replace(/^\s*(?:of|showing|with|for|that shows)\s+/i, '').trim() || String(text || '');
