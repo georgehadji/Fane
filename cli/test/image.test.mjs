@@ -125,6 +125,8 @@ test('rules classify the family; the tier is always value', () => {
 test('image requests are recognised; questions are not', () => {
   for (const q of ['create an image of donald duck and his nieces in the playground', 'Draw me a logo for a bakery', 'please generate 2 pictures of a fox', 'Can you make a poster for a jazz night', 'paint a portrait of a cat', 'draw a fox', 'Sketch the Eiffel Tower at night']) assert.ok(isImageRequest(q), q);
   for (const q of ['draw a conclusion from this data', 'Draw some parallels between Rome and the US']) assert.ok(!isImageRequest(q), q);
+  for (const q of ['Δημιούργησε μια παιχνιδιάρικη και φανταστική εικόνα με ένα μεγάλο ρολόι τοίχου στο κέντρο.', 'φτιάξε μια εικόνα ενός γάτου', 'Φτιάξε μου μια φωτογραφία ενός σκύλου', 'Ζωγράφισε ένα λογότυπο για αρτοποιείο', 'Δημιούργησε μια εικόνα']) assert.ok(isImageRequest(q), q);
+  for (const q of ['φτιάξε μια εικονική μηχανή αναζήτησης', 'δημιούργησε ένα πρόγραμμα για εικόνες', 'Δημιούργησε μια εικόνα ταξινόμησης σε PyTorch', 'τι είναι μια εικόνα;']) assert.ok(!isImageRequest(q), q);
   assert.equal(imageSubject('create an image of donald duck and his nieces in the playground'), 'donald duck and his nieces in the playground');
   assert.equal(imageSubject('draw me a fox'), 'a fox');
   assert.equal(imageSubject('a red fox'), 'a red fox');

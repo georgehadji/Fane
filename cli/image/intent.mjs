@@ -4,6 +4,7 @@
 // --tier says otherwise: "highly detailed" in a prompt is not a reason to pay 10x per image.
 // An explicit --family / --tier always wins.
 import { ASPECT_RATIOS, DEFAULT_TIER, FAMILIES } from './catalogue.mjs';
+import { fold } from '../core/language.mjs';
 
 const RULES = [
   ['vector', /\b(svg|vector|logo|icon|line[- ]?art|monogram|emblem)\b/i],
@@ -19,7 +20,16 @@ const IMAGE_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:create|gener
 // "a picture of how inflation works" are not requests for a picture.
 // Drawing verbs need no noun ("draw a fox"), except figures of speech ("draw a conclusion").
 const DRAW_REQUEST = /^\s*(?:please\s+|can you\s+|could you\s+)*(?:draw|paint|sketch|illustrate)\s+(?:me\s+|us\s+)?(?:an?|the|some|\d+|my|our)\s+(?!(?:conclusions?|comparisons?|distinctions?|parallels?|lines? between|picture of (?:the|how|why|what))\b)/i;
-export const isImageRequest = (text) => IMAGE_REQUEST.test(String(text || '')) || DRAW_REQUEST.test(String(text || ''));
+// The same request in Greek, matched on fold()ed text (no accents, final sigma as sigma): "Δημιούργησε μια φανταστική
+// εικόνα με ...", «φτιάξε μου μια εικόνα του ...». A verb, up to six words of adjectives, a picture noun, then the end,
+// punctuation or a word that starts the subject (the lookahead keeps «εικόνα» as a topic out: «δημιούργησε μια
+// εικόνα-ρεκόρ ...» is rare, «φτιάξε μια εικονική μηχανή» is not a picture).
+const GREEK_IMAGE_REQUEST = /^\s*(?:παρακαλω\s+)?(?:μπορεις\s+να\s+)?(?:δημιουργησε|δημιουργηστε|φτιαξε|φτιαξτε|παρηγαγε|ζωγραφισε|σχεδιασε)\s+(?:μου\s+)?(?:(?:μια|ενα|\d+|δυο|τρεις|τεσσερις)\s+)?(?:(?!(?:με|του|της|των|για|που|οπου|οπωσ|στην|στο|σε|απο|ενοσ|μιασ)(?![\p{L}]))[\p{L}-]+\s+){0,6}?(?:εικονα|εικονεσ|φωτογραφια|φωτογραφιεσ|ζωγραφια|ζωγραφιεσ|εικονογραφηση|λογοτυπο|αφισα)(?![\p{L}])(?=\s*[.,:;!?]*\s*$|[.,:;!?]|\s+(?:με|του|της|των|για|που|οπου|οπωσ|στην|στο|σε|απο|ενοσ|μιασ)(?![\p{L}]))/u;
+
+export const isImageRequest = (text) => {
+  const s = String(text || '');
+  return IMAGE_REQUEST.test(s) || DRAW_REQUEST.test(s) || GREEK_IMAGE_REQUEST.test(fold(s));
+};
 // The subject without the request words, for file names: "create an image of a fox" -> "a fox".
 export const imageSubject = (text) => String(text || '').replace(IMAGE_REQUEST, '').replace(/^\s*(?:please\s+|can you\s+|could you\s+)*(?:draw|paint|sketch|illustrate)\s+(?:me\s+|us\s+)?/i, '').replace(/^\s*(?:of|showing|with|for|that shows)\s+/i, '').trim() || String(text || '');
 
