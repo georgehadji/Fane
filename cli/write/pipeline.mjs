@@ -12,7 +12,7 @@ import { clampPostWords, isPost } from '../core/formats.mjs';
 import { AUDIT_DIMENSIONS, MIN_CLAIM_SUPPORT, auditResult, claimLedger, claimSupportRatio } from './gate.mjs';
 import { countTells, detectLanguage, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
 import { createRoleCaller, noteOf, statusOf } from './llm.mjs';
-import { STOPPED_STATUS } from '../core/runlog.mjs';
+import { PHASE, isStopped, phaseRecord } from '../core/outcome.mjs';
 import { DEFAULT_MODE, MODES, PHASES, POST_PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
 import { resolveEffort } from '../core/effort.mjs';
 import { postEditRule, prompts } from './prompts.mjs';
@@ -58,7 +58,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
 
     // One model call for a role. A fatal error (bad key, no credits) stops the whole run.
     async function step(role, ctx) {
-      emit({ phase: role, status: 'running' });
+      emit({ phase: role, status: PHASE.running });
       const started = now();
       // an editor writes the whole article back, which may already be longer than the target
       const size = Math.max(words, ctx.article ? wordCount(ctx.article) : 0);
@@ -67,12 +67,15 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const r = await call(role, prompt, { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, size, lang, effort.headroom), prices, reasoning: effort.reasoning });
       calls += r.attempts.length;
       cost += r.cost;
-      const rec = { phase: role, model: r.model || null, status: statusOf(r), ms: now() - started, note: noteOf(r) };
+      const rec = phaseRecord(role, statusOf(r), { model: r.model || null, ms: now() - started, note: noteOf(r) });
       phases.push(rec);
-      emit({ ...rec, status: rec.status });
+      emit({ ...rec });
       if (r.fatal) throw Object.assign(new Stop(r.errors[0] || 'the provider refused the request'), { status: r.status });
       return r;
     }
+
+    // A pass whose text was refused: its record ends 'rejected', and that is sent again because the first one said 'ok'.
+    const reject = (rec, why) => { rec.status = PHASE.rejected; if (why) rec.note = why; emit({ ...rec }); };
 
     // Edited text replaces the text only if it is plausibly the whole article again.
     const refuse = (prev, next, shrink = 0.6) => {
@@ -96,8 +99,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       phases.at(-1).words = wordCount(r.text); // where a text grows or shrinks shows in the report
       const why = refuse(body, r.text);
       if (why) {
-        phases.at(-1).status = 'rejected';
-        phases.at(-1).note = why;
+        reject(phases.at(-1), why);
         degraded.push(`${role} was rejected (${why}): the previous text was kept`);
         return false;
       }
@@ -114,7 +116,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
         const r = await step('rewrite', { article: body, sources, instruction: `Cut it to about ${words} words: it is ${before} words, so remove about ${before - words}. Drop repetition and the least important detail first, then merge or drop whole paragraphs; shortening sentences alone will not get there. Keep the thesis, the title, the headings and the claims that carry the argument, with their [n] citations.` });
         const why = !r.ok ? (r.errors.at(-1) || 'no answer') : wordCount(r.text) >= before ? 'not shorter' : refuse(body, r.text, 0.4);
         if (why) {
-          phases.at(-1).status = r.ok ? 'rejected' : 'failed';
+          if (r.ok) reject(phases.at(-1)); // a failed call is already recorded as failed
           degraded.push(`trimming from ${before} words to the target of ${words} failed (${why}): the longer text was kept`);
           return;
         }
@@ -126,19 +128,19 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
     let sources = [], body = '';
     try {
       // 1. Sources: the topic, plus English queries when the topic is not English (most sources are).
-      emit({ phase: 'sources', status: 'running' });
+      emit({ phase: 'sources', status: PHASE.running });
       let queries = [topic];
       if (lang !== 'en' && plan.includes('queries')) {
         const q = await step('queries', {});
         if (q.ok) queries = [topic, ...(Array.isArray(q.data.queries) ? q.data.queries.filter(s => typeof s === 'string' && s.trim()).slice(0, EXTRA_QUERIES) : [])];
         else degraded.push('English search queries failed: searched with the topic only');
-        emit({ phase: 'sources', status: 'running' }); // the query step had its own status; the searches are next
+        emit({ phase: 'sources', status: PHASE.running }); // the query step had its own status; the searches are next
       }
       const found = await Promise.allSettled(queries.map(q => retrieve(q)));
       const seen = new Set();
       for (const f of found) for (const s of f.status === 'fulfilled' ? f.value : []) if (s?.url && !seen.has(s.url)) { seen.add(s.url); sources.push({ title: s.title || s.url, url: s.url, content: s.content || '' }); }
       sources = sources.slice(0, MAX_SOURCES);
-      phases.push({ phase: 'sources', model: null, status: sources.length ? 'ok' : 'failed', ms: 0, note: `${sources.length} sources` });
+      phases.push(phaseRecord('sources', sources.length ? PHASE.ok : PHASE.failed, { model: null, ms: 0, note: `${sources.length} sources` }));
       emit({ phase: 'sources', status: 'done', note: `${sources.length} sources` });
       if (!sources.length) {
         const why = found.find(f => f.status === 'rejected')?.reason?.message;
@@ -166,7 +168,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       let ledger = [], claimSupport = null, audit = null, stoppedBy = null;
       try {
       await trim();
-      emit({ phase: 'draft', status: 'preview', text: body, sources }); // lets a UI show the draft while the checks and edits run
+      emit({ phase: 'draft', status: PHASE.preview, text: body, sources }); // lets a UI show the draft while the checks and edits run
 
       // 4. Fact-check (a ledger of claims against their cited sources) and the structural critique. Both read
       // the same draft and neither needs the other, so they run at the same time. A Stop in one waits for the other:
@@ -200,9 +202,9 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       for (const role of ['polish', 'style', 'copy']) if (plan.includes(role)) await edit(role, { tellsReport: tellsReport() });
 
       // 7. Final audit, with one retry (revise, style, copy, audit) when it fails.
-      const runAudit = async () => {
+      const runAudit = async (noScore = 'the final audit failed: no quality score') => {
         const a = await step('audit', { article: body, ledger });
-        if (!a.ok) { degraded.push('the final audit failed: no quality score'); return null; }
+        if (!a.ok) { degraded.push(noScore); return null; }
         return { ...auditResult(a.data.scores), scores: Object.fromEntries(AUDIT_DIMENSIONS.map(k => [k, a.data.scores?.[k] ?? null])), issues: Array.isArray(a.data.issues) ? a.data.issues.slice(0, 8) : [] };
       };
       if (plan.includes('audit')) {
@@ -210,14 +212,15 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
         if (audit && !audit.passes) {
           audit.retried = true;
           for (const role of ['revise', 'style', 'copy']) await edit(role, { critique: { audit_issues: audit.issues }, ledger, tellsReport: tellsReport() });
-          const second = await runAudit();
+          // no score from the retry is said once, not again as "failed twice"
+          const second = await runAudit('the audit retry produced no quality score: published as is');
           if (second) audit = { ...second, retried: true };
-          if (audit && !audit.passes) degraded.push(`the final audit failed twice (${audit.failures.join('; ') || `score ${audit.score}`}): published as is`);
+          if (second && !audit.passes) degraded.push(`the final audit failed twice (${audit.failures.join('; ') || `score ${audit.score}`}): published as is`);
         }
       }
 
       } catch (err) {
-        if (!(err instanceof Stop) || err.status === STOPPED_STATUS) throw err;
+        if (!(err instanceof Stop) || isStopped(err)) throw err;
         stoppedBy = { status: err.status ?? null, error: err.message };
         degraded.push(`stopped after the draft (${err.message}): the article was not edited further`);
       }

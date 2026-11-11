@@ -138,6 +138,26 @@ Exit codes: 0 ok, 1 runtime error (or no sources with --require-sources, or supp
 const TEXT_ONLY = '--reasoning and --max-cost apply only to --article, --post, --edit-article, --code and --brainstorm';
 const usesEffortFlags = (o) => o.reasoning !== undefined || o['max-cost'] !== undefined;
 
+// The one table of feature flags. --post is the article feature with a platform, so it is its own flag here.
+const FEATURE_FLAGS = [
+  ['--image', 'image', (v) => v.image],
+  ['--article', 'article', (v) => v.article && v.post === undefined], // a post sets article too: it counts once, as --post
+  ['--post', 'article', (v) => v.post !== undefined],
+  ['--edit-article', 'edit-article', (v) => v['edit-article'] !== undefined],
+  ['--code', 'code', (v) => v.code],
+  ['--brainstorm', 'brainstorm', (v) => v.brainstorm],
+  ['--list-article-models', 'list-article', (v) => v['list-article-models']],
+  ['--list-code-models', 'list-code', (v) => v['list-code-models']],
+];
+
+// The one place that picks a call's feature from its parsed flags. A call takes one feature flag: two or more is a
+// UsageError naming them. Returns null when none is set (a search, or a command like --doctor).
+export function featureOf(values) {
+  const set = FEATURE_FLAGS.filter(([, , on]) => on(values));
+  if (set.length > 1) throw new UsageError(`A call takes one feature flag, but got ${set.map(([flag]) => flag).join(' and ')}.`);
+  return set.length ? set[0][1] : null;
+}
+
 export function parseCli(argv) {
   const { values, positionals } = parseArgs({
     args: argv,
@@ -217,16 +237,18 @@ export function parseCli(argv) {
   if (values.post !== undefined) {
     values.post = values.post.toLowerCase();
     if (!POST_PLATFORMS.includes(values.post)) throw new UsageError(`Invalid --post "${values.post}". Use: ${POST_PLATFORMS.join(', ')}`);
-    values.article = true; // a post is the article pipeline with another format
   }
-  const article = values.article || values['list-article-models'] || values['edit-article'] !== undefined;
-  const feature = values.image ? 'image' : article ? 'article' : values.code || values['list-code-models'] ? 'code' : values.brainstorm ? 'brainstorm' : null;
+  // A post sets article below, so featureOf cannot tell --article from it: the clash is checked here, before that.
+  if (values.post !== undefined && values.article) throw new UsageError('A call takes one feature flag, but got --article and --post.');
+  const feature = featureOf(values);
+  if (values.post !== undefined) values.article = true; // a post is the article pipeline with another format (posts.test pins it)
+  const article = feature === 'article' || feature === 'edit-article' || feature === 'list-article';
   if (feature) {
     if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
-    if (values.stream) throw new UsageError(`--stream does not apply to --${feature}`);
+    if (values.stream) throw new UsageError(`--stream does not apply to ${FEATURE_FLAGS.find(([, f]) => f === feature)[0]}`);
     if (feature === 'image' && usesEffortFlags(values)) throw new UsageError(TEXT_ONLY);
   }
-  if ((article || values.brainstorm) && values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
+  if ((article || feature === 'brainstorm') && values.lang && !LANGUAGES.includes(values.lang)) throw new UsageError(`Invalid --lang "${values.lang}". Use: ${LANGUAGES.join(', ')}`);
   if (values.image) {
     if (values.count !== undefined) {
       const n = Number(values.count);
@@ -256,6 +278,7 @@ export function parseCli(argv) {
   return { ...values, model: values.model ?? DEFAULTS.model, modelExplicit, sources, timeoutMs: timeoutSec * 1000, query: positionals.join(' ').trim() };
 }
 
+// Intent order, not flag order: featureOf picks the feature for explicit flags, this picks it for a bare question.
 // A query that asks for an image, code or an article goes there without --image/--code/--article. The arguments
 // are parsed again with that flag, so its options are checked as when it is typed (-n abc, --tier bogus).
 // -> the options for runImage / runCode / runArticle, or null for a search.
@@ -513,13 +536,14 @@ async function main() {
   const opts = parseCli(process.argv.slice(2));
   if (opts.help) return console.log(USAGE);
   if (opts.doctor) { if (await doctor(opts)) process.exitCode = 1; return; }
-  if (opts.image) return runImage(opts);
-  if (opts.code) return runCode(opts);
-  if (opts.brainstorm) return runBrainstorm(opts);
-  if (opts['list-code-models']) return listCodeModels(opts);
-  if (opts['edit-article'] !== undefined) return runArticleEdit(opts);
-  if (opts.article) return runArticle(opts);
-  if (opts['list-article-models']) return listArticleModels(opts);
+  const feature = featureOf(opts);
+  if (feature === 'image') return runImage(opts);
+  if (feature === 'code') return runCode(opts);
+  if (feature === 'brainstorm') return runBrainstorm(opts);
+  if (feature === 'list-code') return listCodeModels(opts);
+  if (feature === 'edit-article') return runArticleEdit(opts);
+  if (feature === 'article') return runArticle(opts);
+  if (feature === 'list-article') return listArticleModels(opts);
   if (opts['list-image-models']) return listImageModels(opts.query, opts.json);
   if (opts['list-openrouter']) return listOpenRouter(opts.query, opts.json);
   if (opts['add-model'] !== undefined) {

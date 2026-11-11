@@ -14,7 +14,7 @@ import { detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { retryEmpty } from '../write/research.mjs';
 import { isBrainstormRequest } from '../core/intent-brainstorm.mjs';
-import { beginRun } from '../core/runlog.mjs';
+import { createTurn } from '../core/turn.mjs';
 import { chainsFor, createBrainstormPipeline, selectBrainstormChains, selectFreeBrainstormChains } from './pipeline.mjs';
 import { brainstormPrompts } from './prompts.mjs';
 import { renderBrainstormFailure, renderBrainstormProgress, renderBrainstormResult } from './present.mjs';
@@ -28,50 +28,39 @@ const TRIAL_FILE = new URL('../write/trial.json', import.meta.url);
 export async function handleBrainstormRequest(query, { emit, update, configPath, mode, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, signal, client, trial, pipeline } = {}) {
   if (!isBrainstormRequest(query) || isImageRequest(query)) return false;
   const lang = detectLanguage(query);
-  const track = beginRun('brainstorm', log, brainstormPrompts);
-  log = track.log;
-  const state = { lang, running: mode === 'speed' ? 'generate' : 'prior', done: [], ideas: [] };
-  const id = emit(tagged(renderBrainstormProgress(state)));
-  const say = (markdown) => { try { update(id, tagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
-  try {
+  const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
+  const state = { lang, running: useMode === 'speed' ? 'generate' : 'prior', done: [], ideas: [] };
+  const turn = createTurn({ feature: 'brainstorm', prompts: brainstormPrompts, emit, update, log, tag: tagged });
+  const { say } = turn;
+  log = turn.log;
+  await turn.run(renderBrainstormProgress(state), async () => {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
-    if (!client) {
-      say(providerMissing('Brainstorming', { free: true }));
-      track.finish({ ok: false }); // a run that ends early still leaves its summary line
-      return true;
-    }
+    if (!client) return say(providerMissing('Brainstorming', { free: true }));
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
-    const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
     const chosen = await withFreeLlm(client, useMode, {
       select: async () => selectBrainstormChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang }),
       free: (ready, last) => selectFreeBrainstormChains(trial, ready, { lang, last }),
       only: chainsFor,
     });
-    if (!chosen) {
-      say(quiet([escapeHtml('No text model has passed the article trial: run node scripts/article-trial.mjs.')]));
-      track.finish({ ok: false }); // a run that ends early still leaves its summary line
-      return true;
-    }
+    if (!chosen) return say(quiet([escapeHtml('No text model has passed the article trial: run node scripts/article-trial.mjs.')]));
     const retrieve = retryEmpty(research);
-    let queue = Promise.resolve();
-    const onProgress = (e) => {
+    const onProgress = turn.progress((e) => {
       if (e.status === 'preview') { if (e.ideas) state.ideas = e.ideas; }
       else if (e.status === 'running') state.running = e.phase;
       else {
         state.done = [...state.done, e.phase];
         if (e.phase === 'prior') researchDone();
       }
-      if (e.phase !== 'done') queue = queue.then(() => say(renderBrainstormProgress(state)));
-    };
-    const run = pipeline || createBrainstormPipeline({ client, retrieve, log });
-    const r = await run({ request: query, mode: useMode, lang, chains: chosen.chains, prices: chosen.prices, onProgress });
-    await queue;
+      if (e.phase !== 'done') return () => renderBrainstormProgress(state);
+    });
+    const brainstorm = pipeline || createBrainstormPipeline({ client, retrieve, log });
+    const r = await brainstorm({ request: query, mode: useMode, lang, chains: chosen.chains, prices: chosen.prices, onProgress });
+    await turn.settle();
     say(r.ok ? renderBrainstormResult(r) : renderBrainstormFailure(r, lang));
-    track.finish(r);
-  } catch (err) {
+    return r;
+  }, { failed: (err) => {
     log(`brainstorm failed: ${err.message}`);
     say(renderBrainstormFailure({ error: err.message }, lang));
-    track.finish({ ok: false });
-  }
+  } });
   return true;
 }

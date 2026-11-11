@@ -4,7 +4,7 @@
 // sent in the Authorization header, never logged or put in an error message.
 
 import { readFile } from 'node:fs/promises';
-import { STOPPED_STATUS } from '../core/runlog.mjs';
+import { STOPPED_STATUS } from '../core/outcome.mjs';
 
 export class OpenRouterError extends Error {
   constructor(message, status) {
@@ -16,7 +16,7 @@ export class OpenRouterError extends Error {
 export const OPENROUTER_HOST = 'openrouter.ai';
 export const OPENROUTER_BASE_URL = `https://${OPENROUTER_HOST}/api/v1`;
 
-// 499 (STOPPED_STATUS, core/runlog.mjs): the run was stopped (the browser closed, or the deadline passed), so nothing more is spent.
+// 499 (STOPPED_STATUS, core/outcome.mjs): the run was stopped (the browser closed, or the deadline passed), so nothing more is spent.
 export { STOPPED_STATUS };
 
 // Bad key or no credits: every model fails the same way, so a chain stops at the first. A stopped run does too.

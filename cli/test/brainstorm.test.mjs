@@ -8,6 +8,7 @@ import { applyClusters, createBrainstormPipeline, normalizeIdeas, pickIdeas, sel
 import { renderBrainstorm, renderBrainstormResult } from '../brainstorm/present.mjs';
 import { handleBrainstormRequest } from '../brainstorm/vane-hook.mjs';
 import { isCodeRequest } from '../core/intent-code.mjs';
+import { PHASE } from '../core/outcome.mjs';
 import { buildTextCatalogue } from '../write/catalogue.mjs';
 import { isArticleRequest, postPlatform } from '../core/intent-article.mjs';
 import { ANSWER_MARKER } from '../image/present.mjs';
@@ -129,6 +130,14 @@ function fakeClient(over = {}) {
     },
   };
 }
+
+test('pipeline: every progress event and phase record uses the PHASE vocabulary (a progress event may also say done)', async () => {
+  const events = [];
+  const r = await createBrainstormPipeline({ client: fakeClient(), retrieve: async () => [{ title: 'T', url: 'https://example.org/t', content: '' }] })({ request: 'ways to cut plastic waste', mode: 'balanced', onProgress: (e) => events.push(e) });
+  const words = new Set(Object.values(PHASE));
+  assert.ok(r.phases.length > 3 && r.phases.every(p => words.has(p.status)), JSON.stringify(r.phases.map(p => p.status)));
+  assert.ok(events.every(e => words.has(e.status) || e.status === 'done'));
+});
 
 test('pipeline (balanced): existing work in the rounds and the scoring, 3 rounds that see earlier titles, 3 developed ideas across themes, a grounded synthesis', async () => {
   const client = fakeClient();
@@ -256,18 +265,6 @@ test('a null, empty or boolean from the model is missing, not a score or a proba
   assert.equal(r.unscored, 2);
 });
 
-test('hook: a run that ends early (no provider, no trial) still writes its summary line', async () => {
-  const ui = () => { const blocks = new Map(); let n = 0; return { blocks, emit: (x) => { const id = `b${++n}`; blocks.set(id, x); return id; }, update: (id, x) => blocks.set(id, x) }; };
-  const catalogue = [{ id: 'lab/writer', architecture: { output_modalities: ['text'] }, pricing: { prompt: '0.000001', completion: '0.000002' }, context_length: 128000, supported_parameters: ['response_format'] }];
-  const summaries = (run) => run.filter(l => /"feature":"brainstorm"/.test(l)).map(l => JSON.parse(l.slice(l.indexOf('{'))));
-  const noKey = [];
-  assert.equal(await handleBrainstormRequest('brainstorm names for a bakery', { ...ui(), readConfig: async () => '{"modelProviders":[]}', log: (m) => noKey.push(m) }), true);
-  assert.deepEqual(summaries(noKey).map(s => s.ok), [false]);
-  const noTrial = [];
-  assert.equal(await handleBrainstormRequest('brainstorm names for a bakery', { ...ui(), client: { models: async () => catalogue }, trial: {}, log: (m) => noTrial.push(m) }), true);
-  assert.deepEqual(summaries(noTrial).map(s => s.ok), [false]);
-});
-
 test('pipeline: the run\'s profile sets every call\'s reasoning effort and token headroom (core/effort.mjs)', async () => {
   const { resolveEffort, HEADROOM } = await import('../core/effort.mjs');
   const low = fakeClient(), medium = fakeClient();
@@ -276,4 +273,14 @@ test('pipeline: the run\'s profile sets every call\'s reasoning effort and token
   assert.ok(low.calls.every(c => c.body.reasoning.effort === 'low'));
   assert.ok(medium.calls.every(c => c.body.reasoning.effort === 'medium'));
   assert.equal(medium.calls[0].body.max_tokens - low.calls[0].body.max_tokens, HEADROOM.medium - HEADROOM.low);
+});
+
+test('hook: an unknown mode shows the same first progress line as the default mode', async () => {
+  const first = async (mode) => {
+    const blocks = []; 
+    await handleBrainstormRequest('brainstorm names for a bakery', { mode, emit: (x) => { blocks.push(x); return 'b1'; }, update: () => {}, readConfig: async () => '{"modelProviders":[]}', log: () => {} });
+    return blocks[0];
+  };
+  assert.equal(await first('turbo'), await first('balanced'));
+  assert.notEqual(await first('turbo'), await first('speed'));
 });

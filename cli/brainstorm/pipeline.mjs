@@ -13,6 +13,7 @@ import { selectChains, selectFreeChains } from '../write/catalogue.mjs';
 import { LANGUAGE_NAMES, detectLanguage, fold, repairFinalNu, repairHomoglyphs } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES, THINKING_HEADROOM } from '../write/models.mjs';
 import { resolveEffort } from '../core/effort.mjs';
+import { PHASE, phaseRecord } from '../core/outcome.mjs';
 import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
 import { brainstormPrompts } from './prompts.mjs';
 
@@ -139,27 +140,27 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
     const fail = (error, extra = {}) => ({ ok: false, error, phases, language: lang, mode, reasoning: effort.reasoning, calls, cost, ...extra });
 
     async function step(role, ctx, note = '') {
-      emit({ phase: role, status: 'running', note });
+      emit({ phase: role, status: PHASE.running, note });
       const started = now();
       const r = await call(role, brainstormPrompts[role]({ text: request, lang, ...ctx }), { chain: chains[role] || chains.generate, maxTokens: tokensFor(role, lang, effort.headroom), temperature: TEMPERATURE[role], prices, json: true, reasoning: effort.reasoning });
       calls += r.attempts.length;
       cost += r.cost;
-      const rec = { phase: role, note, model: r.model || null, status: statusOf(r), ms: now() - started };
+      const rec = phaseRecord(role, statusOf(r), { note, model: r.model || null, ms: now() - started });
       phases.push(rec);
-      emit(rec);
+      emit({ ...rec });
       return { ...r, rec };
     }
 
     // 1. What already exists (Balanced, Quality): Vane's research on the problem. A failed search is a note.
     let prior = [];
     if (plan.prior && retrieve) {
-      emit({ phase: 'prior', status: 'running' });
+      emit({ phase: 'prior', status: PHASE.running });
       let found = [];
       try { found = await retrieve(request); } catch (err) { degraded.push(`the search for existing work failed (${err.message})`); }
       const seen = new Set();
       for (const s of found || []) if (s?.url && !seen.has(s.url)) { seen.add(s.url); prior.push({ title: s.title || s.url, url: s.url, content: s.content || '' }); }
       prior = prior.slice(0, MAX_PRIOR);
-      phases.push({ phase: 'prior', model: null, status: prior.length ? 'ok' : 'failed', ms: 0, note: `${prior.length} pages` });
+      phases.push(phaseRecord('prior', prior.length ? PHASE.ok : PHASE.failed, { model: null, ms: 0, note: `${prior.length} pages` }));
       emit({ phase: 'prior', status: 'done', note: `${prior.length} pages` });
     }
 
@@ -175,7 +176,7 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
       if (tail < TAIL_PER_ROUND) degraded.push(`round ${round} has ${tail} rare idea${tail === 1 ? '' : 's'} (asked for ${TAIL_PER_ROUND})`);
       rounds.push({ round, ideas: got.length, tail });
       ideas = ideas.concat(got);
-      emit({ phase: 'generate', status: 'preview', ideas });
+      emit({ phase: 'generate', status: PHASE.preview, ideas });
     }
     if (!ideas.length) return fail('no round gave a usable idea');
 
@@ -190,7 +191,7 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
         if (applied.unscored) degraded.push(`${applied.unscored} idea${applied.unscored === 1 ? ' was' : 's were'} not scored`);
       } else degraded.push('the scoring named none of the ideas: they are not ranked');
     } else degraded.push('the ideas could not be scored: they are not ranked');
-    emit({ phase: 'cluster', status: 'preview', ideas, themes });
+    emit({ phase: 'cluster', status: PHASE.preview, ideas, themes });
 
     // 4. Develop the picked ideas (Balanced, Quality); Speed goes to the synthesis with the best ideas as they are.
     const picked = pickIdeas(ideas, themes, plan.develop || 3);

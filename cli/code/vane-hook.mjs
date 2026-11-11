@@ -14,7 +14,7 @@ import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { retryEmpty } from '../write/research.mjs';
 import { buildCodeCatalogue, selectCodeChains, selectFreeCodeChains } from './catalogue.mjs';
 import { isCodeRequest } from '../core/intent-code.mjs';
-import { beginRun } from '../core/runlog.mjs';
+import { createTurn } from '../core/turn.mjs';
 import { codeChainsFor } from './models.mjs';
 import { createCodePipeline } from './pipeline.mjs';
 import { codePrompts } from './prompts.mjs';
@@ -30,18 +30,13 @@ const TRIAL_FILE = new URL('./trial.json', import.meta.url);
 export async function handleCodeRequest(query, { emit, update, configPath, mode, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, signal, client, trial, pipeline, checkSyntax } = {}) {
   if (!isCodeRequest(query) || isImageRequest(query)) return false;
   const lang = detectLanguage(query);
-  const track = beginRun('code', log, codePrompts);
-  log = track.log;
   const state = { lang, phases: [], running: 'spec', files: null };
-  const id = emit(codeTagged(renderCodeProgress(state)));
-  const say = (markdown) => { try { update(id, codeTagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
-  try {
+  const turn = createTurn({ feature: 'code', prompts: codePrompts, emit, update, log, tag: codeTagged });
+  const { say } = turn;
+  log = turn.log;
+  await turn.run(renderCodeProgress(state), async () => {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
-    if (!client) {
-      say(providerMissing('Code writing', { free: true }));
-      track.finish({ ok: false }); // a run that ends early still leaves its summary line
-      return true;
-    }
+    if (!client) return say(providerMissing('Code writing', { free: true }));
     try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
     const chosen = await withFreeLlm(client, useMode, {
@@ -49,31 +44,25 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
       free: (ready, last) => selectFreeCodeChains(trial, ready, last),
       only: codeChainsFor,
     });
-    if (!chosen) {
-      say(quiet([escapeHtml('No model has passed the coding trial: run node scripts/code-trial.mjs.')]));
-      track.finish({ ok: false }); // a run that ends early still leaves its summary line
-      return true;
-    }
+    if (!chosen) return say(quiet([escapeHtml('No model has passed the coding trial: run node scripts/code-trial.mjs.')]));
     const retrieve = retryEmpty(research);
-    let queue = Promise.resolve();
-    const onProgress = (e) => {
+    const onProgress = turn.progress((e) => {
       if (e.status === 'preview') { if (e.files) state.files = e.files; }
       else if (e.status === 'running') state.running = e.phase;
       else {
         state.phases = [...state.phases, { phase: e.phase, status: e.status }];
         if (e.phase === 'docs' || e.phase === 'cve') researchDone();
       }
-      if (e.phase !== 'done') queue = queue.then(() => say(renderCodeProgress(state)));
-    };
+      if (e.phase !== 'done') return () => renderCodeProgress(state);
+    });
     const write = pipeline || createCodePipeline({ client, retrieve, checkSyntax: checkSyntax || createSyntaxChecker(), log });
     const r = await write({ request: query, mode: useMode, lang, chains: chosen.chains, prices: chosen.prices, onProgress });
-    await queue;
+    await turn.settle();
     say(r.ok ? renderCodeResult(r) : renderCodeFailure(r, lang));
-    track.finish(r);
-  } catch (err) {
+    return r;
+  }, { failed: (err) => {
     log(`code failed: ${err.message}`);
     say(renderCodeFailure({ error: err.message }, lang));
-    track.finish({ ok: false });
-  }
+  } });
   return true;
 }

@@ -108,3 +108,63 @@ test('vaneRetrieve: parallel searches share one provider fetch and one model reg
   await assert.rejects(flaky('q'), /Vane is down/);
   assert.equal((await flaky('q')).length, 1);
 });
+
+// Characterization of parseCli's single-feature behaviour (plans/state-machines.md Phase 5), before featureOf.
+test('characterization: each single feature flag is kept, and --stream is refused with it', () => {
+  const rows = [
+    [['--image', 'a fox'], (o) => o.image === true],
+    [['--article', 'tides'], (o) => o.article === true],
+    [['--post', 'linkedin', 'tides'], (o) => o.post === 'linkedin'],
+    [['--edit-article', 'a.md', 'shorter'], (o) => o['edit-article'] === 'a.md'],
+    [['--code', 'a script'], (o) => o.code === true],
+    [['--brainstorm', 'ideas'], (o) => o.brainstorm === true],
+    [['--list-article-models'], (o) => o['list-article-models'] === true],
+    [['--list-code-models'], (o) => o['list-code-models'] === true],
+  ];
+  for (const [argv, kept] of rows) {
+    assert.ok(kept(parseCli(argv)), argv.join(' '));
+    assert.throws(() => parseCli([...argv, '--stream']), /--stream does not apply to --/, argv.join(' '));
+  }
+});
+
+test('characterization: options are checked per single feature', () => {
+  for (const argv of [['--image', 'x'], ['--article', 'x'], ['--code', 'x'], ['--brainstorm', 'x']]) {
+    assert.throws(() => parseCli([...argv, '--tier', 'bogus']), /Invalid --tier/, argv[0]);
+  }
+  assert.throws(() => parseCli(['--article', 'x', '--lang', 'de']), /Invalid --lang/);
+  assert.throws(() => parseCli(['--brainstorm', 'x', '--lang', 'de']), /Invalid --lang/);
+  assert.throws(() => parseCli(['--image', 'x', '--reasoning', 'high']), /--reasoning and --max-cost apply only/);
+  assert.throws(() => parseCli(['--post', 'linkedin', 'x', '--words', '5']), /Invalid --words/);
+  assert.throws(() => parseCli(['--post', 'myspace', 'x']), /Invalid --post/);
+});
+
+test('featureOf: one feature flag per call; two or more is a UsageError naming them', async () => {
+  const { UsageError } = await import('../client.mjs');
+  const { featureOf } = await import('../vane.mjs');
+  const feature = (...argv) => featureOf(parseCli(argv));
+  const rows = [
+    [['--image', 'a fox'], 'image'],
+    [['--article', 'tides'], 'article'],
+    [['--post', 'linkedin', 'tides'], 'article'], // a post counts once, as the article feature
+    [['--edit-article', 'a.md', 'shorter'], 'edit-article'],
+    [['--code', 'a script'], 'code'],
+    [['--brainstorm', 'ideas'], 'brainstorm'],
+    [['--list-article-models'], 'list-article'],
+    [['--list-code-models'], 'list-code'],
+    [['what is tidal power'], null],
+    [['--list-image-models'], null], // a listing, not a feature flag
+  ];
+  for (const [argv, want] of rows) assert.equal(feature(...argv), want, argv.join(' '));
+  const clashes = [
+    [['--brainstorm', 'x', '--article'], ['--brainstorm', '--article']],
+    [['--image', 'x', '--code', 'y'], ['--image', '--code']],
+    [['--post', 'linkedin', 'x', '--article'], ['--post', '--article']],
+    [['--article', 'x', '--edit-article', 'a.md', 'shorter'], ['--article', '--edit-article']],
+    [['--code', 'x', '--brainstorm', 'y'], ['--code', '--brainstorm']],
+    [['--list-code-models', '--brainstorm', 'x'], ['--list-code-models', '--brainstorm']],
+    [['--image', 'x', '--list-article-models'], ['--image', '--list-article-models']],
+  ];
+  for (const [argv, flags] of clashes) {
+    assert.throws(() => parseCli(argv), (e) => e instanceof UsageError && flags.every(f => e.message.includes(f)), argv.join(' '));
+  }
+});

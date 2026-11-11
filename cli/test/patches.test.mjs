@@ -267,7 +267,7 @@ test('patch-discover-greek: the Discover search adds every Greek site and query 
   const { GREEK, TARGETS } = require('../../patches/patch-discover-greek.js');
   assert.deepEqual(Object.keys(GREEK), ['tech', 'finance', 'art', 'sports', 'entertainment']); // Vane's Discover topics
   // the patched search, run with a fake SearXNG client
-  const route = `(async (b, d, v) => { let e; ${TARGETS[0].from}; return e; })`;
+  const route = `(async (b, d, v) => { let e; ${TARGETS[0].alts[0].from}; return e; })`;
   const r = planPatch({ [FILES.discoverRoute]: route }, TARGETS);
   assert.deepEqual(r.errors, []);
   const calls = [];
@@ -275,10 +275,10 @@ test('patch-discover-greek: the Discover search adds every Greek site and query 
   const english = { links: ['wired.com'], query: ['AI'] };
   const run = async (topic) => (await eval(r.next[FILES.discoverRoute])(new URLSearchParams(topic ? { topic } : {}), english, v)).map(s => s.url);
   const art = await run('art');
-  assert.equal(art.length, 1 + 3 * 2 - 2); // lifo.gr's two searches failed and gave nothing
+  assert.equal(art.length, 1 + GREEK.art.links.length * 2 - 2); // lifo.gr's two searches failed and gave nothing
   assert.ok(art.includes('el:site:efsyn.gr πολιτισμός') && art.includes('en:site:wired.com AI'));
   assert.ok(calls.filter(([, l]) => l === 'el').every(([q]) => /^site:\S+\.(gr|com) /.test(q)));
-  assert.equal((await run()).filter(u => u.startsWith('el:')).length, 6); // no topic: tech, as in Vane
+  assert.equal((await run()).filter(u => u.startsWith('el:')).length, GREEK.tech.links.length * 2); // no topic: tech, as in Vane
 });
 
 test('patch-editorial-greek: a static Greek-only face under PP Editorial\'s name, stacked with patch-colors and patch-type', () => {
@@ -567,4 +567,44 @@ test('patch-scrape-guard: a page cannot reach a private host or send data, and a
   assert.equal((await scrape('https://a.example/p', { hops: ['https://a.example/p', 'https://rebind.example/'] })).result.title, 'Failed to scrape');
   assert.equal((await scrape('http://127.0.0.1:3000/api/config')).result.title, 'Failed to scrape');
   assert.equal((await scrape('file:///etc/passwd')).result.title, 'Failed to scrape');
+});
+
+// Phase 0 V5: a rename that throws after the first bundle was renamed. Today the throw escapes with no rollback.
+async function renameFailure() {
+  const realFs = await import('node:fs');
+  const { mkdtempSync, writeFileSync } = realFs;
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { run } = require('../../patches/lib/apply-targets.js');
+  const dir = mkdtempSync(join(tmpdir(), 'fane-patch-'));
+  const a = join(dir, 'a.js'), b = join(dir, 'b.js');
+  writeFileSync(a, 'var a=1;');
+  writeFileSync(b, 'var b=1;');
+  let failB = true;
+  const io = new Proxy(realFs, { get: (fs, key) => key !== 'renameSync' ? fs[key] : (from, to) => {
+    if (failB && String(to) === b) throw new Error('EPERM rename');
+    return fs.renameSync(from, to);
+  } });
+  const targets = [{ name: 'a', file: a, from: 'a=1', to: 'a=2' }, { name: 'b', file: b, from: 'b=1', to: 'b=2' }];
+  const state = () => Object.fromEntries([a, b].flatMap(f => [[`${f === a ? 'a' : 'b'}`, realFs.readFileSync(f, 'utf8')], [`${f === a ? 'a' : 'b'}.tmp`, realFs.existsSync(`${f}.fane-tmp`)], [`${f === a ? 'a' : 'b'}.bak`, realFs.existsSync(`${f}.bak`)]]));
+  return { realFs, dir, io, run, targets, state, heal: () => { failB = false; } };
+}
+
+test('run: a rename that throws after the first bundle was renamed leaves a patched, b unpatched, b.fane-tmp and both .bak (pinned), and a rerun heals it', async () => {
+  const t = await renameFailure();
+  try {
+    assert.throws(() => t.run('t', t.targets, t.io), /EPERM rename/);
+    assert.deepEqual(t.state(), { a: 'var a=2;', 'a.tmp': false, 'a.bak': true, b: 'var b=1;', 'b.tmp': true, 'b.bak': true });
+    t.heal();
+    t.run('t', t.targets, t.io);
+    assert.deepEqual(t.state(), { a: 'var a=2;', 'a.tmp': false, 'a.bak': true, b: 'var b=2;', 'b.tmp': false, 'b.bak': true });
+  } finally { t.realFs.rmSync(t.dir, { recursive: true, force: true }); }
+});
+
+test('run: a rename that throws puts every bundle back and leaves no temporary file', { todo: 'bug: the renames at the end of run() are outside the try, so a bundle stays patched without its partner and a .fane-tmp is left' }, async () => {
+  const t = await renameFailure();
+  try {
+    assert.throws(() => t.run('t', t.targets, t.io), /EPERM rename/);
+    assert.deepEqual(t.state(), { a: 'var a=1;', 'a.tmp': false, 'a.bak': false, b: 'var b=1;', 'b.tmp': false, 'b.bak': false });
+  } finally { t.realFs.rmSync(t.dir, { recursive: true, force: true }); }
 });

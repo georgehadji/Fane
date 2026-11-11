@@ -174,10 +174,14 @@ export function createImageGenerator({ client, download, textModel = null, log =
   return async function generate({ prompt, count, tier, family, aspect = '1:1', size, references = [], enhance = true, models, via, format, onProgress }) {
     count = Math.min(Math.max(1, Math.trunc(count ?? (models?.length || DEFAULT_IMAGES))), MAX_IMAGES);
     const started = now();
-    const result = { ok: false, complete: false, requested: count, intent: null, models: [], enhancedPrompt: null, rewrittenPrompt: null, images: [], errors: [] };
+    const result = { ok: false, complete: false, requested: count, intent: null, models: [], enhancedPrompt: null, rewrittenPrompt: null, images: [], errors: [], fatal: null };
 
     let catalogue;
-    try { catalogue = buildCatalogue(await client.imageModels()); } catch (err) { result.errors.push(`catalogue: ${err.message}`); return result; }
+    try { catalogue = buildCatalogue(await client.imageModels()); } catch (err) {
+      result.errors.push(`catalogue: ${err.message}`);
+      if (FATAL_STATUS.has(err.status)) result.fatal = { status: err.status, error: err.message };
+      return result;
+    }
     const hasReference = references.length > 0;
     let primaries, fallbacks;
     if (models?.length) {
@@ -235,6 +239,8 @@ export function createImageGenerator({ client, download, textModel = null, log =
     const images = slots.filter(Boolean);
     result.images = images.map(toResultImage);
     result.ok = images.length > 0;
+    // the provider refusal (401/402) or the user's stop (499) that ended the run, so callers need not read error text
+    result.fatal = run.fatal ? { status: run.fatal.status, error: run.fatal.message } : null;
     result.complete = images.length >= want;
     result.elapsedMs = now() - started;
     return result;

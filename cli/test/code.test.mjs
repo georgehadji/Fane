@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 import { isCodeRequest } from '../core/intent-code.mjs';
+import { PHASE } from '../core/outcome.mjs';
 import { MAX_FILE_CHARS, extractCode, fenceFor, fileChecks, languageOf, parseFiles, safePath } from '../code/files.mjs';
 import { codePrompts } from '../code/prompts.mjs';
 import { buildReadme, createCodePipeline, mapLimited, normalizeReview, normalizeSpec } from '../code/pipeline.mjs';
@@ -269,6 +270,17 @@ test('pipeline: a fix that breaks the parse of a file that parsed is refused and
   assert.equal(r.phases.find(p => p.phase === 'fix').status, 'rejected');
 });
 
+test('pipeline: every progress event and phase record uses the PHASE vocabulary; a refused fix is sent as it ends', async () => {
+  const client = fakeClient(answers({ fix: () => '```js\nimport { countWords } from "./count.mjs"\nconsole.log(countWords(\n```' }));
+  const checkSyntax = async (files) => files.map(f => ({ path: f.path, status: /countWords\($/m.test(f.content) ? 'error' : 'ok', detail: 'Unexpected end of input' }));
+  const events = [];
+  const r = await createCodePipeline({ client, retrieve: async () => [], checkSyntax })({ request: 'write a JS word counter', mode: 'balanced', onProgress: (e) => events.push({ ...e }) });
+  const words = new Set(Object.values(PHASE));
+  assert.ok(r.phases.every(p => words.has(p.status)), JSON.stringify(r.phases.map(p => p.status)));
+  assert.ok(events.every(e => words.has(e.status) || e.status === 'done'));
+  assert.equal(events.filter(e => e.phase === 'fix').at(-1).status, 'rejected');
+});
+
 test('pipeline: a file that does not parse is sent to the fix step even without a finding', async () => {
   const client = fakeClient(answers({ generate: (b) => (fileOf(b) === 'count.mjs' ? '```js\nexport function countWords(s) {\n```' : `\`\`\`js\n${GOOD['cli.mjs']}\n\`\`\``), review: JSON.stringify({ verdict: 'approved' }), fix: () => `\`\`\`js\n${GOOD['count.mjs']}\n\`\`\`` }));
   const checkSyntax = async (files) => files.map(f => ({ path: f.path, status: f.content.includes('return') || f.path !== 'count.mjs' ? 'ok' : 'error', detail: 'Unexpected end of input' }));
@@ -507,16 +519,4 @@ test('the CLI writes generated files only inside a new or empty folder, never ov
     const fresh = join(dir, 'new');
     assert.equal(await codeDir({ 'out-dir': fresh, query: 'q' }), fresh);
   } finally { await rm(dir, { recursive: true, force: true }); }
-});
-
-test('hook: a run that ends early (no provider, no trial) still writes its summary line', async () => {
-  const ui = () => { const blocks = new Map(); let n = 0; return { blocks, emit: (x) => { const id = `b${++n}`; blocks.set(id, x); return id; }, update: (id, x) => blocks.set(id, x) }; };
-  const catalogue = [{ id: 'lab/coder', architecture: { output_modalities: ['text'] }, pricing: { prompt: '0.000001', completion: '0.000002' }, context_length: 128000, supported_parameters: ['response_format'] }];
-  const summaries = (run) => run.filter(l => /"feature":"code"/.test(l)).map(l => JSON.parse(l.slice(l.indexOf('{'))));
-  const noKey = [];
-  assert.equal(await handleCodeRequest('write a Python script that sorts files', { ...ui(), readConfig: async () => '{"modelProviders":[]}', log: (m) => noKey.push(m) }), true);
-  assert.deepEqual(summaries(noKey).map(s => s.ok), [false]);
-  const noTrial = [];
-  assert.equal(await handleCodeRequest('write a Python script that sorts files', { ...ui(), client: { models: async () => catalogue }, trial: {}, log: (m) => noTrial.push(m) }), true);
-  assert.deepEqual(summaries(noTrial).map(s => s.ok), [false]);
 });

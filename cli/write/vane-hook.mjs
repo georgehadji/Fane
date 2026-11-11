@@ -18,7 +18,7 @@ import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, post
 import { isCodeRequest } from '../core/intent-code.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES, chainsFor } from './models.mjs';
-import { beginRun } from '../core/runlog.mjs';
+import { createTurn } from '../core/turn.mjs';
 import { createArticlePipeline } from './pipeline.mjs';
 import { prompts } from './prompts.mjs';
 import { renderArticleFailure, renderArticleProgress, renderArticleResult, renderPostResult } from './present.mjs';
@@ -46,28 +46,21 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   const topic = earlier ? query : platform ? postTopic(query) : articleTopic(query);
   // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
   const lang = earlier ? targetLanguage(query, earlier.lang) : detectLanguage(query);
-  const track = beginRun(platform ? 'post' : earlier ? 'article-edit' : 'article', log, prompts);
-  log = track.log;
   const state = { lang, phases: [], running: earlier ? 'edit' : 'sources', draft: null };
-  const id = emit(tagged(renderArticleProgress(state)));
-  const say = (markdown) => { try { update(id, tagged(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
-  try {
+  const turn = createTurn({ feature: platform ? 'post' : earlier ? 'article-edit' : 'article', prompts, emit, update, log, tag: tagged });
+  const { say } = turn;
+  log = turn.log;
+  await turn.run(renderArticleProgress(state), async () => {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
-    if (!client) {
-      say(providerMissing('Article writing', { free: true }));
-      return true;
-    }
-    trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {};
+    if (!client) return say(providerMissing('Article writing', { free: true }));
+    try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
     const chosen = await withFreeLlm(client, useMode, {
       select: async () => selectChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang }),
       free: (ready, last) => selectFreeChains(trial, ready, { lang, last }),
       only: chainsFor,
     });
-    if (!chosen) {
-      say(quiet([escapeHtml(`No text model has passed the trial for ${LANGUAGE_NAMES[lang]}: run node scripts/article-trial.mjs, or ask in English.`)]));
-      return true;
-    }
+    if (!chosen) return say(quiet([escapeHtml(`No text model has passed the trial for ${LANGUAGE_NAMES[lang]}: run node scripts/article-trial.mjs, or ask in English.`)]));
     const retrieve = retryEmpty(research);
     if (earlier) {
       const edit = editor || createArticleEditor({ client, log });
@@ -77,29 +70,25 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
       };
       const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, mode: useMode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: onEdit });
       say(r.ok ? renderArticleResult(r) : renderArticleFailure({ ...r, edit: true }, lang));
-      track.finish(r);
-      return true;
+      return r;
     }
-    // Updates are applied in order, one at a time.
-    let queue = Promise.resolve();
-    const onProgress = (e) => {
+    const onProgress = turn.progress((e) => {
       if (e.status === 'preview') state.draft = { text: e.text, sources: e.sources };
       else if (e.status === 'running') state.running = e.phase;
       else {
         state.phases = [...state.phases.filter(p => p.phase !== e.phase), { phase: e.phase, status: e.status }];
         if (e.phase === 'sources') researchDone();
       }
-      if (e.phase !== 'done') queue = queue.then(() => say(renderArticleProgress(state)));
-    };
+      if (e.phase !== 'done') return () => renderArticleProgress(state);
+    });
     const write = pipeline || createArticlePipeline({ client, retrieve, log });
     const r = await write({ topic, mode: useMode, lang, words: parseArticleOptions(query, { post: !!platform }).words, format: platform || 'article', chains: chosen.chains, prices: chosen.prices, onProgress });
-    await queue;
+    await turn.settle();
     say(!r.ok ? renderArticleFailure({ ...r, post: !!platform }, lang) : platform ? renderPostResult(r) : renderArticleResult(r));
-    track.finish(r);
-  } catch (err) {
+    return r;
+  }, { failed: (err) => {
     log(`${platform ? 'post' : 'article'} failed: ${err.message}`);
     say(renderArticleFailure({ error: err.message, post: !!platform }, lang));
-    track.finish({ ok: false });
-  }
+  } });
   return true;
 }

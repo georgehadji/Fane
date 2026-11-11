@@ -7,6 +7,7 @@
 // running them; nothing generated is ever executed. Failures are returned as values; a phase that fails after the
 // files exist is skipped and listed in `degraded`, so a weakened run is never presented as a clean one.
 import { createRoleCaller, noteOf, statusOf } from '../write/llm.mjs';
+import { PHASE, phaseRecord } from '../core/outcome.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { MAX_FILE_CHARS, extractCode, fileChecks, parseFiles, safePath, sameFile } from './files.mjs';
@@ -138,28 +139,28 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
     const fail = (error) => ({ ok: false, error, phases, language: lang, mode, reasoning: effort.reasoning, calls, cost });
 
     async function step(role, ctx) {
-      emit({ phase: role, status: 'running', file: ctx.file?.path });
+      emit({ phase: role, status: PHASE.running, file: ctx.file?.path });
       const started = now();
       const r = await call(role, codePrompts[role]({ text: request, lang, today, ...ctx }), {
         chain: chains[role] || chains.generate, maxTokens: codeTokensFor(role, effort.headroom), reasoning: effort.reasoning, temperature: 0.2, prices, json: CODE_JSON_ROLES.has(role), code: true,
       });
       calls += r.attempts.length;
       cost += r.cost;
-      const rec = { phase: role, file: ctx.file?.path, model: r.model || null, status: statusOf(r), ms: now() - started, note: noteOf(r) };
+      const rec = phaseRecord(role, statusOf(r), { file: ctx.file?.path, model: r.model || null, ms: now() - started, note: noteOf(r) });
       phases.push(rec);
-      emit(rec);
+      emit({ ...rec });
       if (r.fatal) throw Object.assign(new Stop(r.errors[0] || 'the provider refused the request'), { status: r.status });
       return { ...r, rec }; // files run in parallel: phases.at(-1) may be another file's record
     }
 
     // Vane research: the pages of one query, de-duplicated. A failed search is a note, not the end of the run.
     async function search(phase, query) {
-      emit({ phase, status: 'running' });
+      emit({ phase, status: PHASE.running });
       let found = [];
       try { found = await retrieve(query); } catch (err) { degraded.push(`the ${phase} search failed (${err.message})`); }
       const seen = new Set(), pages = [];
       for (const s of found || []) if (s?.url && !seen.has(s.url)) { seen.add(s.url); pages.push({ title: s.title || s.url, url: s.url, content: s.content || '' }); }
-      phases.push({ phase, model: null, status: pages.length ? 'ok' : 'failed', ms: 0, note: `${pages.length} pages` });
+      phases.push(phaseRecord(phase, pages.length ? PHASE.ok : PHASE.failed, { model: null, ms: 0, note: `${pages.length} pages` }));
       emit({ phase, status: 'done', note: `${pages.length} pages` });
       return pages.slice(0, MAX_DOCS);
     }
@@ -186,7 +187,7 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
       const { spec, dropped } = normalizeSpec(s.data);
       if (!spec) return fail('the specification named no usable file');
       degraded.push(...dropped);
-      emit({ phase: 'spec', status: 'preview', spec });
+      emit({ phase: 'spec', status: PHASE.preview, spec });
 
       // 3. One call per file, a few at a time; a file that fails is reported, never stored as an error text.
       const written = await mapLimited(spec.files, CONCURRENCY, async (file) => {
@@ -200,7 +201,7 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
       let files = written.filter(Boolean);
       if (!files.length) return fail('no file could be written');
       await check(files);
-      emit({ phase: 'generate', status: 'preview', files });
+      emit({ phase: 'generate', status: PHASE.preview, files });
 
       // 4. Known vulnerabilities of the stack, for the review (Quality).
       let cve = [];
@@ -236,7 +237,7 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
             if (file.syntax.status === 'ok' && next.syntax.status === 'error') why = `the fixed file does not parse (${next.syntax.detail})`;
           }
           if (why) {
-            if (r.ok) { r.rec.status = 'rejected'; r.rec.note = why; }
+            if (r.ok) { r.rec.status = PHASE.rejected; r.rec.note = why; emit({ ...r.rec }); } // the first record said 'ok'
             degraded.push(`the fix of ${file.path} was not used (${why}): the earlier file was kept`);
             for (const i of issues) unfixed.add(i);
             return null;

@@ -6,11 +6,12 @@ import { articleTopic, isArticleRequest, parseArticleOptions } from '../core/int
 import { checkCitations, renumber, rhythm, runChecks, sentences, sourcesSection } from '../write/checks.mjs';
 import { AUDIT_DIMENSIONS, auditResult, claimLedger, claimSupportRatio } from '../write/gate.mjs';
 import { DEFAULT_WORDS, PHASES, chainsFor, clampWords, tokensFor } from '../write/models.mjs';
-import { createRoleCaller, extractJson, maxCostFromEnv, noteOf, statusOf } from '../write/llm.mjs';
+import { NETWORK_WAIT_MS, STOP_REASONS, createRoleCaller, extractJson, maxCostFromEnv, nextStep, noteOf, statusOf } from '../write/llm.mjs';
 import { retryEmpty } from '../write/research.mjs';
 import { createArticlePipeline } from '../write/pipeline.mjs';
 import { parseArticleAnswer } from '../write/edit.mjs';
 import { prompts, sourceBlock } from '../write/prompts.mjs';
+import { PHASE } from '../core/outcome.mjs';
 import { OpenRouterError, openRouterClientFromVane, openRouterNeeded } from '../image/openrouter.mjs';
 
 for (const k of ['VANE_URL', 'VANE_CHAT_MODEL', 'VANE_EMBEDDING_MODEL', 'VANE_CONTAINER', 'VANE_SOURCES', 'VANE_MODE']) delete process.env[k];
@@ -326,6 +327,117 @@ test('role call: once the calls cost the limit, the next model is not asked and 
   assert.ok(Math.abs(r.cost - 0.6) < 1e-9);
   // the total is per caller: a later call on the same caller is refused at once
   assert.equal((await call('draft', { system: 's', user: 'u' }, { chain: ['m1'], maxTokens: 100 })).fatal, true);
+});
+
+// Characterization of the chain loop (plans/state-machines.md Phase 3): these pin what the code does, not what is ideal.
+const ASK = { system: 's', user: 'u' };
+const net = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+const gate = () => { let open; const p = new Promise(r => { open = r; }); return { p, open }; };
+
+test('role call: a 429 counts as a network failure, in a row with a fetch failure; a timeout does not', async () => {
+  const waits = [];
+  const sleep = async (ms) => { waits.push(ms); };
+  const r = await createRoleCaller({ client: stub([new OpenRouterError('429 slow', 429), net(), reply('An answer.')]), sleep })('draft', ASK, { chain: ['m1', 'm2', 'm3'], maxTokens: 100 });
+  assert.equal(r.model, 'm3');
+  assert.deepEqual(waits, [10_000, 20_000]);
+  const timedOut = []; // a TimeoutError has no status but is not the connection being down
+  await createRoleCaller({ client: stub([Object.assign(new Error('timed out'), { name: 'TimeoutError' }), reply('ok')]), sleep: async (ms) => { timedOut.push(ms); } })('draft', ASK, { chain: ['m1', 'm2'], maxTokens: 100 });
+  assert.deepEqual(timedOut, []);
+});
+
+test('role call: the wait resets on an HTTP error but survives a bad answer', async () => {
+  const run = async (script) => {
+    const waits = [];
+    const r = await createRoleCaller({ client: stub(script), sleep: async (ms) => { waits.push(ms); } })('draft', ASK, { chain: ['m1', 'm2', 'm3', 'm4'], maxTokens: 100 });
+    return { waits, model: r.model };
+  };
+  // network failure, then an empty answer: the connection is still counted as down, so m3 waits again (same length)
+  assert.deepEqual(await run([net(), reply(''), reply('')]).then(x => x.waits), [10_000, 10_000, 10_000]);
+  // network failure, then a 503: the count starts again, so m3 does not wait
+  const reset = await run([net(), new OpenRouterError('503 busy', 503), reply('An answer.')]);
+  assert.deepEqual([reset.waits, reset.model], [[10_000], 'm3']);
+});
+
+test('role call: a 402 in one parallel step makes the other step skip paid models', async () => {
+  const asked = [];
+  const slow = gate();
+  const client = { chat: async (body) => {
+    asked.push(body.model);
+    if (body.model === 'slow/1') { await slow.p; return reply(''); }
+    if (body.model === 'x/1') throw new OpenRouterError('402 no credits', 402);
+    return reply('An answer.');
+  } };
+  const call = createRoleCaller({ client });
+  const pending = call('draft', ASK, { chain: ['slow/1', 'b/2', 'free:auto'], maxTokens: 100 }); // in flight on slow/1
+  const a = await call('copy', ASK, { chain: ['x/1', 'free:auto'], maxTokens: 100 }); // OpenRouter is out
+  assert.equal(a.ok, true);
+  slow.open();
+  const b = await pending;
+  assert.equal(b.ok, true);
+  assert.deepEqual(asked, ['slow/1', 'x/1', 'free:auto', 'free:auto']); // b/2 was never asked
+});
+
+test('role call: the spend cap overshoots by the calls already in flight', async () => {
+  const g = gate();
+  const client = { chat: async () => { await g.p; return reply('An answer.', { usage: { cost: 0.4 } }); } };
+  const call = createRoleCaller({ client, maxCost: 0.5 });
+  const both = Promise.all([call('draft', ASK, { chain: ['m1'], maxTokens: 100 }), call('copy', ASK, { chain: ['m1'], maxTokens: 100 })]);
+  g.open();
+  const [a, b] = await both;
+  assert.deepEqual([a.ok, b.ok], [true, true]); // both passed the check at 0 spent: $0.80 against a $0.50 cap
+  assert.equal((await call('polish', ASK, { chain: ['m1'], maxTokens: 100 })).fatal, true);
+});
+
+test('nextStep: one row per branch of the chain loop', () => {
+  const before = { stage: 'before', free: false, paidOut: null, spent: 0, maxCost: Infinity, offline: 0 };
+  const after = { stage: 'after', free: false, freeLater: false, offline: 0, flaw: null };
+  const err = (status, timeout = false) => ({ status, timeout });
+  const out = { status: 402 };
+  const rows = [
+    // before a model
+    [{ ...before }, { kind: 'nextModel' }],
+    [{ ...before, offline: 2 }, { kind: 'waitThenNext', wait: 2 * NETWORK_WAIT_MS }],
+    [{ ...before, paidOut: out }, { kind: 'skipPaid' }],
+    [{ ...before, paidOut: out, free: true }, { kind: 'nextModel' }],
+    [{ ...before, spent: 0.5, maxCost: 0.5, offline: 1 }, { kind: 'stop', reason: 'cap' }], // the cap comes before the wait
+    [{ ...before, paidOut: out, spent: 9, maxCost: 1 }, { kind: 'skipPaid' }], // a skipped model is not asked, so the cap is not looked at
+    // after a call
+    [{ ...after }, { kind: 'answer', offline: 0 }],
+    [{ ...after, offline: 3 }, { kind: 'answer', offline: 3 }],
+    ...['length', 'filter', 'empty', 'think', 'json'].map(flaw => [{ ...after, offline: 1, flaw }, { kind: 'nextModel', offline: 1 }]), // a bad answer keeps the count
+    [{ ...after, offline: 1, error: err(503) }, { kind: 'nextModel', offline: 0 }],
+    [{ ...after, offline: 1, error: err(400) }, { kind: 'nextModel', offline: 0 }],
+    [{ ...after, error: err(undefined) }, { kind: 'nextModel', offline: 1 }], // fetch failed
+    [{ ...after, offline: 1, error: err(429) }, { kind: 'nextModel', offline: 2 }],
+    [{ ...after, offline: 1, error: err(undefined, true) }, { kind: 'nextModel', offline: 0 }], // a timeout is not the network
+    [{ ...after, error: err(401) }, { kind: 'stop', reason: '401', offline: 0 }],
+    [{ ...after, error: err(402) }, { kind: 'stop', reason: '402', offline: 0 }],
+    [{ ...after, error: err(402), freeLater: true }, { kind: 'skipPaid', offline: 0 }],
+    [{ ...after, error: err(401), freeLater: true }, { kind: 'skipPaid', offline: 0 }],
+    [{ ...after, error: err(402), freeLater: true, free: true }, { kind: 'stop', reason: '402', offline: 0 }],
+    [{ ...after, error: err(499), freeLater: true }, { kind: 'stop', reason: '499', offline: 0 }],
+    // the chain ran out
+    [{ stage: 'end', tried: 2, paidOut: null }, { kind: 'softFail' }],
+    [{ stage: 'end', tried: 2, paidOut: out }, { kind: 'softFail' }],
+    [{ stage: 'end', tried: 0, paidOut: null }, { kind: 'softFail' }],
+    [{ stage: 'end', tried: 0, paidOut: out }, { kind: 'stop', reason: '402' }],
+  ];
+  for (const [attempt, step] of rows) assert.deepEqual(nextStep(attempt), step, JSON.stringify(attempt));
+  assert.ok(rows.every(([, s]) => s.kind !== 'stop' || STOP_REASONS.includes(s.reason)));
+});
+
+test('role call: every fatal result says why in `reason`, and keeps its status', async () => {
+  const one = (script, opts = {}) => createRoleCaller({ client: stub(script), ...opts })('draft', ASK, { chain: ['m1', 'm2'], maxTokens: 100 });
+  assert.deepEqual(['401', '402', '499'].map(s => s), (await Promise.all([401, 402, 499].map(s => one([new OpenRouterError('x', s)])))).map(r => r.reason));
+  assert.deepEqual((await one([new OpenRouterError('x', 402)])).status, 402);
+  const cap = await one([reply('', { usage: { cost: 0.6 } })], { maxCost: 0.5 });
+  assert.deepEqual([cap.reason, cap.status, cap.fatal], ['cap', undefined, true]);
+  const paid = createRoleCaller({ client: stub([new OpenRouterError('x', 402), reply('ok')]) }); // OpenRouter out, then a chain with no free: model
+  await paid('draft', ASK, { chain: ['a', 'free:b'], maxTokens: 100 });
+  const none = await paid('draft', ASK, { chain: ['c'], maxTokens: 100 });
+  assert.deepEqual([none.reason, none.status, none.fatal], ['402', 402, true]);
+  const soft = await one([reply(''), reply('')]);
+  assert.deepEqual([soft.ok, soft.fatal, soft.reason], [false, false, undefined]);
 });
 
 test('FANE_MAX_COST: a positive number is the limit, anything else is none', () => {
@@ -647,6 +759,17 @@ test('an edit that returns a fraction of the article is rejected and the previou
   assert.ok(stripped.degraded.some(d => /polish was rejected \(dropped most citations/.test(d)));
 });
 
+test('every progress event and phase record uses the PHASE vocabulary (a progress event may also say done); a rejected edit is sent as it ends', async () => {
+  const events = [];
+  const r = await run(fake({ revise: '# Tides at work\n\nToo short.' }), { mode: 'balanced', onProgress: (e) => events.push(e) });
+  const words = new Set(Object.values(PHASE));
+  assert.ok(r.phases.every(p => words.has(p.status)), JSON.stringify(r.phases.map(p => p.status)));
+  assert.ok(events.every(e => words.has(e.status) || e.status === 'done'));
+  assert.equal(r.phases.find(p => p.phase === 'revise').status, 'rejected');
+  // the record that was rejected is the last thing said about the pass, so a UI that keeps the last record per phase shows it
+  assert.equal(events.filter(e => e.phase === 'revise').at(-1).status, 'rejected');
+});
+
 test('thin evidence is reported: fewer than half of the checked claims supported', async () => {
   const claims = [{ claim: 'a', source: 1, verdict: 'unsupported' }, { claim: 'b', source: 2, verdict: 'partial' }, { claim: 'c', source: 2, verdict: 'supported' }];
   const r = await run(fake({ factcheck: JSON.stringify({ claims }) }), { mode: 'balanced' });
@@ -725,4 +848,12 @@ test('a file written by vane --article reads back for an edit', () => {
   const p = parseArticleAnswer(`${body}${sourcesSection([{ title: 'A, b', url: 'https://example.org/a' }, { title: 'Beta', url: 'https://example.org/b' }], 'en')}`);
   assert.equal(p.body, body);
   assert.deepEqual(p.sources.map(s => [s.title, s.url]), [['A, b', 'https://example.org/a'], ['Beta', 'https://example.org/b']]);
+});
+
+test('Quality: a retry audit that gives no score is said once, not again as "failed twice"', async () => {
+  const c = fake({ audit: (n) => n === 1 ? JSON.stringify(BAD_AUDIT) : 'not json' });
+  const r = await run(c, { mode: 'quality' });
+  assert.equal(r.ok, true);
+  assert.ok(r.degraded.some(d => /audit retry produced no quality score/.test(d)));
+  assert.ok(!r.degraded.some(d => /failed twice|the final audit failed: no quality score/.test(d)), r.degraded.join(' | '));
 });

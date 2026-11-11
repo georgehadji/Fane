@@ -11,6 +11,7 @@ import { sniffMime, toDataUrl, collectImageCandidates, decodeDataUrl } from '../
 import { isPrivateAddress, safeDownload } from '../image/download.mjs';
 import { slugify, fileNameFor, saveImages } from '../image/save.mjs';
 import { createImageGenerator, nearestRatio } from '../image/generate.mjs';
+import { isStopped } from '../core/outcome.mjs';
 
 for (const k of ['VANE_URL', 'VANE_CHAT_MODEL', 'VANE_EMBEDDING_MODEL', 'VANE_CONTAINER', 'VANE_SOURCES', 'VANE_MODE']) delete process.env[k];
 const { parseCli } = await import('../vane.mjs');
@@ -439,6 +440,10 @@ test('pipeline: stops at once on 402 (no fallbacks, no retries)', async () => {
   const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'Mickey Mouse surfing', count: 2, enhance: false });
   assert.equal(r.ok, false);
   assert.equal(client.calls.length, 2); // only the two primaries
+  assert.deepEqual([r.fatal.status, /402/.test(r.fatal.error)], [402, true]); // callers read the stop from `fatal`, not from error text
+  const stopped = await createImageGenerator({ client: fakeClient({ fail: Object.fromEntries(CAT.map(m => [m.id, { msg: 'stopped: the run reached its time limit', status: 499 }])) }), download: async () => null })({ prompt: 'a fox', count: 1, enhance: false });
+  assert.equal(isStopped(stopped.fatal), true);
+  assert.equal((await createImageGenerator({ client: fakeClient(), download: async () => null })({ prompt: 'a fox', count: 1, enhance: false })).fatal, null);
 });
 
 test('pipeline: refusal triggers the rewrite chain', async () => {
@@ -575,8 +580,8 @@ test('hook: an edit keeps the earlier shape, refuses an SVG, and a stopped run s
   const calls = [];
   const shown = [];
   const lines = [];
-  let errors = [];
-  const generator = async (args) => { calls.push(args); return { images: errors.length ? [] : [{ dataUrl: PNG_URL, model: 'a/one' }], requested: 1, complete: !errors.length, errors }; };
+  let errors = [], fatal = null;
+  const generator = async (args) => { calls.push(args); return { images: errors.length ? [] : [{ dataUrl: PNG_URL, model: 'a/one' }], requested: 1, complete: !errors.length, errors, fatal }; };
   const store = { get: async () => PNG_URL, put: async () => link('c') };
   const io = { emit: () => 'b', update: (id, md) => shown.push(md), log: (m) => lines.push(m), generator, store };
   const wide = `<img src="${link('a')}" style="display:block;aspect-ratio:auto 16/9">`;
@@ -589,6 +594,7 @@ test('hook: an edit keeps the earlier shape, refuses an SVG, and a stopped run s
   assert.equal(calls.length, 0);
   assert.match(shown.at(-1), /Vector images \(SVG\) cannot be edited/);
   errors = ['a/one: stopped: the run reached its time limit'];
+  fatal = { status: 499, error: 'stopped: the run reached its time limit' }; // what generate() returns for it
   await handleImageRequest('create an image of a fox', io);
   assert.match(shown.at(-1), /The run was stopped/);
   assert.match(lines.at(-1), /"stopped":true/);

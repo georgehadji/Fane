@@ -95,3 +95,47 @@ test('chip: the first source\'s site and "+1"; open, the card shows the first so
   assert.equal(text(find(card, 'fane-cite-pager')), '‹1/2›');
   assert.equal(find(render({ href: 'https://a.com/', children: ['1'], sources: [src('https://a.com/')] }, true), 'fane-cite-pager'), undefined);
 });
+
+// Phase 0 V3: a stateful stand-in for React (slots by call order, setState re-renders) so the hover timer, focus and
+// the touch handlers can interleave as in a browser.
+function mount(props) {
+  const slots = []; let i = 0, tree;
+  const C = {
+    useState: (v) => { const k = i++; if (!(k in slots)) slots[k] = v; return [slots[k], (n) => { slots[k] = typeof n === 'function' ? n(slots[k]) : n; draw(); }]; },
+    useRef: (v) => { const k = i++; if (!(k in slots)) slots[k] = { current: v }; return slots[k]; },
+    useEffect: () => { i++; }, useLayoutEffect: () => { i++; }, useId: () => ':r1:',
+  };
+  const R = { jsx: (type, p) => ({ type, ...p }), jsxs: (type, p) => ({ type, ...p }) };
+  function draw() { i = 0; tree = CHIP(props, R, C, CITE_ITEMS); }
+  draw();
+  return { get tree() { return tree; }, get chip() { return find(tree, 'fane-cite-chip'); }, get open() { return !!find(tree, 'fane-cite-card'); } };
+}
+const click = (m, pointerType) => { let prevented = false; m.chip.onClick({ preventDefault() { prevented = true; } }); return prevented; };
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const chipProps = { href: 'https://a.com/', children: ['1'], sources: [src('https://a.com/')] };
+
+test('chip tap: a hover timer that fires between pointerdown and click leaves the card open and the first tap does not navigate', async () => {
+  const m = mount(chipProps);
+  m.tree.onPointerEnter({ pointerType: 'mouse' }); // starts the 150 ms timer (a hybrid device)
+  m.chip.onPointerDown({ pointerType: 'touch' }); // wasOpen = false
+  await sleep(250); // the timer fires here
+  assert.equal(m.open, true);
+  assert.equal(click(m), true); // wasOpen is the value at pointerdown, so this tap is the "open" tap: no navigation
+  assert.equal(m.open, true); // and the card is not toggled shut
+});
+
+test('chip tap: a second tap on the open card navigates; the card closing between pointerdown and click does not stop it', async () => {
+  const m = mount(chipProps);
+  m.chip.onPointerDown({ pointerType: 'touch' }); assert.equal(click(m), true); assert.equal(m.open, true); // first tap opens
+  m.chip.onPointerDown({ pointerType: 'touch' }); // wasOpen = true
+  m.tree.onPointerLeave({ pointerType: 'mouse' }); // set(false, 120) fires before the click
+  await sleep(200);
+  assert.equal(m.open, false);
+  assert.equal(click(m), false);
+});
+
+test('chip tap: a keyboard click after a touch tap navigates', { todo: 'bug: touch/wasOpen refs stay set from the last pointerdown, so Enter (a click with no pointerdown) is swallowed' }, () => {
+  const m = mount(chipProps);
+  m.chip.onPointerDown({ pointerType: 'touch' }); click(m); // the touch tap opened the card (wasOpen stays false)
+  assert.equal(click(m), false); // Enter on the focused chip: no pointerdown first
+});

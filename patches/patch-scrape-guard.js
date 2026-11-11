@@ -29,6 +29,8 @@ const TARGETS = [
     name: 'scraper guard helpers',
     from: 'var d=c(32325),e=c(40131),f=c(24425);class g{',
     to: `var d=c(32325),e=c(40131),f=c(24425);/*fane:scrape-guard*/${GUARD}class g{`,
+    // patch-scrape-ladder edits the guard text below this marker (the proxy host, the unwrapping check).
+    marker: '/*fane:scrape-guard*/',
   },
   {
     name: 'every request of a scraped page is checked',

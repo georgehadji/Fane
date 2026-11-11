@@ -2,6 +2,7 @@
 // Nothing here is needed to read the page: without script every picture, receipt and answer is already in the HTML.
 (() => {
   'use strict';
+  const main = () => {
   const NB = ' ';
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -78,7 +79,8 @@
   document.body.append(said);
   document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copied'; said.textContent = 'Copied to the clipboard.'; } catch { b.textContent = 'Select it'; said.textContent = 'Could not copy. Select the text instead.'; }
-    setTimeout(() => { b.textContent = 'Copy'; said.textContent = ''; }, 1600);
+    clearTimeout(b.copyTimer);
+    b.copyTimer = setTimeout(() => { b.textContent = 'Copy'; said.textContent = ''; }, 1600);
   }));
 
   // Entrances: heading, then text, then picture, staggered, once, as each part comes into view.
@@ -112,4 +114,7 @@
     addEventListener('scroll', () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } }, { passive: true });
     update();
   }
+  };
+  // A script error must not leave the entrances hidden: reveal everything, then let the error show.
+  try { main(); } catch (err) { document.querySelectorAll('[data-rise]').forEach((el) => el.classList.add('in')); throw err; }
 })();
