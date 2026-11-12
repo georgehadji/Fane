@@ -252,6 +252,13 @@ Build this only after V1 and V2 report.
 
 **Cost:** medium. **Restart:** none by itself. **Subagent:** sonnet; V2 and the M17 warning on haiku.
 
+**Done (2026-11-12).** Decisions:
+- `scripts/apply.mjs` exports `applyFane({docker, env, argv, container, url, log, error, write, waitReady, doctor, root})` (defaults are the real ones; it returns the exit code) and `main` runs only when executed. `cli/test/apply.test.mjs` drives it with a fake docker: clean, browser-only, server file, patch run that wrote two files, module folder (and a failed copy), settings, host without a key the container has (still copied and restarted: settings rendering is unchanged), Compose refused, stopped, failing patch.
+- `run()` prints `<name>: changed <file>` after its "patched N of M" line, one per file written. `changedFiles(out)` reads them and `needsRestart` decides from those files; the "patched" words no longer decide anything. `changed` for a module folder is set after the copy succeeded.
+- Compose detection: one `docker inspect -f '{{.State.Running}}@@{{json .Config.Entrypoint}}@@{{json .Mounts}}'`. An entrypoint ending in `fane-entrypoint.sh` plus a `/fane/` mount is refused with exit 1 (like the other refusals) and "run `docker compose restart vane`", checked before the running check.
+- `docker/fane-entrypoint.sh` `switch_on` warns "searxng/settings.yml has no <engine> engine block to put the key in; the <label> engine stays off" when the sed did not write the key; `searxng-settings.test.mjs` covers it (LF and CRLF, no key in the output).
+- Not verifiable without a container: the real `docker inspect` output shape on the user's machine and the one-line `inspect` format string.
+
 ## Order and cost
 
 | Order | Phase | Depends on | Size | Restart |

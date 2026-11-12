@@ -108,6 +108,8 @@ function run(name, targets, io = fs) { // `io`: tests pass a fake file system
   const inPlace = n('applied') + n('upgraded') + n('already');
   const detail = [`${applied.length} changed now`, n('upgraded') && `${n('upgraded')} of them upgraded`, n('already') && `${n('already')} already applied`, n('skipped') && `${n('skipped')} optional skipped`].filter(Boolean);
   console.log(`${name}: patched ${inPlace} of ${targets.length} targets (${detail.join(', ')}; backups: *.bak)`);
+  // One line per file written, which scripts/apply.mjs reads to decide whether Vane needs a restart.
+  for (const f of changed) console.log(`${name}: changed ${f}`);
 }
 
 module.exports = { run, planPatch, isApplied, appliedNeedles };

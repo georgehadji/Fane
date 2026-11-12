@@ -66,11 +66,11 @@ const SWITCH_ON = /^switch_on\(\) \{\n[\s\S]*?\n\}\n/m.exec(script)[0];
 const CALLS = script.match(/^switch_on ".*$/gm);
 // Runs the entrypoint's switch_on calls on a copy of the repo file, with only `env`'s keys set.
 // `eol`: Compose mounts searxng/ from the checkout, which has CRLF on Windows.
-function entrypoint(env, eol = '\n') {
+function entrypoint(env, eol = '\n', text = repo) {
   const dir = mkdtempSync(join(tmpdir(), 'fane-'));
   const file = join(dir, 'settings.yml').replace(/\\/g, '/');
   try {
-    writeFileSync(file, repo.replace(/\r?\n/g, eol));
+    writeFileSync(file, text.replace(/\r?\n/g, eol));
     const keys = Object.fromEntries(KEYED_ENGINES.map(e => [e.env, '']));
     const r = spawnSync('sh', ['-c', `${SWITCH_ON.replaceAll('/etc/searxng/settings.yml', file)}${CALLS.join('\n')}`], { env: { ...process.env, ...keys, ...env }, encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
@@ -101,4 +101,25 @@ test('docker/fane-entrypoint.sh trims a pasted key like apply.mjs does, and refu
     assert.match(r.err, /CORE_API_KEY has unexpected characters; the CORE engine stays off/, JSON.stringify(bad));
     assert.throws(() => renderSettings(repo, { coreKey: bad.trim() }), /unexpected characters/, JSON.stringify(bad));
   }
+});
+
+test('docker/fane-entrypoint.sh warns when a key is set but its engine block is missing, in the words apply.mjs uses, and never prints the key', { skip: NO_SH }, () => {
+  for (const e of KEYED_ENGINES) {
+    const noBlock = repo.replace(`- name: ${e.name}\n`.replace(/\n/g, '\r\n'), '- name: renamed away\r\n').replace(`- name: ${e.name}\n`, '- name: renamed away\n');
+    assert.notEqual(noBlock, repo, e.name);
+    for (const eol of ['\n', '\r\n']) {
+      const r = entrypoint({ [e.env]: KEY }, eol, noBlock);
+      assert.ok(r.err.includes(`fane: WARNING: searxng/settings.yml has no ${e.name} engine block to put the key in; the ${e.label} engine stays off`), r.err);
+      assert.equal(r.err.split('\n').filter(Boolean).length, 1, r.err); // only this engine warns
+      assert.ok(!r.err.includes(KEY) && !r.out.includes(KEY));
+    }
+  }
+});
+
+test('docker/fane-entrypoint.sh gives no block warning for a present block, an unset key, or a key refused for its characters', { skip: NO_SH }, () => {
+  for (const e of KEYED_ENGINES) assert.equal(entrypoint({ [e.env]: KEY }).err, '', e.env);
+  assert.equal(entrypoint({}).err, '');
+  const refused = entrypoint({ CORE_API_KEY: 'short' }).err;
+  assert.match(refused, /has unexpected characters/);
+  assert.doesNotMatch(refused, /engine block/); // one warning per problem
 });

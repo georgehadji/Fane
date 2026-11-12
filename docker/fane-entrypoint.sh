@@ -31,6 +31,10 @@ switch_on() {
   esac
   if [ "$ok" = yes ]; then
     sed -i "/- name: $4/,/inactive:/{s/$5:.*/$5: '$6$key'/;s/inactive:.*/inactive: false/}" /etc/searxng/settings.yml
+    # No engine block, or no field line in it: sed changed nothing, and the engine would stay off without a word.
+    if ! sed -n "/- name: $4/,/inactive:/p" /etc/searxng/settings.yml | grep -qF "$5: '$6$key'"; then
+      echo "fane: WARNING: searxng/settings.yml has no $4 engine block to put the key in; the $3 engine stays off" >&2
+    fi
   else
     echo "fane: WARNING: $2 has unexpected characters; the $3 engine stays off" >&2
   fi

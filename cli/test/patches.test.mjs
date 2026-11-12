@@ -645,10 +645,30 @@ test('run: the end-of-run line counts every target in place and keeps the words 
     run('t', [{ ...a, name: 'a2', from: 'a=2', to: 'a=2/*m*/', marker: '/*m*/' }, { name: 'o', file: f, from: 'zzz', to: 'q', optional: 'x' }, { ...a, from: 'b=3', to: 'b=4', ladder: undefined }]);
   } finally { console.log = log; rmSync(dir, { recursive: true, force: true }); }
   assert.equal(lines[0], 't: patched 2 of 2 targets (2 changed now; backups: *.bak)');
-  assert.equal(lines[1], 't: already patched');
-  assert.equal(lines[2], 't: skipped o (x)');
-  assert.match(lines[3], /^t: patched 2 of 3 targets \(2 changed now, 1 optional skipped; backups: \*\.bak\)$/);
-  for (const l of [lines[0], lines[3]]) assert.ok(/patched/.test(l) && !/already patched/.test(l), l); // scripts/apply.mjs reads the line like this
+  assert.equal(lines[1], `t: changed ${f}`); // one line per file written: apply.mjs decides the restart from these
+  assert.equal(lines[2], 't: already patched'); // nothing written, no "changed" line
+  assert.equal(lines[3], 't: skipped o (x)');
+  assert.match(lines[4], /^t: patched 2 of 3 targets \(2 changed now, 1 optional skipped; backups: \*\.bak\)$/);
+  assert.equal(lines[5], `t: changed ${f}`);
+  assert.equal(lines.length, 6);
+  for (const l of [lines[0], lines[4]]) assert.ok(/patched/.test(l) && !/already patched/.test(l), l);
+});
+
+test('run: one "changed" line per file written, for every file of a multi-file run (patch-image-chat with patch-image-serve)', async () => {
+  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { run } = require('../../patches/lib/apply-targets.js');
+  const dir = mkdtempSync(join(tmpdir(), 'fane-patch-'));
+  const [a, b, c] = ['a.js', 'b.js', 'c.js'].map(n => join(dir, n));
+  for (const f of [a, b, c]) writeFileSync(f, 'var x=1;');
+  const lines = [];
+  const log = console.log;
+  console.log = (l) => lines.push(l);
+  try {
+    run('t', [{ name: 'a', file: a, from: 'x=1', to: 'x=2' }, { name: 'b', file: b, from: 'x=1', to: 'x=2' }, { name: 'c', file: c, from: 'x=2', to: 'x=2', optional: 'absent' }]);
+  } finally { console.log = log; rmSync(dir, { recursive: true, force: true }); }
+  assert.deepEqual(lines.filter(l => l.includes(': changed ')), [`t: changed ${a}`, `t: changed ${b}`]);
 });
 
 test('every alts target that has a ladder has one label per alternative', () => {

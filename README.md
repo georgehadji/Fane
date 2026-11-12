@@ -68,7 +68,7 @@ docker rm -f vane      # only if you started it with `docker run`; your data sta
 docker compose up -d
 ```
 
-**B. Apply to an existing container.** Idempotent: copies the patches and settings in, generates a random `secret_key` (the repo file keeps its placeholder), restarts only if something changed, then runs `vane --doctor`.
+**B. Apply to an existing container.** Idempotent: copies the patches and settings in, generates a random `secret_key` (the repo file keeps its placeholder), restarts only if something Vane's server reads was written (a change to browser files only asks for a page reload), then runs `vane --doctor`. A container made by option A is refused: run `docker compose restart vane` instead, because its entrypoint re-applies the patches and settings at every start.
 
 ```bash
 node scripts/apply.mjs            # add --no-searxng to skip the SearXNG settings
