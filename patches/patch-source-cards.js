@@ -167,6 +167,104 @@ function CHIP(P, R, C, ITEMS) {
   });
 }
 
+// The chip as it was before it became a transition table (/*fane*/ installs from before that carry this text), kept
+// as the source text it had then so a patched container is upgraded in place. The function keeps its name CHIP,
+// because the injected text starts with it.
+const CHIP_V1 = (() => {
+function CHIP(P, R, C, ITEMS) {
+  var h = R.jsx, hs = R.jsxs;
+  var items = ITEMS(P.sources, P.children, P.href);
+  var o = C.useState(false), open = o[0], setOpen = o[1];
+  var g = C.useState(0), page = g[0], setPage = g[1];
+  var q = C.useState(null), pos = q[0], setPos = q[1];
+  var wrap = C.useRef(null), chip = C.useRef(null), card = C.useRef(null);
+  var timer = C.useRef(0), hover = C.useRef(false), mute = C.useRef(false), wasOpen = C.useRef(false), touch = C.useRef(false);
+  var id = 'fane-cite-' + String(C.useId ? C.useId() : '').replace(/[^\w-]/g, '');
+  function set(v, ms) {
+    clearTimeout(timer.current);
+    if (ms) timer.current = setTimeout(function () { setOpen(v); }, ms); else setOpen(v);
+  }
+  C.useEffect(function () { return function () { clearTimeout(timer.current); }; }, []);
+  C.useEffect(function () { if (!open) { setPos(null); setPage(0); } }, [open]);
+  C.useLayoutEffect(function () {
+    if (!open || !chip.current || !card.current) return;
+    var a = chip.current.getBoundingClientRect(), b = card.current.getBoundingClientRect();
+    var vw = document.documentElement.clientWidth, vh = window.innerHeight, m = 16;
+    var top = a.bottom + 6;
+    if (top + b.height > vh - m && a.top - 6 - b.height >= m) top = a.top - 6 - b.height;
+    setPos({ left: Math.max(m, Math.min(a.left, vw - m - b.width)), top: top });
+  }, [open, page]);
+  C.useEffect(function () {
+    if (!open) return;
+    function key(e) {
+      if (e.key !== 'Escape') return;
+      if (wrap.current && wrap.current.contains(document.activeElement) && chip.current) { mute.current = true; chip.current.focus(); }
+      set(false);
+    }
+    function away(e) { if (wrap.current && !wrap.current.contains(e.target)) set(false); }
+    function scroll(e) { if (!(card.current && card.current.contains(e.target))) set(false); }
+    function resize() { set(false); }
+    document.addEventListener('keydown', key);
+    document.addEventListener('pointerdown', away);
+    window.addEventListener('scroll', scroll, true);
+    window.addEventListener('resize', resize);
+    return function () {
+      document.removeEventListener('keydown', key);
+      document.removeEventListener('pointerdown', away);
+      window.removeEventListener('scroll', scroll, true);
+      window.removeEventListener('resize', resize);
+    };
+  }, [open]);
+  if (!items.length) return h('a', { href: P.href, target: '_blank', rel: 'noopener', className: 'fane-cite-chip', children: P.children });
+  var it = items[Math.min(page, items.length - 1)], n = items.length;
+  var more = n > 1 ? ' +' + (n - 1) : '';
+  function turn(d) { return function (e) { e.preventDefault(); setPage(function (p) { return (p + d + n) % n; }); }; }
+  var head = [
+    it.icon ? h('img', { src: it.icon, alt: '', width: 16, height: 16, loading: 'lazy', referrerPolicy: 'no-referrer' }, 'i') : null,
+    h('span', { className: 'fane-cite-host', children: it.host || it.site }, 'h'),
+    it.label ? h('span', { className: 'fane-cite-label', children: it.label }, 'l') : null,
+    n > 1 ? hs('span', { className: 'fane-cite-pager', children: [
+      h('button', { type: 'button', onClick: turn(-1), 'aria-label': 'Previous source', children: '\u2039' }, 'p'),
+      h('span', { 'aria-live': 'polite', children: (page + 1) + '/' + n }, 'c'),
+      h('button', { type: 'button', onClick: turn(1), 'aria-label': 'Next source', children: '\u203a' }, 'n'),
+    ] }, 'g') : null,
+  ];
+  return hs('span', {
+    ref: wrap,
+    className: 'fane-cite' + (open ? ' fane-cite-open' : ''),
+    onPointerEnter: function (e) { if (e.pointerType === 'mouse') { hover.current = true; set(true, 150); } },
+    onPointerLeave: function (e) { if (e.pointerType === 'mouse') { hover.current = false; set(false, 120); } },
+    onFocus: function () { if (mute.current) mute.current = false; else set(true); },
+    onBlur: function (e) { if (!hover.current && !(wrap.current && wrap.current.contains(e.relatedTarget))) set(false); },
+    children: [
+      h('a', {
+        ref: chip,
+        href: it.url || P.href,
+        target: '_blank',
+        rel: 'noopener',
+        className: 'fane-cite-chip',
+        'aria-describedby': open ? id : undefined,
+        onPointerDown: function (e) { touch.current = e.pointerType !== 'mouse'; wasOpen.current = open; },
+        onClick: function (e) { if (touch.current && !wasOpen.current) { e.preventDefault(); set(true); } },
+        children: items[0].site + more,
+      }, 'a'),
+      open ? hs('span', {
+        ref: card,
+        id: id,
+        className: 'fane-cite-card',
+        style: pos ? { left: pos.left + 'px', top: pos.top + 'px' } : { left: '0px', top: '0px', visibility: 'hidden' },
+        children: [
+          hs('span', { className: 'fane-cite-head', children: head }, 'hd'),
+          h('a', { href: it.url, target: '_blank', rel: 'noopener', className: 'fane-cite-title', children: it.title }, 't'),
+          it.text ? h('span', { className: 'fane-cite-text', children: it.text }, 'x') : null,
+        ],
+      }, 'c') : null,
+    ],
+  });
+}
+  return String(CHIP);
+})();
+
 // ChatProvider, inside the "[x]" rewrite: `l` is the answer's sources, `a` the cited source's address.
 const CHIP_HTML = 'return a?`<citation href="${a}">${e}</citation>`:""}).join(""))';
 // The pieces of one bracket are joined with no space, so this makes them one chip, and also chips that only spaces
@@ -212,7 +310,10 @@ const TARGETS = [
     from: 'citation:{component:ee}',
     to: 'citation:{component:ee,props:{sources:p}}',
   },
-  { name: 'chip with site name and source card', file: FILES.messageClient, from: VANE_CHIP, to: `ee=((F,I)=>P=>F(P,r,c,I))(${CHIP},${CITE_ITEMS})` },
+  { name: 'chip with site name and source card', file: FILES.messageClient, ladder: ['fresh', 'V1'], alts: [
+    { from: VANE_CHIP, to: `ee=((F,I)=>P=>F(P,r,c,I))(${CHIP},${CITE_ITEMS})` },
+    { from: `ee=((F,I)=>P=>F(P,r,c,I))(${CHIP_V1},${CITE_ITEMS})`, to: `ee=((F,I)=>P=>F(P,r,c,I))(${CHIP},${CITE_ITEMS})` },
+  ] },
   { name: 'source card styles', file: FILES.appCss, from: END, to: `${END}\n${STYLE}\n`, marker: '/*fane:source-cards*/' },
 ];
 
