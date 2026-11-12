@@ -69,9 +69,12 @@ function printArticleReport(r) {
 }
 
 // Models that passed scripts/article-trial.mjs, from cli/write/trial.json ({} when the file is missing).
-async function loadTrial() {
+export async function loadTrial(file = new URL('./write/trial.json', import.meta.url)) {
   const { readFile } = await import('node:fs/promises');
-  try { return JSON.parse(await readFile(new URL('./write/trial.json', import.meta.url), 'utf8')); } catch { return { models: {} }; }
+  try { return JSON.parse(await readFile(file, 'utf8')); } catch (err) {
+    if (err.code === 'ENOENT') return { models: {} };
+    throw new Error(`could not read the model trial (${err.message})`, { cause: err }); // a corrupt file is not "no model passed"
+  }
 }
 
 // Chains of the mode's price band, from the models that passed the trial for this language (and freellmapi's, withFreeLlm).
@@ -170,7 +173,9 @@ async function defaultCodeChains({ mode, client }) {
   const { readFile } = await import('node:fs/promises');
   const [{ buildCodeCatalogue, selectCodeChains, selectFreeCodeChains }, { codeChainsFor }] = await Promise.all([import('./code/catalogue.mjs'), import('./code/models.mjs')]);
   let trial = {};
-  try { trial = JSON.parse(await readFile(new URL('./code/trial.json', import.meta.url), 'utf8')); } catch { /* none yet */ }
+  try { trial = JSON.parse(await readFile(new URL('./code/trial.json', import.meta.url), 'utf8')); } catch (err) {
+    if (err.code !== 'ENOENT') throw new Error(`could not read the coding trial (${err.message})`, { cause: err }); // none yet is fine
+  }
   const chosen = await withFreeLlm(client, mode, {
     select: async () => selectCodeChains(buildCodeCatalogue(await client.models()), trial.models || {}, { mode }),
     free: (ready, last) => selectFreeCodeChains(trial.models || {}, ready, last),

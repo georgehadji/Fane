@@ -106,3 +106,18 @@ test('runTrial: a 401/402 stops the run only after the workers in flight have fi
     assert.deepEqual(saved(), ['lab/slow']);
   });
 });
+
+test('loadTrial: a missing file is an empty trial, a corrupt one is an error', async () => {
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { loadTrial } = await import('../runners.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'fane-trial-'));
+  try {
+    assert.deepEqual(await loadTrial(join(dir, 'none.json')), { models: {} });
+    await writeFile(join(dir, 'bad.json'), '{ not json');
+    await assert.rejects(loadTrial(join(dir, 'bad.json')), /could not read the model trial/);
+    await writeFile(join(dir, 'ok.json'), '{"updated":"2026-10-28","models":{"a/b":{}}}');
+    assert.deepEqual((await loadTrial(join(dir, 'ok.json'))).models, { 'a/b': {} });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
