@@ -140,6 +140,14 @@ test('chip tap: a keyboard click after a touch tap navigates', () => {
   assert.equal(click(m), false); // Enter on the focused chip: no pointerdown first
 });
 
+test('chip tap: a cancelled touch (pointercancel) does not swallow the next click', () => {
+  const m = mount(chipProps);
+  m.chip.onPointerDown({ pointerType: 'touch' }); // the browser takes the touch over to scroll
+  m.chip.onPointerCancel({ pointerType: 'touch' });
+  assert.equal(click(m), false); // Enter on the focused chip, or a later mouse click: it follows the link
+  assert.equal(m.open, false);
+});
+
 test('chip tap: a mouse pointerdown after a touch pointerdown that never clicked does not swallow the click', () => {
   const m = mount(chipProps);
   m.chip.onPointerDown({ pointerType: 'touch' }); // a scroll gesture: no click follows
