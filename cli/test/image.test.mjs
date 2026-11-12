@@ -282,6 +282,7 @@ test('pipeline: enhance, two labs in parallel, Image API for pure generators', a
   assert.ok(r.ok && r.complete);
   assert.equal(r.enhancedPrompt, 'an enhanced prompt');
   assert.equal(r.images.length, 2);
+  assert.deepEqual(r.images.map(i => i.slot), [0, 1]); // the hook matches a stored image to its result by slot
   assert.notEqual(r.images[0].model.split('/')[0], r.images[1].model.split('/')[0]);
   const flux = client.calls.find(c => c.body.model === 'black-forest-labs/flux-3-image-klein');
   assert.equal(flux.endpoint, 'images');
@@ -539,7 +540,7 @@ test('hook: finished images are stored on arrival, shown at once, and linked onc
   const generator = async (args) => {
     args.onProgress({ ready: 1, total: 2, slot: 1, model: 'b/two', name: 'B: Two', image: { dataUrl: PNG_URL, model: 'b/two', name: 'B: Two' } });
     args.onProgress({ ready: 2, total: 2, slot: 0, model: 'a/one', name: 'A: One', image: { dataUrl: PNG_URL, model: 'a/one', name: 'A: One' } });
-    return { images: [{ dataUrl: PNG_URL, model: 'a/one', name: 'A: One' }, { dataUrl: PNG_URL, model: 'b/two', name: 'B: Two' }], requested: 2, complete: true, errors: [] };
+    return { images: [{ dataUrl: PNG_URL, model: 'a/one', name: 'A: One', slot: 0 }, { dataUrl: PNG_URL, model: 'b/two', name: 'B: Two', slot: 1 }], requested: 2, complete: true, errors: [] };
   };
   await handleImageRequest('draw a fox', { emit: () => 'b', update: (id, md) => shown.push(md), log: () => {}, generator, store });
   assert.equal(stored.length, 2); // once per image, not again for the final answer
@@ -549,6 +550,21 @@ test('hook: finished images are stored on arrival, shown at once, and linked onc
   assert.ok(shown[1].indexOf('/api/uploads?fane-image=2') < shown[1].indexOf('/api/uploads?fane-image=1')); // slot order, not arrival order
   assert.ok(!shown.at(-1).includes('base64'));
   assert.equal(shown.at(-1).split('<img ').length - 1, 2);
+});
+
+test('hook: one model that fills two slots gives each result image its own stored link', async () => {
+  const shown = [];
+  const stored = [];
+  const store = { put: async (u) => { stored.push(u); return `/api/uploads?fane-image=${String(stored.length).repeat(64)}.png`; }, get: async () => '' };
+  const generator = async (args) => {
+    args.onProgress({ ready: 1, total: 2, slot: 0, model: 'a/one', name: 'A: One', image: { dataUrl: PNG_URL, model: 'a/one', name: 'A: One', slot: 0 } });
+    args.onProgress({ ready: 2, total: 2, slot: 1, model: 'a/one', name: 'A: One', image: { dataUrl: PNG_URL, model: 'a/one', name: 'A: One', slot: 1 } });
+    return { images: [0, 1].map(slot => ({ dataUrl: PNG_URL, model: 'a/one', name: 'A: One', slot })), requested: 2, complete: true, errors: [] };
+  };
+  await handleImageRequest('draw a fox', { emit: () => 'b', update: (id, md) => shown.push(md), log: () => {}, generator, store });
+  assert.equal(stored.length, 2);
+  const last = shown.at(-1);
+  assert.ok(last.includes('fane-image=' + '1'.repeat(64)) && last.includes('fane-image=' + '2'.repeat(64)), last);
 });
 
 test('isImageEdit reads edits, not questions; pickReferenceIndex finds "the second one"', () => {

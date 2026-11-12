@@ -67,7 +67,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const r = await call(role, prompt, { chain: chains[role] || chains.draft, maxTokens: tokensFor(role, size, lang, effort.headroom), prices, reasoning: effort.reasoning });
       calls += r.attempts.length;
       cost += r.cost;
-      const rec = phaseRecord(role, statusOf(r), { model: r.model || null, ms: now() - started, note: noteOf(r) });
+      const rec = phaseRecord(role, statusOf(r), { model: r.model || null, ms: now() - started, note: noteOf(r), cost: r.cost });
       phases.push(rec);
       emit({ ...rec });
       if (r.fatal) throw Object.assign(new Stop(r.errors[0] || 'the provider refused the request'), { status: r.status });
@@ -140,7 +140,9 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       const seen = new Set();
       for (const f of found) for (const s of f.status === 'fulfilled' ? f.value : []) if (s?.url && !seen.has(s.url)) { seen.add(s.url); sources.push({ title: s.title || s.url, url: s.url, content: s.content || '' }); }
       sources = sources.slice(0, MAX_SOURCES);
-      phases.push(phaseRecord('sources', sources.length ? PHASE.ok : PHASE.failed, { model: null, ms: 0, note: `${sources.length} sources` }));
+      const rec = phaseRecord('sources', sources.length ? PHASE.ok : PHASE.failed, { model: null, ms: 0, note: `${sources.length} sources` });
+      phases.push(rec);
+      emit({ ...rec }); // the record; the 'done' event below is for UIs that close their research display
       emit({ phase: 'sources', status: 'done', note: `${sources.length} sources` });
       if (!sources.length) {
         const why = found.find(f => f.status === 'rejected')?.reason?.message;
@@ -213,7 +215,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
           audit.retried = true;
           for (const role of ['revise', 'style', 'copy']) await edit(role, { critique: { audit_issues: audit.issues }, ledger, tellsReport: tellsReport() });
           // no score from the retry is said once, not again as "failed twice"
-          const second = await runAudit('the audit retry produced no quality score: published as is');
+          const second = await runAudit(`the final audit failed (${audit.failures.join('; ') || `score ${audit.score}`}): the retry produced no quality score, published as is`);
           if (second) audit = { ...second, retried: true };
           if (second && !audit.passes) degraded.push(`the final audit failed twice (${audit.failures.join('; ') || `score ${audit.score}`}): published as is`);
         }

@@ -5,7 +5,6 @@
 // models run on OpenRouter with the key of Vane's own provider settings, on the chains of the mode's price band
 // (selectCodeChains over trial.json), or on freellmapi (withFreeLlm). The answer is one block, updated as the work goes. Every answer carries
 // CODE_ANSWER_MARKER, so the patched browser code leaves its "[x]" alone.
-import { readFile } from 'node:fs/promises';
 import { openRouterClientFromVane, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, providerMissing, quiet } from '../image/present.mjs';
@@ -17,6 +16,7 @@ import { isCodeRequest } from '../core/intent-code.mjs';
 import { createTurn } from '../core/turn.mjs';
 import { codeChainsFor } from './models.mjs';
 import { createCodePipeline } from './pipeline.mjs';
+import { readTrial } from '../write/trial.mjs';
 import { codePrompts } from './prompts.mjs';
 import { codeTagged, renderCodeFailure, renderCodeProgress, renderCodeResult } from './present.mjs';
 import { createSyntaxChecker } from './syntax.mjs';
@@ -37,7 +37,7 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
   await turn.run(renderCodeProgress(state), async () => {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) return say(providerMissing('Code writing', { free: true }));
-    try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
+    trial ??= await readTrial(TRIAL_FILE); // no trial yet is {}, and the message below
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
     const chosen = await withFreeLlm(client, useMode, {
       select: async () => selectCodeChains(buildCodeCatalogue(await client.models()), trial, { mode: useMode }),
@@ -51,7 +51,7 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
       else if (e.status === 'running') state.running = e.phase;
       else {
         state.phases = [...state.phases, { phase: e.phase, status: e.status }];
-        if (e.phase === 'docs' || e.phase === 'cve') researchDone();
+        if ((e.phase === 'docs' || e.phase === 'cve') && e.status === 'done') researchDone();
       }
       if (e.phase !== 'done') return () => renderCodeProgress(state);
     });

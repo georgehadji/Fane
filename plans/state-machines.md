@@ -153,7 +153,7 @@ The first two have no test today. Keep all four behaviours. Record the 429 one a
 
 ## Phase 4: one hook turn (M4)
 
-**Status: done 2026-11-11, not committed.** `cli/core/turn.mjs` (`createTurn`: `run`, `progress`, `say`, `spend`, `settle`, `finish`) and all four hooks moved over (each shorter: write 107 to 94 lines, code 79 to 68, brainstorm 77 to 66, image 105 to 92). `generate` returns `fatal`, and the image hook reads `isStopped(result.fatal)`. `turn.test.mjs` holds the lifecycle table and one parametrized test over the four hooks (it replaced the three per-hook "ends early" tests). Known limits: the text pipelines' progress events carry no cost, so a throw in those hooks keeps the phases but no cost (the image hook feeds `spend()` from each landed image); a failing `emit` still propagates, as before.
+**Status: done 2026-11-11, not committed.** `cli/core/turn.mjs` (`createTurn`: `run`, `progress`, `say`, `spend`, `settle`, `finish`) and all four hooks moved over (each shorter: write 107 to 94 lines, code 79 to 68, brainstorm 77 to 66, image 105 to 92). `generate` returns `fatal`, and the image hook reads `isStopped(result.fatal)`. `turn.test.mjs` holds the lifecycle table and one parametrized test over the four hooks (it replaced the three per-hook "ends early" tests). Known limits (the cost one fixed 2026-11-12: step records carry `cost` and the turn spends it, the image hook feeds `spend()` from each landed image); a failing `emit` still propagates, as before.
 
 The four hooks repeat the same lifecycle, and the copies have already drifted (Phase 1 items 2 and 3).
 
@@ -184,6 +184,8 @@ The four hooks repeat the same lifecycle, and the copies have already drifted (P
 **Test:** `vane.test.mjs`, a table of flag combinations to a feature or a usage error. **Cost:** low. **Restart:** none (host CLI). **Subagent:** haiku.
 
 ## Phase 6: degraded finish for code and brainstorm (M1, behaviour change)
+
+**Status: done 2026-11-12, not committed.** Code: a refusal after the first file (also in the middle of `generate`, with the files that landed) returns ok with `stopped`, the stop note first in `degraded`, and the README says the run was stopped. Brainstorm: a refusal after the first idea returns the ideas so far (themes when the clustering finished). 499 and a refusal before any output still fail. CLI: `--code` and `--brainstorm` exit 1 when `stopped` is set; the files and ideas are still written or shown (the article CLI exits 0). M11: the state field is `fixState` (not `fix`, which already holds the reviewer's advice) with `fixNote`, `FIX` exported from `code/pipeline.mjs`; the notes show in the README, the web answer and the CLI report. Presenters needed no new wording: the stop note is a `degraded` entry. Tests in `code.test.mjs` and `brainstorm.test.mjs`, hook tests included.
 
 The article pipeline keeps its paid draft when a 402 or the spend cap stops it after the draft. Code (`code/pipeline.mjs:275`) and brainstorm (`brainstorm/pipeline.mjs:171-214`, `if (x.fatal) return fail(...)` four times) throw their paid files and ideas away. The comment at `write/pipeline.mjs:163` gives the reason ("it was paid for"), and the same reason holds for the other two.
 

@@ -8,7 +8,6 @@
 // Vane's mode picks the phases: Speed = outline and draft, Balanced adds checks and edits, Quality
 // adds the audit. The answer is one block, updated as the work goes: status lines, then the draft
 // as soon as it exists, then the finished article.
-import { readFile } from 'node:fs/promises';
 import { openRouterClientFromVane, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, previousAnswer, providerMissing, quiet, tagged } from '../image/present.mjs';
@@ -20,6 +19,7 @@ import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES, chainsFor } from './models.mjs';
 import { createTurn } from '../core/turn.mjs';
 import { createArticlePipeline } from './pipeline.mjs';
+import { readTrial } from './trial.mjs';
 import { prompts } from './prompts.mjs';
 import { renderArticleFailure, renderArticleProgress, renderArticleResult, renderPostResult } from './present.mjs';
 import { retryEmpty } from './research.mjs';
@@ -53,7 +53,7 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   await turn.run(renderArticleProgress(state), async () => {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) return say(providerMissing('Article writing', { free: true }));
-    try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
+    trial ??= await readTrial(TRIAL_FILE); // no trial yet is {}, and the message below
     const useMode = MODES.includes(mode) ? mode : DEFAULT_MODE;
     const chosen = await withFreeLlm(client, useMode, {
       select: async () => selectChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang }),
@@ -64,11 +64,12 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
     const retrieve = retryEmpty(research);
     if (earlier) {
       const edit = editor || createArticleEditor({ client, log });
-      const onEdit = (e) => {
+      const onEdit = turn.progress((e) => {
         if (e.phase === 'sources' && e.status === 'done') researchDone();
-        if (e.status === 'running') { state.running = e.phase; say(renderArticleProgress(state)); }
-      };
+        if (e.status === 'running') { state.running = e.phase; return () => renderArticleProgress(state); }
+      });
       const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, mode: useMode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: onEdit });
+      await turn.settle();
       say(r.ok ? renderArticleResult(r) : renderArticleFailure({ ...r, edit: true }, lang));
       return r;
     }
@@ -77,7 +78,7 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
       else if (e.status === 'running') state.running = e.phase;
       else {
         state.phases = [...state.phases.filter(p => p.phase !== e.phase), { phase: e.phase, status: e.status }];
-        if (e.phase === 'sources') researchDone();
+        if (e.phase === 'sources' && e.status === 'done') researchDone();
       }
       if (e.phase !== 'done') return () => renderArticleProgress(state);
     });

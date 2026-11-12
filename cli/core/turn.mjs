@@ -2,16 +2,19 @@
 // while the work goes, and the one summary line it leaves behind. Each hook decides whether a message is its own
 // (it returns false before creating a turn) and how its answer looks; the lifecycle is here so the four copies cannot
 // drift. Imports only core; the hook injects `tag` (its answer marker) and `prompts` (for the log fingerprint).
+import { PHASE } from './outcome.mjs';
 import { beginRun } from './runlog.mjs';
 
-// Phase events that are not records of a finished phase: a phase starting, a draft to show, the run's own end.
-const NOT_A_RECORD = new Set(['running', 'preview']);
+// An event is a record of a phase only when its status is one a phase record can have and it is not a start or a draft
+// to show. A 'done' event (a search or the run finished) is not one: the pipeline sends the record just before it.
+const IS_RECORD = new Set(Object.values(PHASE).filter(s => s !== PHASE.running && s !== PHASE.preview));
 
 export function createTurn({ feature, prompts, emit, update, log, tag = (m) => m }) {
   const track = beginRun(feature, log, prompts);
   log = track.log;
   let id, queue = Promise.resolve(), finished = false, cost;
   const phases = [];
+  const paid = new Map(); // phase+file -> the cost its latest record carried, so a record sent twice counts once
 
   // Once the answer exists the hook owns the turn: a failing update must never throw into Vane's chat route.
   const say = (markdown) => { try { update(id, tag(markdown)); } catch (err) { log(`could not update the answer: ${err.message}`); } };
@@ -26,10 +29,13 @@ export function createTurn({ feature, prompts, emit, update, log, tag = (m) => m
   // handle(event) mutates the hook's state at once and returns what to show: nothing, or a function that renders
   // the answer (it may be async). The renders run one at a time, in event order. Phases and cost are noted for a throw.
   const progress = (handle) => (e) => {
-    if (e?.phase && e.phase !== 'done' && !NOT_A_RECORD.has(e.status)) {
+    const key = e?.phase && `${e.phase}:${e.file ?? ''}`;
+    if (key && e.status === PHASE.running) paid.delete(key); // the next record is a new call
+    if (key && IS_RECORD.has(e.status)) {
       const at = phases.findIndex(p => p.phase === e.phase && p.file === e.file);
       const rec = { phase: e.phase, ...(e.file && { file: e.file }), status: e.status, ...(e.ms != null && { ms: e.ms }) };
       if (at < 0) phases.push(rec); else phases[at] = rec;
+      if (e.cost > 0) { spend(e.cost - (paid.get(key) ?? 0)); paid.set(key, e.cost); }
     }
     const render = handle(e);
     // A render that throws is logged and skipped: left rejected, it would end every later update and go unhandled.

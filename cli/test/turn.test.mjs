@@ -43,7 +43,8 @@ test('turn: a throw is shown through failed(), and the summary keeps the phases 
     onProgress({ phase: 'outline', status: 'ok', ms: 12 });
     onProgress({ phase: 'draft', status: 'preview', text: 'x' }); // a draft to show, not a record
     onProgress({ phase: 'draft', status: 'running' });
-    onProgress({ phase: 'sources', status: 'done' });
+    onProgress({ phase: 'sources', status: 'ok', ms: 0 }); // the record
+    onProgress({ phase: 'sources', status: 'done' }); // the event after it: not a record
     onProgress({ phase: 'done', status: 'done' }); // the run's own end
     r.turn.spend(0.004);
     r.turn.spend(0.006);
@@ -53,7 +54,28 @@ test('turn: a throw is shown through failed(), and the summary keeps the phases 
   assert.equal(r.blocks.get('b1'), 'it failed<!--t-->');
   const [s] = r.summaries();
   assert.deepEqual([s.ok, s.outcome, s.cost], [false, 'failed', 0.01]);
-  assert.deepEqual(s.phases, ['outline=ok/12ms', 'sources=done/0ms']);
+  assert.deepEqual(s.phases, ['outline=ok/12ms', 'sources=ok/0ms']);
+});
+
+test('turn: a record that carries a cost is spent once, a second call of the same phase adds its own, a throw keeps the sum', async () => {
+  const r = rig();
+  const onProgress = r.turn.progress(() => undefined);
+  await r.turn.run('first', async () => {
+    onProgress({ phase: 'draft', status: 'running' });
+    onProgress({ phase: 'draft', status: 'ok', cost: 0.25 });
+    onProgress({ phase: 'draft', status: 'rejected', cost: 0.25 }); // the same record again, as it ended
+    onProgress({ phase: 'rewrite', status: 'running' });
+    onProgress({ phase: 'rewrite', status: 'ok', cost: 0.5 });
+    onProgress({ phase: 'rewrite', status: 'running' }); // a second call of the same phase
+    onProgress({ phase: 'rewrite', status: 'ok', cost: 0.125 });
+    onProgress({ phase: 'generate', file: 'a.js', status: 'running' });
+    onProgress({ phase: 'generate', file: 'b.js', status: 'running' });
+    onProgress({ phase: 'generate', file: 'a.js', status: 'ok', cost: 1 });
+    onProgress({ phase: 'generate', file: 'b.js', status: 'ok', cost: 2 });
+    onProgress({ phase: 'sources', status: 'ok', ms: 0 }); // no cost
+    throw new Error('boom');
+  });
+  assert.equal(r.summaries()[0].cost, 3.875);
 });
 
 test('turn: run() emits the tagged first answer once, and a second finish is ignored', async () => {
@@ -166,14 +188,14 @@ for (const { feature, handle, query, noTrial, pipeline } of HOOKS) {
     const lines = [], io = chat();
     const trial = { 'lab/writer': { en: { ok: true }, json: { ok: true }, code: { ok: true } } };
     const boom = pipeline
-      ? { client: { models: async () => CATALOGUE }, trial, pipeline: async ({ onProgress }) => { onProgress({ phase: 'prior', status: 'ok', ms: 7 }); throw new Error('boom'); } }
+      ? { client: { models: async () => CATALOGUE }, trial, pipeline: async ({ onProgress }) => { onProgress({ phase: 'prior', status: 'ok', ms: 7, cost: 0.25 }); onProgress({ phase: 'prior', status: 'done' }); onProgress({ phase: 'generate', status: 'running' }); onProgress({ phase: 'generate', status: 'ok', ms: 9, cost: 0.5 }); throw new Error('boom'); } }
       : { generator: async ({ onProgress }) => { onProgress({ ready: 1, total: 2, slot: 0, model: 'a/one', name: 'One', image: { dataUrl: 'data:image/png;base64,AAAA', model: 'a/one', name: 'One', pricePerImage: 0.01 } }); throw new Error('boom'); } };
     assert.equal(await handle(query, { ...io, ...boom, log: (m) => lines.push(m) }), true);
     assert.match(io.blocks.get('b1'), /boom/);
     const [s, ...more] = summariesOf(feature, lines);
     assert.equal(more.length, 0);
     assert.deepEqual([s.ok, s.outcome], [false, 'failed']);
-    if (pipeline) assert.deepEqual(s.phases, ['prior=ok/7ms']);
+    if (pipeline) assert.deepEqual([s.phases, s.cost], [['prior=ok/7ms', 'generate=ok/9ms'], 0.75]);
     else assert.equal(s.cost, 0.01);
   });
 }

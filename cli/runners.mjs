@@ -227,7 +227,7 @@ function printCodeReport(r, dir) {
   for (const p of r.phases) say(`  ${p.status.padEnd(9)}${p.phase.padEnd(9)}${p.file ? `${p.file}  ` : ''}${p.model || ''}${p.note && p.status !== 'ok' ? `  (${p.note})` : ''}`);
   for (const f of [...r.files, ...r.tests]) say(`  ${(f.syntax?.status || 'unchecked').padEnd(9)}syntax   ${f.path}${f.syntax?.detail ? `  (${f.syntax.detail})` : ''}`);
   if (r.review) say(`  review: ${r.review.verdict}, ${r.fixes.reduce((n, f) => n + f.issues.length, 0)} issues fixed, ${r.open.length} open${r.review.posture ? ` · ${r.review.posture}` : ''}`);
-  for (const i of r.open) say(`  open    ${i.file || i.named || '?'} (${i.severity}): ${i.issue}`);
+  for (const i of r.open) say(`  open    ${i.file || i.named || '?'} (${i.severity}): ${i.issue}${i.fixNote ? ` — ${i.fixNote}` : ''}`);
   for (const c of r.checks) if (c.level === 'warn') say(`  warn    ${c.name}: ${c.detail}`);
   for (const d of r.degraded) say(`  degraded: ${d}`);
 }
@@ -254,6 +254,7 @@ export async function runCode(opts) {
   });
   if (!r.ok) throw new Error(r.error);
   const written = await writeCodeFiles(dir, r);
+  if (r.stopped) process.exitCode = 1; // the files are written, but the provider stopped the run before it finished
   if (opts.json) return console.log(JSON.stringify({ ...r, dir, written }, null, 2));
   console.log(written.map(p => join(dir, p)).join('\n'));
   printCodeReport(r, dir);
@@ -289,6 +290,7 @@ export async function runBrainstorm(opts) {
   });
   if (!r.ok) throw new Error(r.error);
   const markdown = renderBrainstorm(r);
+  if (r.stopped) process.exitCode = 1; // the ideas are shown, but the provider stopped the run before it finished
   if (opts.out) {
     const { writeFile } = await import('node:fs/promises');
     await writeFile(opts.out, `${markdown}\n`);

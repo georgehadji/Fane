@@ -5,9 +5,11 @@
 // from Vane's own research (`retrieve`, injected). Model calls go through write/llm.mjs, which rejects cut-off,
 // empty and "thinking" answers and walks the role's fallback chain. `checkSyntax` (syntax.mjs) parses files without
 // running them; nothing generated is ever executed. Failures are returned as values; a phase that fails after the
-// files exist is skipped and listed in `degraded`, so a weakened run is never presented as a clean one.
+// files exist is skipped and listed in `degraded`, so a weakened run is never presented as a clean one. A provider
+// refusal (402, the spend cap) after the first file ends the calls, not the run: the files so far come back with
+// `stopped: { status, error }`; the user's own stop (499) returns nothing.
 import { createRoleCaller, noteOf, statusOf } from '../write/llm.mjs';
-import { PHASE, phaseRecord } from '../core/outcome.mjs';
+import { PHASE, isStopped, phaseRecord } from '../core/outcome.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { MAX_FILE_CHARS, extractCode, fileChecks, parseFiles, safePath, sameFile } from './files.mjs';
@@ -17,6 +19,10 @@ import { codePrompts } from './prompts.mjs';
 
 export const MAX_DOCS = 8;
 export const MAX_ISSUES = 12;
+// What became of a review finding (`fixState`, with the reason in `fixNote`; `fix` is already the reviewer's advice):
+// pending until the fix step has judged it, then fixed, refused (the new file was not used), unparsed (a file that did
+// not parse still does not), or notAttempted (medium, names no file, or the run stopped first). `open` = not fixed.
+export const FIX = Object.freeze({ pending: 'pending', fixed: 'fixed', refused: 'refused', unparsed: 'unparsed', notAttempted: 'notAttempted' });
 
 const strings = (a) => (Array.isArray(a) ? a.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim()) : []);
 const text = (s) => (typeof s === 'string' ? s.trim() : '');
@@ -61,7 +67,7 @@ export function normalizeReview(data, files) {
   const list = (key, severity) => (Array.isArray(data?.[key]) ? data[key] : [])
     .filter(i => text(i?.issue))
     .slice(0, MAX_ISSUES)
-    .map(i => { const p = safePath(i.file); return { severity, file: p && known.has(p) ? p : null, named: text(i.file), issue: text(i.issue), fix: text(i.fix) }; });
+    .map(i => { const p = safePath(i.file); return { severity, file: p && known.has(p) ? p : null, named: text(i.file), issue: text(i.issue), fix: text(i.fix), fixState: FIX.pending }; });
   const critical = list('critical', 'critical'), high = list('high', 'high'), medium = list('medium', 'medium');
   const verdict = /approved/i.test(text(data?.verdict)) && !critical.length && !high.length ? 'approved' : 'needs_fixes';
   return { critical, high, medium, verdict, posture: text(data?.security_posture) };
@@ -84,12 +90,12 @@ export async function mapLimited(items, n, fn) {
 }
 
 const README_WORDS = {
-  en: { files: 'Files', tests: 'Tests', setup: 'Setup', run: 'Run', review: 'Review', fixed: 'Fixed after the review', open: 'Not fixed', approved: 'The review found no critical or high issue.', unreviewed: 'Not reviewed (Speed mode).', from: 'Written by Fane (`vane --code`, %s) from this request:', test: 'test' },
-  el: { files: 'Αρχεία', tests: 'Έλεγχοι', setup: 'Εγκατάσταση', run: 'Χρήση', review: 'Αξιολόγηση', fixed: 'Διορθώθηκαν μετά την αξιολόγηση', open: 'Δεν διορθώθηκαν', approved: 'Η αξιολόγηση δεν βρήκε σοβαρό πρόβλημα.', unreviewed: 'Χωρίς αξιολόγηση (λειτουργία Speed).', from: 'Γράφτηκε από το Fane (`vane --code`, %s) με αυτό το αίτημα:', test: 'έλεγχος' },
+  en: { files: 'Files', tests: 'Tests', setup: 'Setup', run: 'Run', review: 'Review', fixed: 'Fixed after the review', open: 'Not fixed', approved: 'The review found no critical or high issue.', unreviewed: 'Not reviewed (Speed mode).', stopped: 'The run was stopped before it finished: the review and the fixes may be incomplete.', from: 'Written by Fane (`vane --code`, %s) from this request:', test: 'test' },
+  el: { files: 'Αρχεία', tests: 'Έλεγχοι', setup: 'Εγκατάσταση', run: 'Χρήση', review: 'Αξιολόγηση', fixed: 'Διορθώθηκαν μετά την αξιολόγηση', open: 'Δεν διορθώθηκαν', approved: 'Η αξιολόγηση δεν βρήκε σοβαρό πρόβλημα.', unreviewed: 'Χωρίς αξιολόγηση (λειτουργία Speed).', stopped: 'Η εκτέλεση διακόπηκε πριν ολοκληρωθεί: η αξιολόγηση και οι διορθώσεις μπορεί να είναι ελλιπείς.', from: 'Γράφτηκε από το Fane (`vane --code`, %s) με αυτό το αίτημα:', test: 'έλεγχος' },
 };
 
 // README.md, written by code from the spec and the review: no extra model call, and nothing in it is invented.
-export function buildReadme({ request, spec, files, tests, review, fixes, open, mode, lang }) {
+export function buildReadme({ request, spec, files, tests, review, fixes, open, mode, lang, stopped = false }) {
   const W = README_WORDS[lang] || README_WORDS.en;
   const title = request.length > 90 ? `${request.slice(0, 87).trimEnd()}…` : request;
   const purpose = new Map(spec.files.map(f => [f.path, f.purpose]));
@@ -100,12 +106,13 @@ export function buildReadme({ request, spec, files, tests, review, fixes, open, 
   if (spec.run) out.push('', `## ${W.run}`, '', spec.run);
   if (tests.length && spec.test_command) out.push('', `## ${W.tests}`, '', '```', spec.test_command, '```');
   out.push('', `## ${W.review}`, '');
-  if (!review) out.push(W.unreviewed);
+  if (!review) out.push(stopped ? W.stopped : W.unreviewed);
   else {
     if (review.posture) out.push(review.posture, '');
     if (fixes.length) out.push(`${W.fixed}:`, '', ...fixes.flatMap(f => f.issues.map(i => `- \`${f.path}\` (${i.severity}): ${i.issue}`)), '');
-    if (open.length) out.push(`${W.open}:`, '', ...open.map(i => `- ${i.file ? `\`${i.file}\`` : i.named || '?'} (${i.severity}): ${i.issue}`), '');
+    if (open.length) out.push(`${W.open}:`, '', ...open.map(i => `- ${i.file ? `\`${i.file}\`` : i.named || '?'} (${i.severity}): ${i.issue}${i.fixNote ? ` — ${i.fixNote}` : ''}`), '');
     if (!fixes.length && !open.length) out.push(W.approved);
+    if (stopped) out.push('', W.stopped);
   }
   out.push('', '---', '', W.from.replace('%s', mode), '', ...request.split('\n').map(l => `> ${l}`));
   return `${out.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`;
@@ -146,7 +153,7 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
       });
       calls += r.attempts.length;
       cost += r.cost;
-      const rec = phaseRecord(role, statusOf(r), { file: ctx.file?.path, model: r.model || null, ms: now() - started, note: noteOf(r) });
+      const rec = phaseRecord(role, statusOf(r), { file: ctx.file?.path, model: r.model || null, ms: now() - started, note: noteOf(r), cost: r.cost });
       phases.push(rec);
       emit({ ...rec });
       if (r.fatal) throw Object.assign(new Stop(r.errors[0] || 'the provider refused the request'), { status: r.status });
@@ -160,7 +167,9 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
       try { found = await retrieve(query); } catch (err) { degraded.push(`the ${phase} search failed (${err.message})`); }
       const seen = new Set(), pages = [];
       for (const s of found || []) if (s?.url && !seen.has(s.url)) { seen.add(s.url); pages.push({ title: s.title || s.url, url: s.url, content: s.content || '' }); }
-      phases.push(phaseRecord(phase, pages.length ? PHASE.ok : PHASE.failed, { model: null, ms: 0, note: `${pages.length} pages` }));
+      const rec = phaseRecord(phase, pages.length ? PHASE.ok : PHASE.failed, { model: null, ms: 0, note: `${pages.length} pages` });
+      phases.push(rec);
+      emit({ ...rec });
       emit({ phase, status: 'done', note: `${pages.length} pages` });
       return pages.slice(0, MAX_DOCS);
     }
@@ -190,25 +199,31 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
       emit({ phase: 'spec', status: PHASE.preview, spec });
 
       // 3. One call per file, a few at a time; a file that fails is reported, never stored as an error text.
-      const written = await mapLimited(spec.files, CONCURRENCY, async (file) => {
+      // From the first written file on, code exists. A refusal from the provider (bad key, no credits, the spend cap)
+      // ends the model calls but not the run: the files so far are finished and shown with a note, because they were
+      // paid for. The user's own stop (499), or a refusal before any file exists, still ends the run with nothing.
+      const produced = [];
+      let files = [], review = null, tests = [], cve = [], stoppedBy = null;
+      const fixes = [], fixedFiles = new Map();
+      const inSpecOrder = () => spec.files.map(f => produced.find(p => p.path === f.path)).filter(Boolean);
+      try {
+      await mapLimited(spec.files, CONCURRENCY, async (file) => {
         const r = await step('generate', { spec, file, docs });
-        if (!r.ok) { degraded.push(`${file.path} could not be written (${r.errors.at(-1) || 'no answer'})`); return null; }
+        if (!r.ok) { degraded.push(`${file.path} could not be written (${r.errors.at(-1) || 'no answer'})`); return; }
         const content = extractCode(r.text);
-        if (!content.trim()) { degraded.push(`${file.path}: the answer held no code`); return null; }
-        if (content.length > MAX_FILE_CHARS) { degraded.push(`${file.path}: ${content.length} characters, more than ${MAX_FILE_CHARS}: dropped`); return null; }
-        return { path: file.path, content, role: 'source' };
+        if (!content.trim()) { degraded.push(`${file.path}: the answer held no code`); return; }
+        if (content.length > MAX_FILE_CHARS) { degraded.push(`${file.path}: ${content.length} characters, more than ${MAX_FILE_CHARS}: dropped`); return; }
+        produced.push({ path: file.path, content, role: 'source' });
       });
-      let files = written.filter(Boolean);
+      files = inSpecOrder();
       if (!files.length) return fail('no file could be written');
       await check(files);
       emit({ phase: 'generate', status: PHASE.preview, files });
 
       // 4. Known vulnerabilities of the stack, for the review (Quality).
-      let cve = [];
       if (plan.includes('cve') && retrieve) cve = await search('cve', `${spec.language} ${spec.framework} security vulnerabilities CVE`.replace(/\s+/g, ' '));
 
       // 5. Adversarial review of the whole files.
-      let review = null;
       if (plan.includes('review')) {
         const broken = files.filter(f => f.syntax.status === 'error').map(f => ({ path: f.path, detail: f.syntax.detail }));
         const r = await step('review', { spec, files, syntax: broken, cve });
@@ -218,7 +233,6 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
 
       // 6. Fixes: one call per file with a critical or high finding, or that does not parse. A fix that breaks
       // the parse of a file that parsed, or loses most of it, is refused and the earlier file kept.
-      const fixes = [], unfixed = new Set();
       if (plan.includes('fix')) {
         const todo = files.map(file => ({
           file,
@@ -227,7 +241,8 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
             ...(file.syntax.status === 'error' ? [{ severity: 'syntax', file: file.path, issue: `does not parse: ${file.syntax.detail}`, fix: '' }] : []),
           ],
         })).filter(t => t.issues.length);
-        const results = await mapLimited(todo, CONCURRENCY, async ({ file, issues }) => {
+        // a fix that landed before a stop is kept (fixedFiles), whatever the other workers did
+        try { await mapLimited(todo, CONCURRENCY, async ({ file, issues }) => {
           const r = await step('fix', { spec, file, issues });
           let why = r.ok ? null : `failed: ${r.errors.at(-1) || 'no answer'}`;
           const next = r.ok ? { ...file, content: extractCode(r.text) } : null;
@@ -239,23 +254,20 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
           if (why) {
             if (r.ok) { r.rec.status = PHASE.rejected; r.rec.note = why; emit({ ...r.rec }); } // the first record said 'ok'
             degraded.push(`the fix of ${file.path} was not used (${why}): the earlier file was kept`);
-            for (const i of issues) unfixed.add(i);
-            return null;
+            for (const i of issues) Object.assign(i, { fixState: FIX.refused, fixNote: why });
+            return;
           }
           // a file that did not parse and still does not: the fix is kept for its other changes, the parse is not fixed
           const still = next.syntax.status === 'error' ? issues.filter(i => i.severity === 'syntax') : [];
-          for (const i of still) unfixed.add(i);
+          for (const i of still) Object.assign(i, { fixState: FIX.unparsed, fixNote: 'the file still does not parse' });
           const done = issues.filter(i => !still.includes(i));
+          for (const i of done) i.fixState = FIX.fixed;
           if (done.length) fixes.push({ path: file.path, issues: done });
-          return next;
-        });
-        const fixed = new Map(results.filter(Boolean).map(f => [f.path, f]));
-        files = files.map(f => fixed.get(f.path) || f);
+          fixedFiles.set(file.path, next);
+        }); } finally { files = files.map(f => fixedFiles.get(f.path) || f); }
       }
-      const open = review ? [...review.critical, ...review.high].filter(i => !i.file || !plan.includes('fix') || unfixed.has(i)).concat(review.medium) : [];
 
       // 7. Tests of the final files, with a regression test per finding.
-      let tests = [];
       if (plan.includes('tests')) {
         const r = await step('tests', { spec, files, issues: review ? [...review.critical, ...review.high] : [] });
         if (!r.ok) degraded.push(`the tests could not be written (${r.errors.at(-1) || 'no answer'})`);
@@ -266,12 +278,29 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
         }
       }
 
-      // 8. Finish: deterministic checks and a README written by code.
+      } catch (err) {
+        if (!(err instanceof Stop) || isStopped(err) || !produced.length) throw err;
+        stoppedBy = { status: err.status ?? null, error: err.message };
+        degraded.unshift(`stopped (${err.message}): the files written so far are kept, the rest of the work was not done`);
+        if (!files.length) { files = inSpecOrder(); await check(files); } // stopped while the files were being written
+      }
+
+      // 8. Finish: findings the fix step never judged say why, then deterministic checks and a README written by code.
+      const findings = review ? [...review.critical, ...review.high, ...review.medium] : [];
+      for (const i of findings) {
+        if (i.fixState !== FIX.pending) continue;
+        i.fixState = FIX.notAttempted;
+        i.fixNote = i.severity === 'medium' ? 'medium findings are not sent to the fix step'
+          : !i.file ? 'it names no file of the project'
+            : !plan.includes('fix') ? 'this mode does not fix'
+              : 'the run was stopped before this fix';
+      }
+      const open = findings.filter(i => i.fixState !== FIX.fixed);
       const checks = fileChecks([...files, ...tests]);
       for (const c of checks) if (c.level === 'fail') degraded.push(`check "${c.name}" failed: ${c.detail}`);
-      const readme = buildReadme({ request, spec, files, tests, review, fixes, open, mode, lang });
+      const readme = buildReadme({ request, spec, files, tests, review, fixes, open, mode, lang, stopped: !!stoppedBy });
       emit({ phase: 'done', status: 'done' });
-      return { ok: true, request, language: lang, mode, reasoning: effort.reasoning, spec, files, tests, readme, review, fixes, open, docs, cve, checks, phases, degraded, calls, cost, ms: now() - t0 };
+      return { ok: true, request, language: lang, mode, reasoning: effort.reasoning, spec, files, tests, readme, review, fixes, open, docs, cve, checks, phases, degraded, calls, cost, stopped: stoppedBy, ms: now() - t0 };
     } catch (err) {
       if (err instanceof Stop) return { ...fail(err.message), fatal: true, status: err.status };
       throw err;

@@ -8,7 +8,7 @@ import { applyClusters, createBrainstormPipeline, normalizeIdeas, pickIdeas, sel
 import { renderBrainstorm, renderBrainstormResult } from '../brainstorm/present.mjs';
 import { handleBrainstormRequest } from '../brainstorm/vane-hook.mjs';
 import { isCodeRequest } from '../core/intent-code.mjs';
-import { PHASE } from '../core/outcome.mjs';
+import { PHASE, outcomeOf } from '../core/outcome.mjs';
 import { buildTextCatalogue } from '../write/catalogue.mjs';
 import { isArticleRequest, postPlatform } from '../core/intent-article.mjs';
 import { ANSWER_MARKER } from '../image/present.mjs';
@@ -190,6 +190,69 @@ test('pipeline: a round without rare ideas is noted; no idea at all ends the run
   assert.equal(broke.status, 402);
 });
 
+// ---- a provider refusal once ideas exist: the ideas are kept, the stop is named (like the article pipeline) ----
+
+const noCredits = async () => new (await import('../image/openrouter.mjs')).OpenRouterError('402 insufficient credits', 402);
+const userStop = async () => new (await import('../image/openrouter.mjs')).OpenRouterError('stopped: the browser was closed', 499);
+const defaultRound = (b) => JSON.stringify({ ideas: [1, 2, 3, 4, 5].map(n => ({ title: `Idea ${roundOf(b)}.${n}`, description: `d${n}`, probability: n <= 2 ? 0.05 : 0.4, tier: 'lateral' })) });
+const again = async (make) => { const e = await make(); return () => e; }; // an answer is a function of the request
+const rolesOf = (client) => client.calls.map(c => c.role);
+
+test('pipeline: a 402 in round 2 keeps round 1 as one unranked list, with the stop named, and asks nothing more', async () => {
+  const err = await noCredits();
+  const client = fakeClient({ generate: (b) => (roundOf(b) === 2 ? err : defaultRound(b)) });
+  const r = await createBrainstormPipeline({ client })({ request: 'names for a bakery', mode: 'speed' });
+  assert.equal(r.ok, true);
+  assert.deepEqual([r.stopped.status, /insufficient credits/.test(r.stopped.error)], [402, true]);
+  assert.match(r.degraded[0], /^stopped \(.*insufficient credits.*\): the ideas so far are kept/);
+  assert.deepEqual(rolesOf(client), ['generate', 'generate']);
+  assert.equal(r.ideas.length, 5);
+  assert.deepEqual(r.themes, [{ theme: '', ids: r.ideas.map(i => i.id) }]);
+  assert.equal(r.synthesis, null);
+  assert.equal(outcomeOf(r), 'degraded');
+});
+
+test('pipeline: a 402 in the scoring, the development or the synthesis keeps what finished before it', async () => {
+  const cluster = await createBrainstormPipeline({ client: fakeClient({ cluster: await again(noCredits) }) })({ request: 'x', mode: 'speed' });
+  assert.deepEqual([cluster.ok, cluster.stopped.status, cluster.ideas.length, cluster.ideas.some(i => i.score != null), cluster.synthesis], [true, 402, 10, false, null]);
+
+  const developClient = fakeClient({ develop: await again(noCredits) });
+  const develop = await createBrainstormPipeline({ client: developClient })({ request: 'x', mode: 'balanced' });
+  assert.deepEqual([develop.ok, develop.stopped.status, develop.synthesis, develop.themes.length], [true, 402, null, 2]); // scored and themed
+  assert.ok(develop.ideas.some(i => i.score != null) && !develop.ideas.some(i => i.development));
+  assert.equal(rolesOf(developClient).at(-1), 'develop');
+
+  const synthesis = await createBrainstormPipeline({ client: fakeClient({ synthesis: await again(noCredits) }) })({ request: 'x', mode: 'balanced' });
+  assert.deepEqual([synthesis.ok, synthesis.stopped.status, synthesis.synthesis], [true, 402, null]);
+  assert.ok(synthesis.ideas.some(i => i.development)); // the development was paid for and is kept
+  assert.equal(outcomeOf(synthesis), 'degraded');
+});
+
+test('pipeline: a stop by the user (499) after ideas exist still ends the run without them; a clean run has no stop', async () => {
+  const err = await userStop();
+  const r = await createBrainstormPipeline({ client: fakeClient({ generate: (b) => (roundOf(b) === 2 ? err : defaultRound(b)) }) })({ request: 'x', mode: 'speed' });
+  assert.deepEqual([r.ok, r.fatal, r.status], [false, true, 499]);
+  assert.equal(outcomeOf(r), 'stopped');
+  const late = await createBrainstormPipeline({ client: fakeClient({ synthesis: () => err }) })({ request: 'x', mode: 'speed' });
+  assert.deepEqual([late.ok, late.fatal, late.status], [false, true, 499]);
+  assert.equal((await createBrainstormPipeline({ client: fakeClient() })({ request: 'x', mode: 'speed' })).stopped, null);
+});
+
+test('hook: a 402 after the ideas exist shows them with the note, and writes one summary line saying degraded', async () => {
+  const err = await noCredits();
+  const blocks = new Map(); let n = 0; const lines = [];
+  const catalogue = [{ id: 'lab/writer', architecture: { output_modalities: ['text'] }, pricing: { prompt: '0.000001', completion: '0.000002' }, context_length: 128000, supported_parameters: ['response_format'] }];
+  const client = { ...fakeClient({ cluster: () => err }), models: async () => catalogue };
+  const trial = { 'lab/writer': { en: { ok: true }, json: { ok: true } } };
+  assert.equal(await handleBrainstormRequest('brainstorm names for a bakery', { emit: (x) => { blocks.set(`b${++n}`, x); return `b${n}`; }, update: (id, x) => blocks.set(id, x), client, trial, research: async () => [], mode: 'speed', log: (m) => lines.push(m) }), true);
+  const final = blocks.get('b1');
+  assert.match(final, /Idea 1\.1/);
+  assert.match(final, /stopped \(.*insufficient credits.*\): the ideas so far are kept/);
+  assert.ok(final.endsWith(ANSWER_MARKER));
+  const summaries = lines.filter(l => /"feature":"brainstorm"/.test(l)).map(l => JSON.parse(l.slice(l.indexOf('{'))));
+  assert.deepEqual(summaries.map(s => [s.ok, s.outcome]), [[true, 'degraded']]);
+});
+
 test('Greek text gets the article pipeline\'s spelling repairs (Latin look-alikes, the dropped final ν)', async () => {
   const client = fakeClient({
     generate: (b) => JSON.stringify({ ideas: [{ title: `Ιδέα ${roundOf(b)}`, description: 'Βοηθά στη οργάνωση', probability: 0.05 }, { title: `Άλλη ${roundOf(b)}`, description: 'x', probability: 0.05 }] }),
@@ -283,4 +346,23 @@ test('hook: an unknown mode shows the same first progress line as the default mo
   };
   assert.equal(await first('turbo'), await first('balanced'));
   assert.notEqual(await first('turbo'), await first('speed'));
+});
+
+// The records a pipeline sends carry its cost: replayed through a turn that then throws, the summary keeps all of it,
+// and the sources record (not the 'done' event) is what the summary holds.
+test('brainstorm pipeline: replayed through a turn that throws, the summary has the whole cost and prior=ok', async () => {
+  const { createTurn } = await import('../core/turn.mjs');
+  const lines = [];
+  const turn = createTurn({ feature: 'replay', prompts: {}, emit: () => 'b', update: () => {}, log: (m) => lines.push(m) });
+  const onProgress = turn.progress(() => {});
+  let r;
+  await turn.run('first', async () => {
+    r = await createBrainstormPipeline({ client: fakeClient(), retrieve: async () => [{ title: 'T', url: 'https://example.org/t', content: '' }] })({ request: 'ways to cut plastic waste', mode: 'balanced', onProgress });
+    throw new Error('after the run');
+  });
+  const s = JSON.parse(lines.find(l => /"feature":"replay"/.test(l)).replace(/^[^{]*/, ''));
+  assert.equal(r.ok, true, r.error);
+  assert.ok(r.cost > 0 && Math.abs(s.cost - r.cost) < 1e-9, `${s.cost} vs ${r.cost}`);
+  assert.ok(s.phases.some(p => p.startsWith('prior=ok/')), s.phases.join(' '));
+  assert.ok(!s.phases.some(p => p.includes('=done')), s.phases.join(' '));
 });

@@ -821,7 +821,7 @@ test('progress events report each phase and a throwing listener is ignored', asy
   const pipeline = createArticlePipeline({ client: fake(), retrieve: async () => SOURCES });
   const r = await pipeline({ topic: 'tides', words: 300, mode: 'speed', onProgress: (e) => { events.push(`${e.phase}:${e.status}`); throw new Error('listener'); } });
   assert.equal(r.ok, true);
-  assert.deepEqual(events, ['sources:running', 'sources:done', 'outline:running', 'outline:ok', 'draft:running', 'draft:ok', 'draft:preview', 'done:done']);
+  assert.deepEqual(events, ['sources:running', 'sources:ok', 'sources:done', 'outline:running', 'outline:ok', 'draft:running', 'draft:ok', 'draft:preview', 'done:done']);
 });
 
 test('an unknown mode is a programming error', async () => {
@@ -854,6 +854,27 @@ test('Quality: a retry audit that gives no score is said once, not again as "fai
   const c = fake({ audit: (n) => n === 1 ? JSON.stringify(BAD_AUDIT) : 'not json' });
   const r = await run(c, { mode: 'quality' });
   assert.equal(r.ok, true);
-  assert.ok(r.degraded.some(d => /audit retry produced no quality score/.test(d)));
-  assert.ok(!r.degraded.some(d => /failed twice|the final audit failed: no quality score/.test(d)), r.degraded.join(' | '));
+  // one note, and it keeps why the first audit failed
+  const notes = r.degraded.filter(d => /audit/.test(d));
+  assert.equal(notes.length, 1, r.degraded.join(' | '));
+  assert.match(notes[0], /^the final audit failed \(.+\): the retry produced no quality score, published as is$/);
+});
+
+// The records a pipeline sends carry its cost: replayed through a turn that then throws, the summary keeps all of it,
+// and the sources record (not the 'done' event) is what the summary holds.
+test('article pipeline: replayed through a turn that throws, the summary has the whole cost and sources=ok', async () => {
+  const { createTurn } = await import('../core/turn.mjs');
+  const lines = [];
+  const turn = createTurn({ feature: 'replay', prompts: {}, emit: () => 'b', update: () => {}, log: (m) => lines.push(m) });
+  const onProgress = turn.progress(() => {});
+  let r;
+  await turn.run('first', async () => {
+    r = await run(fake({ audit: (n) => (n === 1 ? JSON.stringify(BAD_AUDIT) : JSON.stringify(GOOD_AUDIT)) }), { mode: 'quality', onProgress });
+    throw new Error('after the run');
+  });
+  const s = JSON.parse(lines.find(l => /"feature":"replay"/.test(l)).replace(/^[^{]*/, ''));
+  assert.equal(r.ok, true, r.error);
+  assert.ok(r.cost > 0 && Math.abs(s.cost - r.cost) < 1e-9, `${s.cost} vs ${r.cost}`);
+  assert.ok(s.phases.some(p => p.startsWith('sources=ok/')), s.phases.join(' '));
+  assert.ok(!s.phases.some(p => p.includes('=done')), s.phases.join(' '));
 });

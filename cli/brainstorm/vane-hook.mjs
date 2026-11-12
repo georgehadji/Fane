@@ -5,7 +5,6 @@
 // own provider settings, on the chains of the mode's price band (the article trial's models), or on freellmapi
 // (withFreeLlm). The answer is one
 // block, updated as the work goes, and ends with ANSWER_MARKER (tagged()) like every Fane answer.
-import { readFile } from 'node:fs/promises';
 import { openRouterClientFromVane, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, providerMissing, quiet, tagged } from '../image/present.mjs';
@@ -13,6 +12,7 @@ import { buildTextCatalogue } from '../write/catalogue.mjs';
 import { detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { retryEmpty } from '../write/research.mjs';
+import { readTrial } from '../write/trial.mjs';
 import { isBrainstormRequest } from '../core/intent-brainstorm.mjs';
 import { createTurn } from '../core/turn.mjs';
 import { chainsFor, createBrainstormPipeline, selectBrainstormChains, selectFreeBrainstormChains } from './pipeline.mjs';
@@ -36,7 +36,7 @@ export async function handleBrainstormRequest(query, { emit, update, configPath,
   await turn.run(renderBrainstormProgress(state), async () => {
     client ??= await openRouterClientFromVane({ configPath, readConfig, log, signal });
     if (!client) return say(providerMissing('Brainstorming', { free: true }));
-    try { trial ??= JSON.parse(await readFile(TRIAL_FILE, 'utf8')).models || {}; } catch { trial = {}; } // no trial yet: the message below
+    trial ??= await readTrial(TRIAL_FILE); // no trial yet is {}, and the message below
     const chosen = await withFreeLlm(client, useMode, {
       select: async () => selectBrainstormChains(buildTextCatalogue(await client.models()), trial, { mode: useMode, lang }),
       free: (ready, last) => selectFreeBrainstormChains(trial, ready, { lang, last }),
@@ -49,7 +49,7 @@ export async function handleBrainstormRequest(query, { emit, update, configPath,
       else if (e.status === 'running') state.running = e.phase;
       else {
         state.done = [...state.done, e.phase];
-        if (e.phase === 'prior') researchDone();
+        if (e.phase === 'prior' && e.status === 'done') researchDone();
       }
       if (e.phase !== 'done') return () => renderBrainstormProgress(state);
     });

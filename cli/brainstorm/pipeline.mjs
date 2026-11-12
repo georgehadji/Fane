@@ -7,13 +7,15 @@
 //  - code ranks the scored ideas and picks the ones to develop, one theme at a time (reasoner developed the first
 //    three ideas the clustering model marked "keep", in the order of its themes, whatever their scores);
 //  - ids are given by code; answers that name an unknown id are ignored, so nothing invented reaches the result.
-// Failures are values: a round, the development or the synthesis that fails is listed in `degraded`.
+// Failures are values: a round, the development or the synthesis that fails is listed in `degraded`. A provider
+// refusal (402, the spend cap) once an idea exists ends the model calls, not the run: the ideas so far come back with
+// `stopped: { status, error }`; the user's own stop (499) returns nothing.
 import { createRoleCaller, statusOf } from '../write/llm.mjs';
 import { selectChains, selectFreeChains } from '../write/catalogue.mjs';
 import { LANGUAGE_NAMES, detectLanguage, fold, repairFinalNu, repairHomoglyphs } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES, THINKING_HEADROOM } from '../write/models.mjs';
 import { resolveEffort } from '../core/effort.mjs';
-import { PHASE, phaseRecord } from '../core/outcome.mjs';
+import { PHASE, isStopped, phaseRecord } from '../core/outcome.mjs';
 import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
 import { brainstormPrompts } from './prompts.mjs';
 
@@ -145,7 +147,7 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
       const r = await call(role, brainstormPrompts[role]({ text: request, lang, ...ctx }), { chain: chains[role] || chains.generate, maxTokens: tokensFor(role, lang, effort.headroom), temperature: TEMPERATURE[role], prices, json: true, reasoning: effort.reasoning });
       calls += r.attempts.length;
       cost += r.cost;
-      const rec = phaseRecord(role, statusOf(r), { note, model: r.model || null, ms: now() - started });
+      const rec = phaseRecord(role, statusOf(r), { note, model: r.model || null, ms: now() - started, cost: r.cost });
       phases.push(rec);
       emit({ ...rec });
       return { ...r, rec };
@@ -160,16 +162,27 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
       const seen = new Set();
       for (const s of found || []) if (s?.url && !seen.has(s.url)) { seen.add(s.url); prior.push({ title: s.title || s.url, url: s.url, content: s.content || '' }); }
       prior = prior.slice(0, MAX_PRIOR);
-      phases.push(phaseRecord('prior', prior.length ? PHASE.ok : PHASE.failed, { model: null, ms: 0, note: `${prior.length} pages` }));
+      const rec = phaseRecord('prior', prior.length ? PHASE.ok : PHASE.failed, { model: null, ms: 0, note: `${prior.length} pages` });
+      phases.push(rec);
+      emit({ ...rec });
       emit({ phase: 'prior', status: 'done', note: `${prior.length} pages` });
     }
 
     // 2. Rounds of Verbalized Sampling, one after another: each round sees the titles of the earlier ones.
-    let ideas = [];
+    let ideas = [], stoppedBy = null;
     const rounds = [], seen = new Set();
+    // A fatal result -> the failure to return (no idea yet, or the user's own stop), or null after noting the stop:
+    // the ideas so far were paid for, so the run goes on to its end without another model call.
+    const stop = (r) => {
+      const error = r.errors[0] || 'the provider refused the request';
+      if (isStopped(r) || !ideas.length) return fail(error, { fatal: true, status: r.status });
+      stoppedBy = { status: r.status ?? null, error };
+      degraded.unshift(`stopped (${error}): the ideas so far are kept, the rest of the work was not done`);
+      return null;
+    };
     for (let round = 1; round <= plan.rounds; round++) {
       const r = await step('generate', { round, k: IDEAS_PER_ROUND, tail: TAIL, nTail: TAIL_PER_ROUND, previous: ideas, prior }, `round ${round}`);
-      if (r.fatal) return fail(r.errors[0] || 'the provider refused the request', { fatal: true, status: r.status });
+      if (r.fatal) { const f = stop(r); if (f) return f; break; }
       if (!r.ok) { degraded.push(`round ${round} gave no ideas (${r.errors.at(-1) || 'no answer'})`); continue; }
       const got = normalizeIdeas(r.data, round, seen);
       const tail = got.filter(i => i.probability != null && i.probability < TAIL).length;
@@ -182,38 +195,40 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
 
     // 3. Merge, theme and score. Without it the ideas stay one unscored list.
     let themes = [{ theme: '', ids: ideas.map(i => i.id) }];
-    const c = await step('cluster', { ideas, prior });
-    if (c.fatal) return fail(c.errors[0], { fatal: true, status: c.status });
-    if (c.ok) {
+    const c = stoppedBy ? null : await step('cluster', { ideas, prior });
+    if (c?.fatal) { const f = stop(c); if (f) return f; }
+    else if (c?.ok) {
       const applied = applyClusters(c.data, ideas, prior);
       if (applied.themes.length) {
         ({ themes, ideas } = applied);
         if (applied.unscored) degraded.push(`${applied.unscored} idea${applied.unscored === 1 ? ' was' : 's were'} not scored`);
       } else degraded.push('the scoring named none of the ideas: they are not ranked');
-    } else degraded.push('the ideas could not be scored: they are not ranked');
+    } else if (c) degraded.push('the ideas could not be scored: they are not ranked');
     emit({ phase: 'cluster', status: PHASE.preview, ideas, themes });
 
     // 4. Develop the picked ideas (Balanced, Quality); Speed goes to the synthesis with the best ideas as they are.
     const picked = pickIdeas(ideas, themes, plan.develop || 3);
     let developed = 0;
-    if (plan.develop) {
+    if (plan.develop && !stoppedBy) {
       const d = await step('develop', { ideas: picked });
-      if (d.fatal) return fail(d.errors[0], { fatal: true, status: d.status });
-      if (!d.ok) degraded.push('the ideas could not be developed: the synthesis works from the ideas alone');
-      for (const dev of Array.isArray(d.data?.developments) ? d.data.developments : []) {
-        const idea = picked.find(i => i.id === text(dev?.id));
-        if (!idea || idea.development) continue;
-        idea.development = { use_case: text(dev.use_case), steps: strings(dev.steps), risks: strings(dev.risks), success: strings(dev.success) };
-        developed++;
+      if (d.fatal) { const f = stop(d); if (f) return f; }
+      else {
+        if (!d.ok) degraded.push('the ideas could not be developed: the synthesis works from the ideas alone');
+        for (const dev of Array.isArray(d.data?.developments) ? d.data.developments : []) {
+          const idea = picked.find(i => i.id === text(dev?.id));
+          if (!idea || idea.development) continue;
+          idea.development = { use_case: text(dev.use_case), steps: strings(dev.steps), risks: strings(dev.risks), success: strings(dev.success) };
+          developed++;
+        }
+        if (d.ok && developed < picked.length) degraded.push(`${picked.length - developed} of ${picked.length} picked ideas were not developed`);
       }
-      if (d.ok && developed < picked.length) degraded.push(`${picked.length - developed} of ${picked.length} picked ideas were not developed`);
     }
 
     // 5. Synthesis: a recommendation that points at ideas of this run only.
     let synthesis = null;
-    const s = await step('synthesis', { ideas: picked, themes: themes.map(t => t.theme).filter(Boolean) });
-    if (s.fatal) return fail(s.errors[0], { fatal: true, status: s.status });
-    if (s.ok) {
+    const s = stoppedBy ? null : await step('synthesis', { ideas: picked, themes: themes.map(t => t.theme).filter(Boolean) });
+    if (s?.fatal) { const f = stop(s); if (f) return f; }
+    else if (s?.ok) {
       const known = new Set(picked.map(i => i.id));
       synthesis = {
         recommended: strings(s.data.recommended).filter(id => known.has(id)),
@@ -226,7 +241,7 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
         uncertainty: text(s.data.uncertainty),
       };
       if (!synthesis.recommendation) { degraded.push('the synthesis gave no recommendation'); synthesis = null; }
-    } else degraded.push('the synthesis failed: the ideas are shown without a recommendation');
+    } else if (s) degraded.push('the synthesis failed: the ideas are shown without a recommendation');
 
     // Text for people: ideas named by title, not by id (a live synthesis wrote "R1I1 and R2I4"), and the Greek
     // spelling repairs of the article pipeline (Latin look-alike letters, the dropped final ν).
@@ -239,6 +254,6 @@ export function createBrainstormPipeline({ client, retrieve, log = () => {}, now
       : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, KEEP.has(k) ? x : tidy(x)])) : v);
 
     emit({ phase: 'done', status: 'done' });
-    return { ok: true, request, language: lang, mode, reasoning: effort.reasoning, prior, rounds, ideas: tidy(ideas), themes: tidy(themes), picked: picked.map(i => i.id), synthesis: tidy(synthesis), phases, degraded, calls, cost, ms: now() - t0 };
+    return { ok: true, request, language: lang, mode, reasoning: effort.reasoning, prior, rounds, ideas: tidy(ideas), themes: tidy(themes), picked: picked.map(i => i.id), synthesis: tidy(synthesis), phases, degraded, calls, cost, stopped: stoppedBy, ms: now() - t0 };
   };
 }

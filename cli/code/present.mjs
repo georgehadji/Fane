@@ -43,7 +43,7 @@ export function renderCodeProgress(state) {
   return state.files?.length ? `${files(state.files)}\n\n${status}` : status;
 }
 
-const issueList = (issues) => `<ul>${issues.map(i => `<li>${escapeHtml(`${i.file || i.named || '?'} (${i.severity}): ${i.issue}`)}</li>`).join('')}</ul>`;
+const issueList = (issues) => `<ul>${issues.map(i => `<li>${escapeHtml(`${i.file || i.named || '?'} (${i.severity}): ${i.issue}${i.fixNote ? ` — ${i.fixNote}` : ''}`)}</li>`).join('')}</ul>`;
 
 export function renderCodeResult(r) {
   const lang = r.language || 'en';

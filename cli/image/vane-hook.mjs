@@ -80,7 +80,7 @@ export async function handleImageRequest(query, { emit, update, configPath, mode
     const result = await generate({ prompt: query, format: 'jpeg', ...(references.length && { references, enhance: false }), ...(TIER_FOR_MODE[mode] && { tier: TIER_FOR_MODE[mode] }), ...(earlier?.aspect && { aspect: earlier.aspect }), ...parseImageOptions(query), onProgress });
     await turn.settle();
     // Stored images are linked, not embedded; one that could not be stored is embedded as before.
-    const images = await Promise.all(result.images.map(async (i) => ({ ...i, url: done.find(d => d.model === i.model)?.url ?? await keep(i) })));
+    const images = await Promise.all(result.images.map(async (i) => ({ ...i, url: done.find(d => d.slot === i.slot)?.url ?? await keep(i) })));
     say(renderResult({ ...result, images, editedImage }, query));
     const stopped = !images.length && isStopped(result.fatal);
     return { ok: images.length > 0, ...(stopped && { status: STOPPED_STATUS }), cost: images.reduce((n, i) => n + (i.pricePerImage || 0), 0) };

@@ -6,10 +6,11 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 import { isCodeRequest } from '../core/intent-code.mjs';
-import { PHASE } from '../core/outcome.mjs';
+import { PHASE, outcomeOf } from '../core/outcome.mjs';
+import { OpenRouterError } from '../image/openrouter.mjs';
 import { MAX_FILE_CHARS, extractCode, fenceFor, fileChecks, languageOf, parseFiles, safePath } from '../code/files.mjs';
 import { codePrompts } from '../code/prompts.mjs';
-import { buildReadme, createCodePipeline, mapLimited, normalizeReview, normalizeSpec } from '../code/pipeline.mjs';
+import { FIX, buildReadme, createCodePipeline, mapLimited, normalizeReview, normalizeSpec } from '../code/pipeline.mjs';
 import { createSyntaxChecker } from '../code/syntax.mjs';
 import { CODE_ANSWER_MARKER, codeTagged, renderCodeResult } from '../code/present.mjs';
 import { handleCodeRequest } from '../code/vane-hook.mjs';
@@ -326,9 +327,84 @@ test('pipeline: after a 402 in one file the other workers start no new file', as
     },
   };
   const r = await createCodePipeline({ client, checkSyntax: syntaxOk })({ request: 'write a JS thing', mode: 'speed', chains: { spec: ['m'], generate: ['m'] } });
-  assert.equal(r.fatal, true);
+  // the three files that were paid for and landed are kept; the stop is named
+  assert.equal(r.ok, true);
+  assert.equal(r.stopped.status, 402);
+  assert.deepEqual(r.files.map(f => f.path), ['m1.mjs', 'm2.mjs', 'm3.mjs']);
   await new Promise(res => setTimeout(res, 150)); // let workers that are still running finish
   assert.equal(generated.length, 4); // the four started together, no more
+});
+
+// ---- a provider refusal after the files exist: the files are kept, the stop is named (like the article pipeline) ----
+
+const CHAINS = { spec: ['m'], generate: ['m'], review: ['m'], fix: ['m'], tests: ['m'] };
+const runBalanced = (over) => createCodePipeline({ client: fakeClient(answers(over)), retrieve: async () => [], checkSyntax: syntaxOk })({ request: 'write a JavaScript CLI that counts words', mode: 'balanced', chains: CHAINS });
+const noCredits = () => new OpenRouterError('402 insufficient credits', 402);
+
+test('pipeline: a 402 in the review keeps the files with a note and nothing after it is asked', async () => {
+  const r = await runBalanced({ review: noCredits() });
+  assert.equal(r.ok, true);
+  assert.deepEqual([r.stopped.status, /insufficient credits/.test(r.stopped.error)], [402, true]);
+  assert.match(r.degraded[0], /^stopped \(.*insufficient credits.*\): the files written so far are kept/);
+  assert.deepEqual(r.files.map(f => f.path), ['count.mjs', 'cli.mjs']);
+  assert.deepEqual([r.review, r.tests, r.fixes, r.open], [null, [], [], []]);
+  assert.ok(!r.phases.some(p => ['fix', 'tests'].includes(p.phase)));
+  assert.match(r.readme, /The run was stopped before it finished/);
+  assert.equal(outcomeOf(r), 'degraded');
+});
+
+test('pipeline: a 402 in the fix leaves the findings open with the reason, the earlier files unchanged, and no tests', async () => {
+  const r = await runBalanced({ fix: noCredits() });
+  assert.equal(r.ok, true);
+  assert.equal(r.stopped.status, 402);
+  assert.deepEqual(r.open.map(i => [i.issue, i.fixState, i.fixNote]), [
+    ['no input validation', FIX.notAttempted, 'the run was stopped before this fix'],
+    ['regex per call', FIX.notAttempted, 'medium findings are not sent to the fix step'],
+  ]);
+  assert.equal(r.files.find(f => f.path === 'cli.mjs').content, `${GOOD['cli.mjs']}\n`);
+  assert.deepEqual([r.fixes, r.tests], [[], []]);
+  assert.match(r.readme, /no input validation — the run was stopped before this fix/);
+});
+
+test('pipeline: a 402 in the tests keeps the fixes that landed', async () => {
+  const r = await runBalanced({ tests: noCredits() });
+  assert.equal(r.ok, true);
+  assert.equal(r.stopped.status, 402);
+  assert.deepEqual(r.fixes.map(f => f.path), ['cli.mjs']);
+  assert.match(r.files.find(f => f.path === 'cli.mjs').content, /usage: cli/);
+  assert.deepEqual([r.tests, r.open.map(i => i.issue)], [[], ['regex per call']]);
+  assert.equal(outcomeOf(r), 'degraded');
+});
+
+test('pipeline: a stop by the user (499) after the files exist still ends the run without them; a clean run has no stop', async () => {
+  const r = await runBalanced({ review: new OpenRouterError('stopped: the browser was closed', 499) });
+  assert.deepEqual([r.ok, r.fatal, r.status], [false, true, 499]);
+  assert.equal(outcomeOf(r), 'stopped');
+  assert.equal((await runBalanced({})).stopped, null);
+});
+
+test('pipeline: a 402 before any file exists is still a failure', async () => {
+  const r = await runBalanced({ generate: noCredits() });
+  assert.deepEqual([r.ok, r.fatal, r.status], [false, true, 402]);
+});
+
+// ---- the fix lifecycle: every finding says what became of it ----
+
+test('pipeline: findings carry fixState and fixNote; the README says why a finding was not fixed', async () => {
+  const r = await runBalanced({});
+  assert.deepEqual(Object.keys(FIX), ['pending', 'fixed', 'refused', 'unparsed', 'notAttempted']);
+  assert.equal(r.review.critical[0].fixState, FIX.fixed);
+  assert.deepEqual([r.review.medium[0].fixState, r.review.medium[0].fixNote], [FIX.notAttempted, 'medium findings are not sent to the fix step']);
+  assert.deepEqual(r.open.map(i => i.fixState), [FIX.notAttempted]); // open = the findings that are not fixed
+  assert.match(r.readme, /regex per call — medium findings are not sent to the fix step/);
+
+  const ghost = await runBalanced({ review: JSON.stringify({ critical: [{ file: 'ghost.mjs', issue: 'x is unsafe' }], verdict: 'needs_fixes' }) });
+  assert.deepEqual(ghost.open.map(i => [i.fixState, i.fixNote]), [[FIX.notAttempted, 'it names no file of the project']]);
+
+  const broken = await createCodePipeline({ client: fakeClient(answers({ fix: () => '```js\nimport { countWords } from "./count.mjs"\nconsole.log(countWords(\n```' })), retrieve: async () => [], checkSyntax: async (files) => files.map(f => ({ path: f.path, status: /countWords\($/m.test(f.content) ? 'error' : 'ok', detail: 'Unexpected end of input' })) })({ request: 'write a JS word counter', mode: 'balanced', chains: CHAINS });
+  assert.deepEqual(broken.open.map(i => [i.issue, i.fixState]), [['no input validation', FIX.refused], ['regex per call', FIX.notAttempted]]);
+  assert.match(broken.open[0].fixNote, /the fixed file does not parse/);
+  assert.match(broken.readme, /no input validation — the fixed file does not parse/);
 });
 
 test('pipeline: a failed spec ends the run; a 402 stops it as fatal; one failed file is reported, not stored', async () => {
@@ -456,6 +532,20 @@ test('hook: not a coding request -> false; no trial -> a message; a run -> files
   assert.equal(closed, 1);
 });
 
+test('hook: a 402 after the files exist shows the files and the note, and writes one summary line saying degraded', async () => {
+  const blocks = new Map(); let n = 0; const lines = [];
+  const catalogue = [{ id: 'lab/coder', architecture: { output_modalities: ['text'] }, pricing: { prompt: '0.000001', completion: '0.000002' }, context_length: 128000, supported_parameters: ['response_format'] }];
+  const client = { ...fakeClient(answers({ review: noCredits() })), models: async () => catalogue };
+  const trial = { 'lab/coder': { code: { ok: true, score: 0 }, json: { ok: true } } };
+  assert.equal(await handleCodeRequest('write a Python script that sorts files', { emit: (x) => { blocks.set(`b${++n}`, x); return `b${n}`; }, update: (id, x) => blocks.set(id, x), client, trial, checkSyntax: syntaxOk, research: async () => [], mode: 'balanced', log: (m) => lines.push(m) }), true);
+  const final = blocks.get('b1');
+  assert.match(final, /<h4>count\.mjs<\/h4>/);
+  assert.match(final, /stopped \(.*insufficient credits.*\): the files written so far are kept/);
+  assert.ok(final.includes(CODE_ANSWER_MARKER));
+  const summaries = lines.filter(l => /"feature":"code"/.test(l)).map(l => JSON.parse(l.slice(l.indexOf('{'))));
+  assert.deepEqual(summaries.map(s => [s.ok, s.outcome]), [[true, 'degraded']]);
+});
+
 // ---- the trial ----
 
 test('trial judges: the code must pass all cases but one; the spec must be JSON with a usable path', () => {
@@ -519,4 +609,23 @@ test('the CLI writes generated files only inside a new or empty folder, never ov
     const fresh = join(dir, 'new');
     assert.equal(await codeDir({ 'out-dir': fresh, query: 'q' }), fresh);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+// The records a pipeline sends carry its cost: replayed through a turn that then throws, the summary keeps all of it,
+// and the sources record (not the 'done' event) is what the summary holds.
+test('code pipeline: replayed through a turn that throws, the summary has the whole cost and docs=ok', async () => {
+  const { createTurn } = await import('../core/turn.mjs');
+  const lines = [];
+  const turn = createTurn({ feature: 'replay', prompts: {}, emit: () => 'b', update: () => {}, log: (m) => lines.push(m) });
+  const onProgress = turn.progress(() => {});
+  let r;
+  await turn.run('first', async () => {
+    r = await createCodePipeline({ client: fakeClient(answers()), retrieve: async () => [{ title: 'Node fs docs', url: 'https://nodejs.org/api/fs.html', content: 'readFile ...' }], checkSyntax: syntaxOk })({ request: 'write a JavaScript CLI that counts words', mode: 'balanced', chains: { spec: ['m'], generate: ['m'], review: ['m'], fix: ['m'], tests: ['m'] }, onProgress });
+    throw new Error('after the run');
+  });
+  const s = JSON.parse(lines.find(l => /"feature":"replay"/.test(l)).replace(/^[^{]*/, ''));
+  assert.equal(r.ok, true, r.error);
+  assert.ok(r.cost > 0 && Math.abs(s.cost - r.cost) < 1e-9, `${s.cost} vs ${r.cost}`);
+  assert.ok(s.phases.some(p => p.startsWith('docs=ok/')), s.phases.join(' '));
+  assert.ok(!s.phases.some(p => p.includes('=done')), s.phases.join(' '));
 });

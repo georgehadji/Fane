@@ -327,6 +327,26 @@ test('"make it shorter" after an article edits it in one call, without a new sea
   assert.ok(final.endsWith(ANSWER_MARKER));
 });
 
+test('a throwing editor keeps its phases and cost in the summary line, and its updates run through the turn', async () => {
+  const u = ui(), lines = [];
+  const editor = async ({ onProgress }) => {
+    onProgress({ phase: 'sources', status: 'ok', ms: 0 });
+    onProgress({ phase: 'sources', status: 'done' });
+    onProgress({ phase: 'edit', status: 'running' });
+    onProgress({ phase: 'edit', status: 'ok', ms: 3, cost: 0.25 });
+    throw new Error('boom');
+  };
+  let closed = 0;
+  await handleArticleRequest('add a paragraph about costs', { ...u, mode: 'speed', client: editClient(), trial: TRIAL, lastAnswer: async () => previous(), research: async () => [], researchDone: () => { closed++; }, editor, log: (m) => lines.push(m) });
+  assert.equal(closed, 1);
+  assert.match(u.blocks.get('b1'), /boom/);
+  const [s, ...more] = lines.filter(l => /"feature":"article-edit"/.test(l)).map(l => JSON.parse(l.slice(l.indexOf('{'))));
+  assert.equal(more.length, 0);
+  assert.deepEqual([s.ok, s.cost, s.phases], [false, 0.25, ['sources=ok/0ms', 'edit=ok/3ms']]);
+  // the "Editing the article…" status was shown through the turn, once, before the failure replaced it
+  assert.ok(u.events.some(([, x]) => /Editing the article…/.test(x)));
+});
+
 test('edits that ask for something new are told apart from rewording', () => {
   for (const q of ['add a paragraph about costs', 'expand the history section', 'say more about Orkney', 'πρόσθεσε μια παράγραφο για το κόστος', 'Επέκτεινε την εισαγωγή']) assert.equal(needsNewFacts(q), true, q);
   for (const q of ['make it shorter', 'more formal please', 'translate it to Greek', 'κάνε το πιο σύντομο', 'rewrite the conclusion']) assert.equal(needsNewFacts(q), false, q);
@@ -396,4 +416,21 @@ test('an upgrade is not taken as applied because the other hook passes the same 
   assert.deepEqual([image.errors, image.applied.length], [[], 3]);
   const article = planPatch(old(IMAGE[0], `handleArticleRequest(b.followUp,{mode:b.config.mode,configPath:${C},research:1})`), [ARTICLE[1]]);
   assert.deepEqual([article.errors, article.applied.length], [[], 1]);
+});
+
+test('readTrial: a missing file is an empty trial; a corrupt or unreadable one surfaces; the three hooks use it', async () => {
+  const { readTrial } = await import('../write/trial.mjs');
+  const { readFile } = await import('node:fs/promises');
+  const fail = (code, message = code) => async () => { throw Object.assign(new Error(message), { code }); };
+  assert.deepEqual(await readTrial('x', async () => '{"models":{"a/b":{"en":{"ok":true}}}}'), { 'a/b': { en: { ok: true } } });
+  assert.deepEqual(await readTrial('x', async () => '{}'), {});
+  assert.deepEqual(await readTrial('x', fail('ENOENT')), {});
+  await assert.rejects(readTrial('x', async () => '{"models": {'), /could not read the model trial \(.*JSON/);
+  await assert.rejects(readTrial('x', fail('EACCES', 'permission denied')), /could not read the model trial \(permission denied\)/);
+  // no hook turns a read error into an empty trial again
+  for (const f of ['write', 'code', 'brainstorm']) {
+    const src = await readFile(new URL(`../${f}/vane-hook.mjs`, import.meta.url), 'utf8');
+    assert.ok(src.includes('await readTrial('), f);
+    assert.ok(!/catch\s*\{\s*trial\s*=/.test(src), f);
+  }
 });

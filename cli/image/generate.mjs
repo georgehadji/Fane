@@ -29,7 +29,7 @@ export const IMAGE_TEXT_MODEL = process.env.VANE_IMAGE_TEXT_MODEL || DEFAULT_TEX
 const ENHANCE_SYSTEM = 'You are an image-prompt engineer. Expand the description into one detailed prompt for an image model: subject, setting, composition, lighting, colour palette, medium or style, and mood. Keep every element the user asked for; add no text, logos or artist names they did not ask for. Reply with the prompt only, under 120 words.';
 const unquote = (s) => String(s || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
 
-const toResultImage = (i) => ({ dataUrl: i.dataUrl, model: i.model.id, name: i.model.name, via: viaOf(i.model), endpoint: i.endpoint, aspect: i.aspect, pricePerImage: i.model.price, text: i.text });
+const toResultImage = (i, slot) => ({ dataUrl: i.dataUrl, model: i.model.id, name: i.model.name, via: viaOf(i.model), endpoint: i.endpoint, aspect: i.aspect, pricePerImage: i.model.price, text: i.text, slot });
 
 export function createImageGenerator({ client, download, textModel = null, log = () => {}, now = Date.now }) {
   const complete = textModel ? (system, user) => client.complete(textModel, system, user) : null;
@@ -214,7 +214,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
     const slots = chains.map(() => null);
     const drawn = () => slots.filter(Boolean).length;
     // Progress is cosmetic: a throwing listener must never fail an image run.
-    const onImage = (slot) => { try { onProgress?.({ ready: drawn(), total: want, slot, model: slots[slot].model.id, name: slots[slot].model.name, image: toResultImage(slots[slot]) }); } catch (err) { log(`progress listener failed: ${err.message}`); } };
+    const onImage = (slot) => { try { onProgress?.({ ready: drawn(), total: want, slot, model: slots[slot].model.id, name: slots[slot].model.name, image: toResultImage(slots[slot], slot) }); } catch (err) { log(`progress listener failed: ${err.message}`); } };
     let run = await attempt(finalPrompt, chains, slots, opts, onImage);
     result.errors.push(...run.errors);
 
@@ -237,7 +237,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
     }
 
     const images = slots.filter(Boolean);
-    result.images = images.map(toResultImage);
+    result.images = slots.flatMap((s, slot) => (s ? [toResultImage(s, slot)] : []));
     result.ok = images.length > 0;
     // the provider refusal (401/402) or the user's stop (499) that ended the run, so callers need not read error text
     result.fatal = run.fatal ? { status: run.fatal.status, error: run.fatal.message } : null;

@@ -86,6 +86,7 @@ export function createArticleEditor({ client, log = () => {}, now = Date.now, ma
       try { found = await retrieve(title ? `${title}: ${instruction}` : instruction); } catch (err) { log(`search for the edit failed: ${err.message}`); }
       const seen = new Set(sources.map(s => s.url).filter(Boolean));
       for (const s of found || []) if (s?.url && !seen.has(s.url) && fresh.length < MAX_NEW_SOURCES) { seen.add(s.url); fresh.push({ title: s.title || s.url, url: s.url, content: s.content || '' }); }
+      emit({ phase: 'sources', status: fresh.length ? 'ok' : 'failed', ms: 0, note: `${fresh.length} new sources` }); // the record
       emit({ phase: 'sources', status: 'done', note: `${fresh.length} new sources` });
       if (!fresh.length) degraded.push('the search found no new sources: the edit could only use what the article already says');
     }
@@ -93,7 +94,7 @@ export function createArticleEditor({ client, log = () => {}, now = Date.now, ma
     emit({ phase: 'edit', status: 'running' });
     // "longer" can grow the text: room for half as much again.
     const r = await call('rewrite', prompts.rewrite({ lang, article: body, sources: all, instruction, newFacts: fresh.length > 0 }), { chain: chains.draft, maxTokens: tokensFor('draft', Math.ceil(wordCount(body) * 1.5), lang, effort.headroom), reasoning: effort.reasoning, prices });
-    emit({ phase: 'edit', status: r.ok ? 'ok' : 'failed' });
+    emit({ phase: 'edit', status: r.ok ? 'ok' : 'failed', cost: r.cost });
     const base = { language: lang, mode, reasoning: effort.reasoning, calls: r.attempts.length, cost: r.cost };
     if (!r.ok) return { ok: false, fatal: r.fatal, status: r.status, error: `the edit failed: ${r.errors.join('; ')}`, ...base };
     sources = all;
