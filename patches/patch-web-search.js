@@ -103,16 +103,19 @@ const TARGETS = [
     // so capture them under new names at module level.
     name: 'module handles for page reading',
     alts: [{ from: HANDLES_FROM + HANDLES_V1, to: HANDLES }, { from: HANDLES_FROM + ';', to: HANDLES }],
+    ladder: ['V1', 'fresh'],
     marker: 'FANE_READ=',
   },
   {
     name: 'batched embeddings',
     // With or without RANK_ON_ORIGINAL_TEXT applied (scholarly/social patches).
     alts: [RANK_ON_ORIGINAL_TEXT.to, RANK_ON_ORIGINAL_TEXT.from].map(embedLine => ({ from: EMBED_HEAD + embedLine + EMBED_TAIL, to: BATCHED })),
+    ladder: ['fresh+ranked', 'fresh'],
   },
   {
     name: 'balanced reads top pages',
     alts: [{ from: BALANCED_READ_V1, to: BALANCED_READ }, { from: VANE_RESULTS, to: BALANCED_READ }],
+    ladder: ['V1', 'fresh'],
     marker: 'await FANE_READ(R,a,',
   },
   {

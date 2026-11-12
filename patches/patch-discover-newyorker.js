@@ -24,6 +24,7 @@ module.exports = {
         { from: ORIGINAL, to: NEWYORKER_ONLY },
         { from: WITH_ATLANTIC, to: BOTH },
       ],
+      ladder: ['fresh', 'fresh+atlantic'],
     },
   ],
 };

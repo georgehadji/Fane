@@ -1,6 +1,6 @@
 // Tests the code patches/patch-source-cards.js injects into Vane's browser chunks: the chip merge in the chat code,
 // the card data (CITE_ITEMS) and the chip component (CHIP), rendered with a stand-in for React.
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
@@ -134,8 +134,153 @@ test('chip tap: a second tap on the open card navigates; the card closing betwee
   assert.equal(click(m), false);
 });
 
-test('chip tap: a keyboard click after a touch tap navigates', { todo: 'bug: touch/wasOpen refs stay set from the last pointerdown, so Enter (a click with no pointerdown) is swallowed' }, () => {
+test('chip tap: a keyboard click after a touch tap navigates', () => {
   const m = mount(chipProps);
   m.chip.onPointerDown({ pointerType: 'touch' }); click(m); // the touch tap opened the card (wasOpen stays false)
   assert.equal(click(m), false); // Enter on the focused chip: no pointerdown first
+});
+
+test('chip tap: a mouse pointerdown after a touch pointerdown that never clicked does not swallow the click', () => {
+  const m = mount(chipProps);
+  m.chip.onPointerDown({ pointerType: 'touch' }); // a scroll gesture: no click follows
+  m.chip.onPointerDown({ pointerType: 'mouse' });
+  assert.equal(click(m), false);
+  assert.equal(m.open, false);
+});
+
+// The chip's machine, driven the way a browser does: handlers on the tree, document/window listeners the effects add,
+// and mocked timers. The state is read from what it does (see SIGNATURE), because CHIP keeps it in a ref.
+function mountFx(props) {
+  const slots = []; const fx = []; let i = 0, tree, eff = 0, pending = [];
+  const reg = () => ({ l: {}, addEventListener(t, f) { (this.l[t] ??= []).push(f); }, removeEventListener(t, f) { this.l[t] = (this.l[t] || []).filter(x => x !== f); } });
+  const doc = Object.assign(reg(), { activeElement: null, documentElement: { clientWidth: 1000 } });
+  const win = Object.assign(reg(), { innerHeight: 800 });
+  const same = (a, b) => a && b && a.length === b.length && a.every((v, k) => v === b[k]);
+  const C = {
+    useState: (v) => { const k = i++; if (!(k in slots)) slots[k] = v; return [slots[k], (n) => { const x = typeof n === 'function' ? n(slots[k]) : n; if (Object.is(x, slots[k])) return; slots[k] = x; draw(); }]; },
+    useRef: (v) => { const k = i++; if (!(k in slots)) slots[k] = { current: v }; return slots[k]; },
+    useEffect: (fn, deps) => { pending.push([eff++, fn, deps]); }, useLayoutEffect: () => {}, useId: () => ':r1:',
+  };
+  const els = {};
+  const R = { jsx: (type, p) => { const n = { type, ...p }; if (p.ref) { p.ref.current = els[p.className] ??= { inside: true, contains: (x) => !!x && x.inside === true, focus() { if (doc.activeElement !== this) { doc.activeElement = this; tree.onFocus(); } }, getBoundingClientRect: () => ({}) }; } return n; } };
+  R.jsxs = R.jsx;
+  function draw() {
+    i = 0; eff = 0; pending = []; tree = CHIP(props, R, C, CITE_ITEMS);
+    for (const [k, fn, deps] of pending) {
+      if (fx[k] && deps && same(deps, fx[k].deps)) continue;
+      if (fx[k] && typeof fx[k].undo === 'function') fx[k].undo();
+      fx[k] = { deps }; fx[k].undo = fn(); // a state change inside the effect redraws before it returns
+    }
+  }
+  const prev = [globalThis.document, globalThis.window];
+  globalThis.document = doc; globalThis.window = win;
+  draw();
+  const emit = (target, type, e) => (target.l[type] || []).slice().forEach(f => f(e));
+  const m = {
+    get tree() { return tree; }, get chip() { return find(tree, 'fane-cite-chip'); }, get open() { return !!find(tree, 'fane-cite-card'); },
+    get page() { return text(find(tree, 'fane-cite-pager')); },
+    chipEl: () => els['fane-cite-chip'], doc, emit,
+    enter: () => tree.onPointerEnter({ pointerType: 'mouse' }), leave: () => tree.onPointerLeave({ pointerType: 'mouse' }),
+    focus: () => { doc.activeElement = m.chipEl(); tree.onFocus(); }, blur: () => { doc.activeElement = null; tree.onBlur({ relatedTarget: null }); },
+    tap: () => { m.chip.onPointerDown({ pointerType: 'touch' }); return click(m); },
+    esc: () => emit(doc, 'keydown', { key: 'Escape' }), away: () => emit(doc, 'pointerdown', { target: {} }), scroll: (target = {}) => emit(win, 'scroll', { target }),
+    resize: () => emit(win, 'resize', {}),
+    timer: () => mock.timers.tick(200), end: () => { [globalThis.document, globalThis.window] = prev; },
+  };
+  return m;
+}
+
+// What each state does: [card shown, after the timer, after a blur, after a focus, after a focus then a blur].
+const SIGNATURE = {
+  closed: [false, false, false, true, false], over: [false, false, false, true, true], opening: [false, true, false, true, true],
+  open: [true, true, false, true, false], openOver: [true, true, true, true, true], closing: [true, false, false, true, false],
+  muted: [false, false, false, false, false],
+};
+const PATH = {
+  closed: [], opening: ['enter'], open: ['focus'], openOver: ['enter', 'timer'], over: ['enter', 'timer', 'scroll'],
+  closing: ['focus', 'leave'], muted: ['focus', 'esc'],
+};
+function replay(steps) {
+  mock.timers.reset(); mock.timers.enable({ apis: ['setTimeout'] });
+  const m = mountFx(chipProps);
+  try { for (const s of steps) m[s](); return m; } catch (e) { m.end(); throw e; }
+}
+function signature(steps) {
+  const seen = (more) => { const m = replay([...steps, ...more]); const o = m.open; m.end(); return o; };
+  return [seen([]), seen(['timer']), seen(['blur']), seen(['focus']), seen(['focus', 'blur'])];
+}
+const nameOf = (steps) => { const s = JSON.stringify(signature(steps)); return Object.keys(SIGNATURE).find(k => JSON.stringify(SIGNATURE[k]) === s) ?? s; };
+
+test('chip machine: every state is reached by its path and tells itself apart by what it does', () => {
+  for (const [name, steps] of Object.entries(PATH)) assert.equal(nameOf(steps), name, name);
+});
+
+// One row per transition of T in patches/patch-source-cards.js (and the no-ops worth pinning): [from, event, to].
+// 'tap' is a touch pointerdown and its click; esc/away/scroll/resize reach CHIP through the listeners its effect adds.
+// Esc is muted only when the focus is on the chip (open, closing); openOver's path has none, so its Esc closes (see below).
+const ROWS = [
+  ['closed', 'enter', 'opening'], ['closed', 'focus', 'open'], ['closed', 'tap', 'open'], ['closed', 'blur', 'closed'], ['closed', 'leave', 'closed'],
+  ['over', 'enter', 'opening'], ['over', 'leave', 'closed'], ['over', 'focus', 'openOver'], ['over', 'tap', 'openOver'], ['over', 'blur', 'over'],
+  ['opening', 'leave', 'closed'], ['opening', 'focus', 'openOver'], ['opening', 'tap', 'openOver'], ['opening', 'timer', 'openOver'], ['opening', 'blur', 'opening'],
+  ['opening', 'esc', 'opening'], ['opening', 'away', 'opening'], ['opening', 'scroll', 'opening'], // no card yet, so no listeners
+  ['open', 'enter', 'openOver'], ['open', 'leave', 'closing'], ['open', 'blur', 'closed'], ['open', 'esc', 'muted'], ['open', 'away', 'closed'],
+  ['open', 'scroll', 'closed'], ['open', 'resize', 'closed'], ['open', 'focus', 'open'],
+  ['openOver', 'leave', 'closing'], ['openOver', 'esc', 'closed'], ['openOver', 'away', 'over'], ['openOver', 'scroll', 'over'], ['openOver', 'blur', 'openOver'],
+  ['closing', 'enter', 'openOver'], ['closing', 'leave', 'closing'], ['closing', 'focus', 'open'], ['closing', 'blur', 'closed'], ['closing', 'esc', 'muted'],
+  ['closing', 'away', 'closed'], ['closing', 'scroll', 'closed'], ['closing', 'timer', 'closed'],
+  ['muted', 'enter', 'opening'], ['muted', 'focus', 'closed'], ['muted', 'blur', 'closed'], ['muted', 'tap', 'open'], ['muted', 'leave', 'muted'],
+];
+for (const [from, event, to] of ROWS) {
+  test(`chip machine: ${from} --${event}--> ${to}`, () => {
+    assert.equal(nameOf([...PATH[from], event]), to);
+  });
+}
+
+test('chip machine: Esc from a focused button in the card puts the focus back on the chip and does not reopen the card', () => {
+  const m = replay(['focus']);
+  m.doc.activeElement = { inside: true }; // the pager's button
+  m.esc();
+  assert.equal(m.doc.activeElement, m.chipEl());
+  assert.equal(m.open, false);
+  m.end();
+  assert.equal(nameOf(['focus', 'esc']), 'muted'); // chip already focused: no focus event comes, a blur clears it
+});
+
+test('chip machine: Esc with the focus outside the chip closes the card and is not muted', () => {
+  const m = replay(['enter', 'timer']);
+  m.esc();
+  assert.equal(m.open, false); m.end();
+  assert.equal(nameOf(['enter', 'timer', 'esc']), 'closed');
+});
+
+test('chip machine: Esc with the chip focused and the pointer on it mutes, and clears the hover', () => {
+  assert.equal(nameOf(['focus', 'enter', 'esc']), 'muted');
+});
+
+test('chip machine: Esc clears the hover, so a later focus then blur closes the card', () => {
+  assert.deepEqual(signature(['focus', 'enter', 'esc', 'blur']), SIGNATURE.closed); // not 'over', which a stale hover would leave
+});
+
+test('chip machine: scrolling inside the card leaves it open, scrolling the page closes it', () => {
+  const m = replay(['focus']);
+  m.scroll({ inside: true }); assert.equal(m.open, true);
+  m.scroll({}); assert.equal(m.open, false);
+  m.end();
+});
+
+test('chip machine: a touch pointer does not hover', () => {
+  const m = replay([]);
+  m.tree.onPointerEnter({ pointerType: 'touch' }); m.timer(); assert.equal(m.open, false);
+  m.end();
+});
+
+test('chip machine: the pager page is data: it turns while the card is open and resets when the card closes', () => {
+  const sources = [src('https://a.com/', 'A'), src('https://b.com/', 'B')];
+  mock.timers.reset(); mock.timers.enable({ apis: ['setTimeout'] });
+  const m = mountFx({ href: 'https://a.com/', children: ['1,2'], sources });
+  m.focus(); assert.equal(m.page, '‹1/2›');
+  find(m.tree, 'fane-cite-pager').children[2].onClick({ preventDefault() {} }); assert.equal(m.page, '‹2/2›');
+  m.esc(); assert.equal(m.open, false);
+  m.blur(); m.focus(); assert.equal(m.page, '‹1/2›');
+  m.end();
 });

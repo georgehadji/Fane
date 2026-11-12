@@ -79,6 +79,7 @@ const TARGETS = [
   {
     name: 'compact researcher context',
     alts: [{ from: COMPACT_V1, to: COMPACT }, { from: COMPACT_FROM, to: COMPACT }],
+    ladder: ['V1', 'fresh'],
     marker: '"speed"!==b.config.mode&&a&&"search_results"===a.type',
   },
   {
@@ -96,6 +97,7 @@ const TARGETS = [
     name: 'stop after rounds without a new page',
     // The upgrade first: LOOP_END also follows STOP_V1, so the plain insertion would add a second stop.
     alts: [{ from: STOP_V2 + LOOP_END, to: STOP + LOOP_END }, { from: STOP_V1 + LOOP_END, to: STOP + LOOP_END }, { from: LOOP_END, to: STOP + LOOP_END }],
+    ladder: ['V2', 'V1', 'fresh'],
     marker: '/*fane:stop-3*/',
   },
 ].map(t => ({ file: FILES.research, ...t }));

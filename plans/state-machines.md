@@ -91,7 +91,7 @@ Run before any item that depends on them. Each one is a short subagent task; rec
 **Answers (2026-11-11, read from code, not run):**
 - **V1: hypothesis mostly wrong.** Under Compose, `apply.mjs` copies the patches to `/tmp` (not a mount), the patches report "already patched", and the `/fane/*` hashes equal the mounts, so nothing is removed or copied and `changed` stays false. The `rm -rf` on a read-only mount happens only if the mounts hold other files than the checkout (`apply.mjs:82-83`; the catch at `:122-125` swallows it, skips the SearXNG step, restarts and exits 1). The real fault: when the host shell lacks a key the container got from Compose (`CORE_API_KEY` …), the rendered settings differ, `apply.mjs` copies them (`:114`) and sets `changed`, so Vane restarts for nothing on every run, and the entrypoint writes the settings again. Phase 9 targets that, not the `rm` failure.
 - **V3: the timer race is not a bug.** A hover timer firing between `pointerdown` and `click` leaves `wasOpen` false, so the tap is prevented and the card stays open; a card closed in between still navigates on the second tap (both pinned in `source-cards.test.mjs`). A different bug: `touch` and `wasOpen` keep the last `pointerdown`'s values, so a click with no `pointerdown` (Enter on the chip, a screen reader) right after a touch tap that opened the card is swallowed. Test is `todo`; Phase 8.3 fixes it (reset `touch` on a mouse or key event).
-- **V5: confirmed.** The renames at `apply-targets.js:81` sit outside the `try`. When the second rename throws: `a.js` patched and `a.bak` exists; `b.js` original with `b.fane-tmp` left behind and `b.bak` written; the error escapes with no rollback. A rerun with a working file system heals it. The desired-behaviour test is `todo` in `patches.test.mjs`; Phase 8.2 fixes it.
+- **V5: confirmed.** The renames at `apply-targets.js:81` sit outside the `try`. When the second rename throws: `a.js` patched and `a.bak` exists; `b.js` original with `b.fane-tmp` left behind and `b.bak` written; the error escapes with no rollback. A rerun with a working file system heals it. Fixed in Phase 8.2: the renames sit in a `try` and a failure writes back `contents[f]` to the renamed files, then removes the `.fane-tmp` files and this run's backups; the test passes.
 - **V2: confirmed.** Nothing in the repo rewrites `/etc/searxng/settings.yml` on restart of a `docker run` container; only the Compose entrypoint (`fane-entrypoint.sh:16`) and `apply.mjs:113` write it. Whether the pinned image's own entrypoint touches it is not in the repo (unconfirmed). The two-writers case is Compose-only.
 
 ## Phase 1: small fixes the survey found (behaviour changes, one commit each)
@@ -223,16 +223,16 @@ Code fix lifecycle (M11), in the same phase:
 
 ## Phase 8: patch machines (M7, M8, M9)
 
-1. **Version ladder sweep** (M7).
+1. **Version ladder sweep** (M7). Done 2026-11-12.
    - Add a test in `patches.test.mjs`. For every target with `alts`, build a fixture from each `alts[k].from`, apply, and assert that the result contains the target's latest `to` (or marker). Apply again and assert no change.
    - Extend the existing cross-patch check: run all patches in file order on fixture bundles, then re-run each patch alone, and every target reports already applied.
    - Add an optional `ladder: ['V1', 'V2', …]` label per `alts` entry. Error messages then say "found 0 (known versions: fresh, V1, V2)" instead of bare counts. This is the AX gain: an agent editing a `to` learns that a frozen earlier version exists.
    - No bundle change. No restart. Subagent: sonnet.
-2. **Engine statuses and rename rollback** (M8).
+2. **Engine statuses and rename rollback** (M8). Done 2026-11-12.
    - `planPatch` returns a `status` per target, one of `applied`, `upgraded`, `already`, `skipped`, `error`, next to today's arrays. The end-of-run line counts them, so "patched N of M" stops undercounting already-applied targets.
    - If a rename throws (V5), write back the original contents already in memory (`contents[f]`, not `.bak`: `.bak` holds the first-ever original, `:72`) to the files already renamed, then remove the leftover `.fane-tmp` files.
    - Test with the fake `io`. No restart by itself. Subagent: sonnet.
-3. **`CHIP`** (M9).
+3. **`CHIP`** (M9). **Done 2026-11-12, not committed:** states closed, over, opening, open, openOver, closing, muted (`patch-source-cards.js`); table-driven rows in `source-cards.test.mjs`; the V3 `todo` is a passing test.
    - Inside the injected function, a table `T[state][event] -> state` and one `send(event)`. The events are enter, leave, focus, blur, esc, tap, away, scroll and timer. The five refs it uses today become one `state` ref plus the timer.
    - It stays closure-free and ASCII.
    - Fix what V3 confirms. Also reset `touch` on a mouse pointer event, and clear `hover` on Esc.
@@ -298,6 +298,6 @@ No item makes a paid model call. Nothing here needs `article-bench.mjs`, because
 9. A stream without `done` exits 1 (7.2).
 10. Unanswered paid models are not saved by a trial (7.4).
 11. `apply.mjs` refuses a Compose container, and restarts only for files actually written (9).
-12. `CHIP` touch and Esc fixes, as confirmed by V3 (8.3).
+12. `CHIP` touch and Esc fixes, as confirmed by V3 (8.3). Done.
 
 Anything not on this list must not change.

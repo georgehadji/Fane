@@ -55,6 +55,7 @@ const TARGETS = [
       { from: ENGINES(['arxiv', 'google scholar', 'pubmed']), to: ENGINES([...ACADEMIC, 'core.ac.uk']) },
       { from: ENGINES(ACADEMIC), to: ENGINES([...ACADEMIC, 'core.ac.uk']) },
     ],
+    ladder: ['fresh', 'V1'],
   },
   {
     name: 'paper metadata in results',

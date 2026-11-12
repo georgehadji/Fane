@@ -38,6 +38,7 @@ const TARGETS = [
     name: 'theme toggle above settings',
     file: FILES.layoutClient,
     alts: [{ from: SETTINGS, to: stacked('gap-y-4') }, { from: stacked('gap-y-3'), to: stacked('gap-y-4') }],
+    ladder: ['fresh', 'V1'],
   },
 ];
 

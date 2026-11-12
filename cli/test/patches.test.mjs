@@ -569,7 +569,7 @@ test('patch-scrape-guard: a page cannot reach a private host or send data, and a
   assert.equal((await scrape('file:///etc/passwd')).result.title, 'Failed to scrape');
 });
 
-// Phase 0 V5: a rename that throws after the first bundle was renamed. Today the throw escapes with no rollback.
+// Phase 0 V5 (fixed in Phase 8.2): a rename that throws after the first bundle was renamed.
 async function renameFailure() {
   const realFs = await import('node:fs');
   const { mkdtempSync, writeFileSync } = realFs;
@@ -590,21 +590,137 @@ async function renameFailure() {
   return { realFs, dir, io, run, targets, state, heal: () => { failB = false; } };
 }
 
-test('run: a rename that throws after the first bundle was renamed leaves a patched, b unpatched, b.fane-tmp and both .bak (pinned), and a rerun heals it', async () => {
+test('run: after a rename that threw and was rolled back, a rerun patches both bundles', async () => {
   const t = await renameFailure();
   try {
     assert.throws(() => t.run('t', t.targets, t.io), /EPERM rename/);
-    assert.deepEqual(t.state(), { a: 'var a=2;', 'a.tmp': false, 'a.bak': true, b: 'var b=1;', 'b.tmp': true, 'b.bak': true });
     t.heal();
     t.run('t', t.targets, t.io);
     assert.deepEqual(t.state(), { a: 'var a=2;', 'a.tmp': false, 'a.bak': true, b: 'var b=2;', 'b.tmp': false, 'b.bak': true });
   } finally { t.realFs.rmSync(t.dir, { recursive: true, force: true }); }
 });
 
-test('run: a rename that throws puts every bundle back and leaves no temporary file', { todo: 'bug: the renames at the end of run() are outside the try, so a bundle stays patched without its partner and a .fane-tmp is left' }, async () => {
+test('run: a rename that throws puts every bundle back and leaves no temporary file or backup this run made', async () => {
   const t = await renameFailure();
   try {
     assert.throws(() => t.run('t', t.targets, t.io), /EPERM rename/);
     assert.deepEqual(t.state(), { a: 'var a=1;', 'a.tmp': false, 'a.bak': false, b: 'var b=1;', 'b.tmp': false, 'b.bak': false });
   } finally { t.realFs.rmSync(t.dir, { recursive: true, force: true }); }
+});
+
+test('planPatch reports one status per target: applied, upgraded, already, skipped, error', () => {
+  const ts = [
+    T({ name: 'fresh', from: 'a=1', to: 'a=2', ladder: ['fresh'] }),
+    T({ name: 'up', alts: [{ from: 'b=0', to: 'b=3' }, { from: 'b=1', to: 'b=3' }], ladder: ['fresh', 'V1'] }),
+    T({ name: 'done', from: 'c=0', to: 'c=2' }),
+    T({ name: 'opt', from: 'zzz', to: 'q', optional: 'needs other patch' }),
+    T({ name: 'bad', from: 'nope', to: 'x', ladder: ['fresh'] }),
+  ];
+  const r = planPatch({ [F]: 'var a=1,b=1,c=2;' }, ts);
+  assert.deepEqual(r.status, [['fresh', 'applied'], ['up', 'upgraded'], ['done', 'already'], ['opt', 'skipped'], ['bad', 'error']].map(([name, status]) => ({ name, status })));
+  assert.deepEqual([r.applied, r.skipped.length, r.errors], [['fresh', 'up'], 1, ['bad: expected 1 match, found 0 (known versions: fresh)']]);
+});
+
+test('a "found 0" error names the known versions only when the target has a ladder', () => {
+  const alts = [{ from: 'x()', to: 'X()' }, { from: 'y()', to: 'Y()' }];
+  assert.deepEqual(planPatch({ [F]: 'z();' }, [T({ alts, ladder: ['fresh', 'V1'] })]).errors, ['t: expected 1 match, found 0/0 (known versions: fresh, V1)']);
+  assert.deepEqual(planPatch({ [F]: 'z();' }, [T({ alts })]).errors, ['t: expected 1 match, found 0/0']);
+});
+
+test('run: the end-of-run line counts every target in place and keeps the words apply.mjs looks for', async () => {
+  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { run } = require('../../patches/lib/apply-targets.js');
+  const dir = mkdtempSync(join(tmpdir(), 'fane-patch-'));
+  const f = join(dir, 'a.js');
+  writeFileSync(f, 'var a=1,b=2;');
+  const lines = [];
+  const log = console.log;
+  console.log = (l) => lines.push(l);
+  try {
+    const a = { name: 'a', file: f, from: 'a=1', to: 'a=2' };
+    run('t', [a, { name: 'b', file: f, from: 'b=2', to: 'b=3' }]);
+    run('t', [a]);
+    run('t', [{ ...a, name: 'a2', from: 'a=2', to: 'a=2/*m*/', marker: '/*m*/' }, { name: 'o', file: f, from: 'zzz', to: 'q', optional: 'x' }, { ...a, from: 'b=3', to: 'b=4', ladder: undefined }]);
+  } finally { console.log = log; rmSync(dir, { recursive: true, force: true }); }
+  assert.equal(lines[0], 't: patched 2 of 2 targets (2 changed now; backups: *.bak)');
+  assert.equal(lines[1], 't: already patched');
+  assert.equal(lines[2], 't: skipped o (x)');
+  assert.match(lines[3], /^t: patched 2 of 3 targets \(2 changed now, 1 optional skipped; backups: \*\.bak\)$/);
+  for (const l of [lines[0], lines[3]]) assert.ok(/patched/.test(l) && !/already patched/.test(l), l); // scripts/apply.mjs reads the line like this
+});
+
+test('every alts target that has a ladder has one label per alternative', () => {
+  const dir = new URL('../../patches/', import.meta.url);
+  for (const f of readdirSync(dir).filter(x => /^patch-.*\.js$/.test(x))) {
+    for (const t of require(`../../patches/${f}`).TARGETS) {
+      if (t.ladder === undefined) continue;
+      assert.ok(t.alts && Array.isArray(t.ladder) && t.ladder.length === t.alts.length, `${f}: ${t.name}: ladder needs one label per alts entry`);
+      assert.ok(t.ladder.every(l => typeof l === 'string' && l), `${f}: ${t.name}: labels are non-empty strings`);
+    }
+  }
+});
+
+// Phase 8.1 version ladder: every alternative of every target, built from its own from alone. The fixture goes in a
+// .css-named file, which the engine does not parse, because a bare fragment is not a JavaScript program.
+const allPatches = () => {
+  const dir = new URL('../../patches/', import.meta.url);
+  return readdirSync(dir).filter(x => /^patch-.*\.js$/.test(x)).sort().map(f => ({ f, TARGETS: require(`../../patches/${f}`).TARGETS }));
+};
+const noCr = (s) => s.replace(/\r/g, '');
+
+test('version ladder: every alts entry of every target upgrades to the latest text and is then a no-op', () => {
+  const file = '/sweep/bundle.css';
+  let swept = 0;
+  for (const { f, TARGETS } of allPatches()) {
+    for (const t of TARGETS.filter(x => x.alts)) {
+      const tt = { ...t, file };
+      t.alts.forEach((alt, k) => {
+        const where = `${f}: ${t.name}: alts[${k}]${t.ladder ? ' (' + t.ladder[k] + ')' : ''}`;
+        const one = planPatch({ [file]: noCr(alt.from) }, [tt]);
+        assert.deepEqual(one.errors, [], where);
+        assert.ok(['applied', 'upgraded'].includes(one.status[0].status), where);
+        assert.ok(isApplied(one.next[file], tt), where + ': the result holds a to (or the marker)');
+        if (t.ladder) assert.equal(one.status[0].status, t.ladder[k].startsWith('fresh') ? 'applied' : 'upgraded', where);
+        const two = planPatch(one.next, [tt]);
+        assert.deepEqual([two.errors, two.applied, two.status[0].status, two.next[file] === one.next[file]], [[], [], 'already', true], where);
+        swept++;
+      });
+    }
+  }
+  assert.ok(swept >= 30, String(swept));
+});
+
+// Cross-patch, target by target: fixtures are the targets' own fresh froms (the first alts entry labelled fresh, else the
+// only from), one bundle per file, then every patch in file order. A target whose from only exists in another patch's
+// output cannot be built from its from alone: it reports an error here and is listed in the log line, not failed.
+// After the whole run, each target that applied reports "already" when run alone, so a marker that a later patch's
+// edit removed shows up.
+test('every patch in file order, then each target alone: whatever applied is reported as already applied', () => {
+  const file = (t) => noCr(t.file) + '.css';
+  const fresh = (t) => noCr(t.alts ? t.alts[Math.max(0, (t.ladder || []).findIndex(l => l === 'fresh'))].from : t.from);
+  const bundles = {};
+  const seen = new Set();
+  for (const { TARGETS } of allPatches()) for (const t of TARGETS) {
+    const key = file(t) + '|' + fresh(t);
+    if (seen.has(key)) continue; // a target two patches share (RANK_ON_ORIGINAL_TEXT)
+    seen.add(key);
+    bundles[file(t)] = (bundles[file(t)] || '') + fresh(t) + '\n;/*gap*/\n';
+  }
+  let files = bundles;
+  const applied = [], unbuilt = [];
+  for (const { f, TARGETS } of allPatches()) for (const t of TARGETS) {
+    const tt = { ...t, file: file(t) };
+    const r = planPatch(files, [tt]);
+    if (r.errors.length) { unbuilt.push(`${f}: ${t.name}`); continue; }
+    if (r.status[0].status === 'applied' || r.status[0].status === 'upgraded') applied.push([f, tt]);
+    files = r.next;
+  }
+  for (const [f, tt] of applied) {
+    const again = planPatch(files, [tt]);
+    assert.deepEqual([again.errors, again.status[0].status], [[], 'already'], `${f}: ${tt.name}`);
+  }
+  assert.ok(applied.length >= 40, 'applied ' + applied.length + ', unbuilt ' + unbuilt.length);
+  console.log('# cross-patch fixtures: ' + applied.length + ' targets applied and re-checked, ' + unbuilt.length + ' not buildable from their own from: ' + unbuilt.join('; '));
 });

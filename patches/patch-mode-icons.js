@@ -62,7 +62,7 @@ const TARGETS = [
     from,
     to: bars(i + 1),
   })),
-  { name: 'no Beta tag', file: FILES.messageClient, alts: BETA_TAGS.map(from => ({ from, to: '/*fane:no-beta*/' })) },
+  { name: 'no Beta tag', file: FILES.messageClient, alts: BETA_TAGS.map(from => ({ from, to: '/*fane:no-beta*/' })), ladder: ['fresh', 'V1'], },
   {
     name: 'selected mode marked',
     file: FILES.messageClient,

@@ -155,6 +155,7 @@ const TARGETS = [
     alts: [{ from: COLORS_V3, to: COLORS }, { from: COLORS_V2, to: COLORS }, { from: COLORS_V1, to: COLORS }, { from: END, to: `${END}
 ${COLORS}
 ` }],
+    ladder: ['V3', 'V2', 'V1', 'fresh'],
     marker: '/*fane:colors-4*/',
   },
 ];

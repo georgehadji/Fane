@@ -99,6 +99,7 @@ const TARGETS = [
     file: FILES.appCss,
     // an older block is replaced where it stands (patch-colors may sit between it and the stylesheet's last rule)
     alts: [{ from: TYPE_V4, to: TYPE }, { from: TYPE_V3, to: TYPE }, { from: TYPE_V2, to: TYPE }, { from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
+    ladder: ['V4', 'V3', 'V2', 'V1', 'fresh'],
     marker: '/*fane:type-5*/',
   },
 ];

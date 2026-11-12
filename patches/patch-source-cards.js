@@ -56,6 +56,11 @@ function CITE_ITEMS(sources, children, href) {
 }
 
 // The chip component: (props, react/jsx-runtime, React, CITE_ITEMS). Injected as-is like CITE_ITEMS.
+// The card's life is one machine, T[state][event] -> state, driven by send(event). States: closed; over (closed, the
+// pointer is still on the chip); opening (150 ms hover timer); open; openOver (open, pointer on the chip: a blur does not
+// close it); closing (120 ms after the pointer left); muted (closed after Esc: the focus coming back to the chip is not
+// an open). Events: enter, leave, focus, blur, esc, tap (first touch tap), away (pointerdown elsewhere), scroll (also
+// resize) and timer. An event a state has no entry for does nothing. The page of the pager is plain data, not a state.
 function CHIP(P, R, C, ITEMS) {
   var h = R.jsx, hs = R.jsxs;
   var items = ITEMS(P.sources, P.children, P.href);
@@ -63,11 +68,25 @@ function CHIP(P, R, C, ITEMS) {
   var g = C.useState(0), page = g[0], setPage = g[1];
   var q = C.useState(null), pos = q[0], setPos = q[1];
   var wrap = C.useRef(null), chip = C.useRef(null), card = C.useRef(null);
-  var timer = C.useRef(0), hover = C.useRef(false), mute = C.useRef(false), wasOpen = C.useRef(false), touch = C.useRef(false);
+  var st = C.useRef('closed'), timer = C.useRef(0), armed = C.useRef(false);
   var id = 'fane-cite-' + String(C.useId ? C.useId() : '').replace(/[^\w-]/g, '');
-  function set(v, ms) {
+  var T = {
+    closed: { enter: 'opening', focus: 'open', tap: 'open' },
+    over: { enter: 'opening', leave: 'closed', focus: 'openOver', tap: 'openOver' },
+    opening: { leave: 'closed', focus: 'openOver', tap: 'openOver', timer: 'openOver' },
+    open: { enter: 'openOver', leave: 'closing', blur: 'closed', esc: 'muted', away: 'closed', scroll: 'closed' },
+    openOver: { leave: 'closing', esc: 'muted', away: 'over', scroll: 'over' },
+    closing: { enter: 'openOver', leave: 'closing', focus: 'open', blur: 'closed', esc: 'muted', away: 'closed', scroll: 'closed', timer: 'closed' },
+    muted: { enter: 'opening', focus: 'closed', blur: 'closed', tap: 'open' },
+  };
+  var WAIT = { opening: 150, closing: 120 }, SHOWN = { open: 1, openOver: 1, closing: 1 };
+  function send(ev) {
+    var n = (T[st.current] || {})[ev];
+    if (!n) return;
     clearTimeout(timer.current);
-    if (ms) timer.current = setTimeout(function () { setOpen(v); }, ms); else setOpen(v);
+    st.current = n;
+    if (WAIT[n]) timer.current = setTimeout(function () { send('timer'); }, WAIT[n]);
+    setOpen(!!SHOWN[n]);
   }
   C.useEffect(function () { return function () { clearTimeout(timer.current); }; }, []);
   C.useEffect(function () { if (!open) { setPos(null); setPage(0); } }, [open]);
@@ -83,12 +102,12 @@ function CHIP(P, R, C, ITEMS) {
     if (!open) return;
     function key(e) {
       if (e.key !== 'Escape') return;
-      if (wrap.current && wrap.current.contains(document.activeElement) && chip.current) { mute.current = true; chip.current.focus(); }
-      set(false);
+      send('esc');
+      if (wrap.current && wrap.current.contains(document.activeElement) && chip.current) chip.current.focus(); else send('blur');
     }
-    function away(e) { if (wrap.current && !wrap.current.contains(e.target)) set(false); }
-    function scroll(e) { if (!(card.current && card.current.contains(e.target))) set(false); }
-    function resize() { set(false); }
+    function away(e) { if (wrap.current && !wrap.current.contains(e.target)) send('away'); }
+    function scroll(e) { if (!(card.current && card.current.contains(e.target))) send('scroll'); }
+    function resize() { send('scroll'); }
     document.addEventListener('keydown', key);
     document.addEventListener('pointerdown', away);
     window.addEventListener('scroll', scroll, true);
@@ -117,10 +136,10 @@ function CHIP(P, R, C, ITEMS) {
   return hs('span', {
     ref: wrap,
     className: 'fane-cite' + (open ? ' fane-cite-open' : ''),
-    onPointerEnter: function (e) { if (e.pointerType === 'mouse') { hover.current = true; set(true, 150); } },
-    onPointerLeave: function (e) { if (e.pointerType === 'mouse') { hover.current = false; set(false, 120); } },
-    onFocus: function () { if (mute.current) mute.current = false; else set(true); },
-    onBlur: function (e) { if (!hover.current && !(wrap.current && wrap.current.contains(e.relatedTarget))) set(false); },
+    onPointerEnter: function (e) { if (e.pointerType === 'mouse') send('enter'); },
+    onPointerLeave: function (e) { if (e.pointerType === 'mouse') send('leave'); },
+    onFocus: function () { send('focus'); },
+    onBlur: function (e) { if (!(wrap.current && wrap.current.contains(e.relatedTarget))) send('blur'); },
     children: [
       h('a', {
         ref: chip,
@@ -129,8 +148,8 @@ function CHIP(P, R, C, ITEMS) {
         rel: 'noopener',
         className: 'fane-cite-chip',
         'aria-describedby': open ? id : undefined,
-        onPointerDown: function (e) { touch.current = e.pointerType !== 'mouse'; wasOpen.current = open; },
-        onClick: function (e) { if (touch.current && !wasOpen.current) { e.preventDefault(); set(true); } },
+        onPointerDown: function (e) { armed.current = e.pointerType !== 'mouse' && !open; },
+        onClick: function (e) { if (armed.current) { armed.current = false; e.preventDefault(); send('tap'); } },
         children: items[0].site + more,
       }, 'a'),
       open ? hs('span', {

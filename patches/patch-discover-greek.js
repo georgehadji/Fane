@@ -47,6 +47,7 @@ const TARGETS = [
     file: FILES.discoverRoute,
     // The first alternative is a fresh Vane; the second upgrades a container patched with the first site table.
     alts: [{ from: FROM, to: TO }, { from: TO_V1, to: TO }],
+    ladder: ['fresh', 'V1'],
     // patch-discover-kleon (and -medium) edit the end of `to`; the new table's first-added site stays as it is.
     marker: '"skai.gr"',
   },

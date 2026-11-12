@@ -55,6 +55,7 @@ const TARGETS = [
       { from: SEARCH_V1, to: SEARCH }, // a container patched with the first engine list
       { from: SEARCH_V2, to: SEARCH }, // a container patched before X was searched
     ],
+    ladder: ['fresh', 'V1', 'V2'],
   },
   {
     name: 'keyword-style social queries',
@@ -70,6 +71,8 @@ const TARGETS = [
       { from: `c=(b.results||[]).map(${SOCIAL_V1}).map(r=>{let A=`, to: `c=(b.results||[]).map(${SOCIAL}).map(r=>{let A=` },
       { from: `c=(b.results||[]).map(${SOCIAL_V1}),d=b.suggestions;`, to: `c=(b.results||[]).map(${SOCIAL}),d=b.suggestions;` },
     ],
+    // the first pair is a fresh Vane with and without patch-scholarly-sources' .map() in front
+    ladder: ['fresh+scholarly', 'fresh', 'V1+scholarly', 'V1'],
   },
   RANK_ON_ORIGINAL_TEXT, // shared with patch-scholarly-sources; a no-op when that ran first
   {
