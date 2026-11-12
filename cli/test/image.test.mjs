@@ -447,6 +447,64 @@ test('pipeline: stops at once on 402 (no fallbacks, no retries)', async () => {
   assert.equal((await createImageGenerator({ client: fakeClient(), download: async () => null })({ prompt: 'a fox', count: 1, enhance: false })).fatal, null);
 });
 
+const FLUX = 'black-forest-labs/flux-3-image-klein';
+const GEMINI = 'google/gemini-3.1-flash-image';
+
+test('pipeline: every slot keeps its own attempts (model, endpoint, outcome)', async () => {
+  const two = await createImageGenerator({ client: fakeClient(), download: async () => null })({ prompt: 'x', count: 2, enhance: false, models: [FLUX] });
+  assert.deepEqual(two.slots, [{ attempts: [{ model: FLUX, endpoint: 1, outcome: 'drawn' }] }, { attempts: [{ model: FLUX, endpoint: 1, outcome: 'drawn' }] }]);
+  // a chat model draws on its second endpoint after the first failed
+  const client = fakeClient();
+  client.chat = async () => { throw new Error('503'); };
+  const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'x', count: 1, enhance: false, models: [GEMINI] });
+  assert.deepEqual(r.slots, [{ attempts: [{ model: GEMINI, endpoint: 1, outcome: 'failed' }, { model: GEMINI, endpoint: 2, outcome: 'drawn' }] }]);
+  // a fatal stop, and the models it skipped
+  const fatal = await createImageGenerator({ client: fakeClient({ fail: Object.fromEntries(CAT.map(m => [m.id, { msg: '402', status: 402 }])) }), download: async () => null })({ prompt: 'x', count: 2, enhance: false });
+  assert.equal(fatal.slots.length, 2);
+  assert.ok(fatal.slots.every(s => s.attempts[0].outcome === 'fatal' && s.attempts[0].endpoint === 1 && s.attempts.slice(1).every(a => a.outcome === 'skipped' && a.endpoint === null)));
+});
+
+test('pipeline: a stop (499) seen by one chain starts no further download or check in its siblings', async () => {
+  const client = fakeClient();
+  const downloads = [];
+  client.images = async (body) => {
+    if (body.model === FLUX) { const e = new Error('stopped: the request was closed'); e.status = 499; throw e; }
+    await new Promise(r => setTimeout(r, 20)); // the sibling's answer arrives after the stop
+    return { data: [{ url: 'https://cdn.test/late' }] };
+  };
+  const r = await createImageGenerator({ client, download: async (u) => { downloads.push(u); return PNG_URL; } })({ prompt: 'x', count: 2, enhance: false, models: [FLUX, 'black-forest-labs/flux-3-image'] });
+  assert.deepEqual(downloads, []);
+  assert.equal(isStopped(r.fatal), true);
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.slots.map(s => s.attempts.map(a => a.outcome)), [['fatal'], ['fatal']]);
+  // a vision check is not started either
+  const c2 = fakeClient();
+  const REF = 'data:image/png;base64,REF';
+  let checks = 0;
+  c2.chat = async (body) => { if (body.model === 'x/cheap') checks++; return { choices: [{ message: { content: 'yes' } }] }; };
+  c2.images = async (body) => {
+    if (body.model === FLUX) { const e = new Error('stopped: the request was closed'); e.status = 499; throw e; }
+    await new Promise(r => setTimeout(r, 20));
+    return { data: [{ b64_json: PNG.toString('base64'), media_type: 'image/png' }] };
+  };
+  const r2 = await createImageGenerator({ client: c2, download: async () => null, textModel: 'x/cheap' })({ prompt: 'x', count: 2, enhance: false, references: [REF], models: [FLUX, 'black-forest-labs/flux-3-image'] });
+  assert.equal(checks, 0);
+  assert.equal(r2.images.length, 0);
+});
+
+test('pipeline: a vision check that fails keeps the image and records unchecked; a "no" records rejected', async () => {
+  const REF = 'data:image/png;base64,REF';
+  const client = fakeClient();
+  client.chat = async () => { throw new Error('503'); };
+  const kept = await createImageGenerator({ client, download: async () => null, textModel: 'x/cheap' })({ prompt: 'make it blue', count: 1, enhance: false, references: [REF], models: [FLUX] });
+  assert.equal(kept.images.length, 1);
+  assert.deepEqual(kept.slots, [{ attempts: [{ model: FLUX, endpoint: 1, outcome: 'unchecked' }] }]);
+  client.chat = async () => ({ choices: [{ message: { content: 'no' } }] });
+  const no = await createImageGenerator({ client, download: async () => null, textModel: 'x/cheap' })({ prompt: 'make it blue', count: 1, enhance: false, references: [REF], models: [FLUX] });
+  assert.equal(no.images.length, 0);
+  assert.deepEqual(no.slots[0].attempts, [{ model: FLUX, endpoint: 1, outcome: 'rejected' }]);
+});
+
 test('pipeline: refusal triggers the rewrite chain', async () => {
   const client = fakeClient({ refuseUnless: 'original' });
   const r = await createImageGenerator({ client, download: async () => null })({ prompt: 'Mickey Mouse surfing a wave', count: 1, enhance: false });

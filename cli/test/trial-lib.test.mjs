@@ -62,3 +62,47 @@ test('runTrial: trial.json is written only when a model was tried', async () => 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Runs runTrial in a temp folder; saved() lists the models in trial.json, or null when no file was written.
+async function withTrial(run) {
+  const { runTrial } = await import('../../scripts/trial-lib.mjs');
+  const { mkdtempSync, existsSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'fane-trial-'));
+  const file = join(dir, 'trial.json');
+  const log = console.log;
+  console.log = () => {};
+  try {
+    const base = { file, client: {}, parts: () => [], line: () => '' };
+    await run({ runTrial, base, saved: () => (existsSync(file) ? Object.keys(JSON.parse(readFileSync(file, 'utf8')).models) : null) });
+  } finally {
+    console.log = log;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const noAnswer = async () => ({ out: { cost: 0, finish: 'error', text: '' }, unanswered: true });
+
+test('runTrial: an unanswered model is not saved, paid or free, so the next trial tries it again', async () => {
+  await withTrial(async ({ runTrial, base, saved }) => {
+    await runTrial({ ...base, values: { concurrency: '1' }, candidates: [{ id: 'lab/paid' }], trialOne: noAnswer });
+    assert.equal(saved(), null);
+  });
+  await withTrial(async ({ runTrial, base, saved }) => {
+    await runTrial({ ...base, values: { concurrency: '1', free: true }, candidates: [{ id: 'lab/free' }], trialOne: noAnswer });
+    assert.equal(saved(), null);
+  });
+});
+
+test('runTrial: a 401/402 stops the run only after the workers in flight have finished and saved', async () => {
+  await withTrial(async ({ runTrial, base, saved }) => {
+    const trialOne = async (client, m) => {
+      if (m.id === 'lab/slow') { await new Promise(r => setTimeout(r, 30)); return { out: { cost: 0.02, finish: 'stop', text: 'ok' }, unanswered: false }; }
+      throw Object.assign(new Error('402 out of credit'), { status: 402 });
+    };
+    const error = await runTrial({ ...base, values: { concurrency: '2' }, candidates: [{ id: 'lab/slow' }, { id: 'lab/broke' }], trialOne }).catch(e => e);
+    assert.equal(error.status, 402);
+    assert.deepEqual(saved(), ['lab/slow']);
+  });
+});

@@ -204,19 +204,19 @@ Code fix lifecycle (M11), in the same phase:
 
 ## Phase 7: image ladder (M6) and the small machines
 
-1. **Image slots** (`image/generate.mjs`).
+1. **Image slots** (`image/generate.mjs`). **Done.** `result.slots[slot].attempts` holds `{model, endpoint, outcome}` (`ATTEMPT`: drawn, failed, fatal, rejected, unchecked, skipped). `signal` is not reachable in `generate`, so the stop is the minimal form: after a 499 no further download or vision check starts (`stopCheck`).
    - Each slot keeps `{ attempts: [{ model, endpoint, outcome }] }`, and the hook maps a stored URL by slot index, not model id. This fixes V4 if V4 confirms it.
    - Pass the run `signal` to `safeDownload` and to `keepsReference`, so a stopped run stops downloading.
    - A failed vision check keeps the image, as today (`generate.mjs:135`), and now records `outcome: 'unchecked'`.
    - Tests: `image.test.mjs`, two slots with one model, and a stop while sibling chains are calling. Restart: yes. Subagent: sonnet.
-2. **Stream end** (`client.mjs:209-257`, M14). Track `sawDone`. A stream that ends cleanly without `done` becomes "Vane closed the stream in the middle of the answer", which is the existing message. Behaviour change: such a truncated answer now exits 1 instead of 0. Test against the real `node:http` server in `client.test.mjs`. Subagent: haiku.
-3. **Start-and-wait** (M15). Test only, with `execFileSync` and `fetch` injected: unreachable, then started, then ready; and gave up after the deadline. Subagent: haiku.
-4. **Trial save rule** (M16, `scripts/trial-lib.mjs:111`).
+2. **Stream end** (`client.mjs:209-257`, M14). Track `sawDone`. A stream that ends cleanly without `done` becomes "Vane closed the stream in the middle of the answer", which is the existing message. Behaviour change: such a truncated answer now exits 1 instead of 0. Test against the real `node:http` server in `client.test.mjs`. Subagent: haiku. **Status: done 2026-11-12, not committed.**
+3. **Start-and-wait** (M15). Test only, with `execFileSync` and `fetch` injected: unreachable, then started, then ready; and gave up after the deadline. Subagent: haiku. **Status: done 2026-11-12, not committed.**
+4. **Trial save rule** (M16, `scripts/trial-lib.mjs:111`). **Status: done 2026-11-12, not committed** (one rule for paid and free; the pool waits for in-flight workers before a 401/402 is rethrown).
    - Today an unanswered paid model is saved as FAIL; a free one is not saved.
    - Decision: one rule. An unanswered model is not saved, whether paid or free, so the next trial tries it again. A rate limit is not a verdict.
    - On a 401/402 pool abort, wait for the workers in flight before writing `trial.json` (`:118-125`).
    - Test: `trial-lib.test.mjs`. Subagent: haiku.
-5. **Leave-list tests.**
+5. **Leave-list tests.** **Status: done 2026-11-12, not committed** (`new-chat.test.mjs`, and one test in `code.test.mjs`).
    - `patch-new-chat`: a test that the first message of a chat started at `/` survives (the `replaceState`-before-add order).
    - `codeBlocks`: a test of a 4-backtick labelled fence inside a 3-backtick block. CommonMark closes the outer block on a bare 4-backtick line, so the current behaviour is correct; pin it.
    - Subagent: haiku.

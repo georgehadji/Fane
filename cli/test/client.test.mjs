@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 
 for (const k of ['VANE_URL', 'VANE_CHAT_MODEL', 'VANE_EMBEDDING_MODEL', 'VANE_CONTAINER', 'VANE_SOURCES', 'VANE_MODE']) delete process.env[k];
-const { search, resolveChatModel, resolveModel, UsageError } = await import('../client.mjs');
+const { search, resolveChatModel, resolveModel, getProvidersStartingVane, UsageError } = await import('../client.mjs');
 
 const providers = [{ id: 'p1', name: 'Openrouter', chatModels: [{ key: 'google/gemini-x', name: 'Gemini X' }, { key: 'anthropic/claude-y', name: 'Claude Y' }], embeddingModels: [{ key: 'emb-1', name: 'Embedding 1' }] }];
 const SOURCE = { content: 'page text', metadata: { title: 'A page', url: 'https://a.example' } };
@@ -80,6 +80,28 @@ test('--stream: a stream cut in the middle of a line says so, and what was print
   });
 });
 
+test('--stream: a stream that ends cleanly without a done event is cut too, and what was printed stays', async () => {
+  await withServer((req, res) => { res.end(ndjson({ type: 'init', data: 'x' }, { type: 'response', data: 'Hel' })); }, async (url) => {
+    const { error, out } = await captureStdout(() => search(opts(url, { stream: true }), providers));
+    assert.match(error.message, /Vane closed the stream in the middle of the answer/);
+    assert.equal(out, 'Hel');
+  });
+});
+
+test('--stream: a done event with no newline after it still ends the answer', async () => {
+  await withServer((req, res) => { res.end(`${ndjson({ type: 'response', data: 'Hi' })}{"type":"done"}`); }, async (url) => {
+    const { result, out } = await captureStdout(() => search(opts(url, { stream: true }), providers));
+    assert.deepEqual([result.message, out], ['Hi', 'Hi\n']);
+  });
+});
+
+test('a search whose connection is reset is retried once', async () => {
+  await withServer((req, res, n) => { if (n === 1) return req.socket.destroy(); res.end(JSON.stringify({ message: 'ok', sources: [] })); }, async (url, seen) => {
+    assert.equal((await search(opts(url), providers)).message, 'ok');
+    assert.equal(seen.length, 2);
+  });
+});
+
 test('--stream: an error event from Vane is the error', async () => {
   await withServer((req, res) => { res.end(ndjson({ type: 'response', data: 'a' }, { type: 'error', data: 'model refused' })); }, async (url) => {
     const { error } = await captureStdout(() => search(opts(url, { stream: true }), providers));
@@ -98,4 +120,64 @@ test('model names: exact key, exact name, unique substring; an unknown or ambigu
   assert.deepEqual([r.model.key, r.providers === providers], ['google/gemini-x', true]);
   // an unknown name that is not an OpenRouter slug is the usage error, with no network call
   await assert.rejects(resolveChatModel(providers, { model: 'nonexistent', modelExplicit: true, url: 'http://127.0.0.1:9' }), UsageError);
+});
+
+// ---- start-and-wait (Vane stopped: start the container once, then poll until it answers) ----
+
+const refused = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+// a fake clock: sleep() moves time on, so the deadline is reached without waiting
+function fakeClock() {
+  let t = 0;
+  return { now: () => t, wait: async (ms) => { t += ms; } };
+}
+async function quietStderr(fn) {
+  const write = process.stderr.write, out = [];
+  process.stderr.write = (s, ...rest) => (typeof s === 'string' ? (out.push(s), true) : write.call(process.stderr, s, ...rest));
+  try { return { result: await fn(), out: out.join('') }; } catch (err) { return { error: err, out: out.join('') }; } finally { process.stderr.write = write; }
+}
+
+test('start-and-wait: unreachable, the container is started, then ready after two failed polls', async () => {
+  const calls = { exec: [], providers: 0, wait: [] };
+  const deps = {
+    exec: (...args) => calls.exec.push(args),
+    providers: async () => { if (++calls.providers < 4) throw refused(); return providers; },
+    wait: async (ms) => { calls.wait.push(ms); },
+    now: () => 0, waitMs: 90_000,
+  };
+  const { result, out } = await quietStderr(() => getProvidersStartingVane('http://127.0.0.1:3000', 'vane', deps));
+  assert.deepEqual(result, providers);
+  assert.deepEqual(calls.exec, [['docker', ['start', 'vane'], { stdio: 'ignore', timeout: 60_000 }]]);
+  assert.equal(calls.providers, 4);
+  assert.deepEqual(calls.wait, [2000, 2000, 2000]);
+  assert.match(out, /Vane not reachable at http:\/\/127\.0\.0\.1:3000; starting container "vane"/);
+});
+
+test('start-and-wait: Vane answers at once, so the container is not started', async () => {
+  const exec = [];
+  const result = await getProvidersStartingVane('http://x', 'vane', { exec: (...a) => exec.push(a), providers: async () => providers });
+  assert.deepEqual([result, exec], [providers, []]);
+});
+
+test('start-and-wait: gave up after the deadline, and says how long it waited', async () => {
+  const clock = fakeClock();
+  let polls = 0;
+  const deps = { exec: () => {}, providers: async () => { polls++; throw refused(); }, ...clock, waitMs: 5000 };
+  const { error } = await quietStderr(() => getProvidersStartingVane('http://x', 'vane', deps));
+  assert.match(error.message, /Vane did not become ready within 5s/);
+  assert.equal(polls, 4); // one poll before the wait, then at 2 s, 4 s and 6 s: the 4 s check is still before the 5 s deadline
+});
+
+test('start-and-wait: a container that cannot be started is an error, and Vane is not polled', async () => {
+  let polls = 0;
+  const deps = { exec: () => { throw new Error('no docker'); }, providers: async () => { polls++; throw refused(); } };
+  const { error } = await quietStderr(() => getProvidersStartingVane('http://x', 'vane', deps));
+  assert.match(error.message, /Could not start Docker container "vane"\. Is Docker Desktop running\?/);
+  assert.equal(polls, 1);
+});
+
+test('start-and-wait: an error that is not a connection error is thrown as it is, with no start', async () => {
+  const exec = [];
+  const deps = { exec: (...a) => exec.push(a), providers: async () => { throw new Error('GET /api/providers failed: HTTP 500'); } };
+  await assert.rejects(getProvidersStartingVane('http://x', 'vane', deps), /HTTP 500/);
+  assert.deepEqual(exec, []);
 });

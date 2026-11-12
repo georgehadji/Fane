@@ -9,6 +9,7 @@ import { classifyIntent } from './intent.mjs';
 import { REWRITE_SYSTEM, hasRiskTerms, heuristicRewrite, shouldRetry } from './policy.mjs';
 import { collectImageCandidates, sniffMime } from './extract.mjs';
 import { DEFAULT_TEXT_MODEL, FATAL_STATUS } from './openrouter.mjs';
+import { isStopped } from '../core/outcome.mjs';
 
 // Closest ratio from a provider's accepted list ("auto" ignored), compared on a log scale.
 export function nearestRatio(want, accepted) {
@@ -27,9 +28,16 @@ export const DEFAULT_IMAGES = 4; // one per model, from different labs where pos
 export const IMAGE_TEXT_MODEL = process.env.VANE_IMAGE_TEXT_MODEL || DEFAULT_TEXT_MODEL;
 
 const ENHANCE_SYSTEM = 'You are an image-prompt engineer. Expand the description into one detailed prompt for an image model: subject, setting, composition, lighting, colour palette, medium or style, and mood. Keep every element the user asked for; add no text, logos or artist names they did not ask for. Reply with the prompt only, under 120 words.';
+// What became of one model on one slot (`result.slots[slot].attempts`). `endpoint` is the 1-based place in the model's
+// endpoint order (generateOne), null when nothing was tried. unchecked: the vision check itself failed, the image was kept.
+export const ATTEMPT = Object.freeze({ drawn: 'drawn', failed: 'failed', fatal: 'fatal', rejected: 'rejected', unchecked: 'unchecked', skipped: 'skipped' });
 const unquote = (s) => String(s || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
 
 const toResultImage = (i, slot) => ({ dataUrl: i.dataUrl, model: i.model.id, name: i.model.name, via: viaOf(i.model), endpoint: i.endpoint, aspect: i.aspect, pricePerImage: i.model.price, text: i.text, slot });
+
+// A run the user stopped (499, seen by a sibling chain) starts no further download or vision check: the client refuses
+// every call after the abort, but a download or check is not a client call. `opts.fatal()` is the running attempt's stop.
+const stopCheck = (opts) => { const f = opts.fatal?.(); if (isStopped(f)) throw f; };
 
 export function createImageGenerator({ client, download, textModel = null, log = () => {}, now = Date.now }) {
   const complete = textModel ? (system, user) => client.complete(textModel, system, user) : null;
@@ -37,7 +45,8 @@ export function createImageGenerator({ client, download, textModel = null, log =
   // Pure generators use OpenRouter's Image API; chat models that also write text (Gemini,
   // GPT) draw through chat completions (viaOf decides, from catalogue data), with a switch
   // to the Image API if chat completions says the model needs it. -> { dataUrl, text }
-  async function viaImagesApi(model, prompt, { aspect, size, references, format }, retried = false) {
+  async function viaImagesApi(model, prompt, opts, retried = false) {
+    const { aspect, size, references, format } = opts;
     let res;
     try {
       res = await client.images({
@@ -56,7 +65,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
       const near = accepted && nearestRatio(aspect, accepted.split(',').map(s => s.trim()));
       if (near && near !== aspect) {
         log(`${model.id} does not support ${aspect}; using ${near}`);
-        return viaImagesApi(model, prompt, { aspect: near, size, references, format }, true);
+        return viaImagesApi(model, prompt, { ...opts, aspect: near }, true);
       }
       throw err;
     }
@@ -66,7 +75,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
       const mime = sniffMime(bytes) || item.media_type;
       if (mime?.startsWith('image/')) return { dataUrl: `data:${mime};base64,${item.b64_json}`, text: null, endpoint: 'images', aspect };
     }
-    if (item?.url) return { dataUrl: await download(item.url), text: null, endpoint: 'images', aspect };
+    if (item?.url) { stopCheck(opts); return { dataUrl: await download(item.url), text: null, endpoint: 'images', aspect }; }
     throw new Error('no image in response');
   }
 
@@ -74,12 +83,14 @@ export function createImageGenerator({ client, download, textModel = null, log =
   // for square images (their native path), the Image API first for any other ratio because
   // chat completions drops it silently for some providers (GPT returned 1024x1024 for 16:9).
   // Any non-fatal failure moves on to the next endpoint.
-  async function generateOne(model, prompt, opts) {
+  async function generateOne(model, prompt, opts, note = () => {}) {
     const order = viaOf(model) === 'images' ? [viaImagesApi] : opts.aspect === '1:1' ? [viaChat, viaImagesApi] : [viaImagesApi, viaChat];
     const failures = [];
-    for (const call of order) {
-      try { return await call(model, prompt, opts); } catch (err) {
-        if (FATAL_STATUS.has(err.status)) throw err;
+    for (const [i, call] of order.entries()) {
+      try { return { ...(await call(model, prompt, opts)), step: i + 1 }; } catch (err) {
+        const fatal = FATAL_STATUS.has(err.status);
+        note(i + 1, fatal ? ATTEMPT.fatal : ATTEMPT.failed);
+        if (fatal) throw err;
         failures.push(err);
       }
     }
@@ -88,7 +99,8 @@ export function createImageGenerator({ client, download, textModel = null, log =
     throw Object.assign(new Error(failures.map((e, i) => `${names[i]}: ${e.message}`).join('; ')), { status: failures.at(-1).status });
   }
 
-  async function viaChat(model, prompt, { aspect, size, references }) {
+  async function viaChat(model, prompt, opts) {
+    const { aspect, size, references } = opts;
     // image_config is provider-specific: Gemini honours aspect_ratio, GPT image models ignore
     // it (live check: 16:9 came back 1024x1024), so a non-square ratio is also stated in words.
     const asked = aspect === '1:1' ? prompt : `${prompt}\n\nAspect ratio ${aspect} (${ASPECT_WORDS[aspect]}).`;
@@ -108,6 +120,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
     const { inline, remote } = collectImageCandidates(message?.images ?? message ?? res);
     if (inline.length) return { dataUrl: inline[0], text, endpoint: 'chat', aspect };
     for (const url of remote) {
+      stopCheck(opts);
       try { return { dataUrl: await download(url), text, endpoint: 'chat', aspect }; } catch (err) { log(`${model.id}: ${err.message}`); }
     }
     throw new Error(`no image in response${text ? ` (model replied: ${text.slice(0, 120)})` : ''}`);
@@ -118,7 +131,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
   // lists both as taking image input). The text model sees the original beside each edited image; "no" rejects
   // it and the chain moves on. Without a text model, or when the check itself fails, the image is kept.
   async function keepsReference(reference, dataUrl, prompt) {
-    if (!textModel || !/^data:image\/(?:png|jpeg|webp|gif)/.test(dataUrl)) return true;
+    if (!textModel || !/^data:image\/(?:png|jpeg|webp|gif)/.test(dataUrl)) return ATTEMPT.drawn;
     try {
       const res = await client.chat({
         model: textModel,
@@ -131,21 +144,29 @@ export function createImageGenerator({ client, download, textModel = null, log =
         ] }],
       }, 30_000);
       const c = res?.choices?.[0]?.message?.content;
-      return !/^\W*no\b/i.test(Array.isArray(c) ? c.map(p => p?.text || '').join('') : String(c ?? ''));
-    } catch (err) { log(`edit check failed, keeping the image: ${err.message}`); return true; }
+      return /^\W*no\b/i.test(Array.isArray(c) ? c.map(p => p?.text || '').join('') : String(c ?? '')) ? ATTEMPT.rejected : ATTEMPT.drawn;
+    } catch (err) { log(`edit check failed, keeping the image: ${err.message}`); return ATTEMPT.unchecked; }
   }
 
   // Runs the chains whose slot in `images` is still empty, all in parallel; each chain tries
   // its models in order until one draws. A key/credit error stops every chain.
-  async function attempt(prompt, chains, images, opts, onImage) {
+  async function attempt(prompt, chains, images, opts, onImage, trail) {
     const errors = [];
     let fatal = null;
+    const o = { ...opts, fatal: () => fatal };
     await Promise.all(chains.map(async (chain, slot) => {
+      const note = (m, endpoint, outcome) => trail[slot].attempts.push({ model: m.id, endpoint, outcome });
       for (const m of images[slot] ? [] : chain) {
-        if (fatal) return;
+        if (fatal) { note(m, null, ATTEMPT.skipped); continue; }
         try {
-          const drawn = await generateOne(m, prompt, opts);
-          if (opts.references.length && !(await keepsReference(opts.references[0], drawn.dataUrl, prompt))) throw new Error('ignored the reference image (drew a different picture)');
+          const drawn = await generateOne(m, prompt, o, (step, outcome) => note(m, step, outcome));
+          let verdict = ATTEMPT.drawn;
+          if (opts.references.length) {
+            stopCheck(o);
+            verdict = await keepsReference(opts.references[0], drawn.dataUrl, prompt);
+          }
+          note(m, drawn.step, verdict);
+          if (verdict === ATTEMPT.rejected) throw new Error('ignored the reference image (drew a different picture)');
           images[slot] = { ...drawn, model: m }; onImage(slot); return;
         } catch (err) {
           errors.push(`${m.id}: ${err.message}`);
@@ -174,7 +195,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
   return async function generate({ prompt, count, tier, family, aspect = '1:1', size, references = [], enhance = true, models, via, format, onProgress }) {
     count = Math.min(Math.max(1, Math.trunc(count ?? (models?.length || DEFAULT_IMAGES))), MAX_IMAGES);
     const started = now();
-    const result = { ok: false, complete: false, requested: count, intent: null, models: [], enhancedPrompt: null, rewrittenPrompt: null, images: [], errors: [], fatal: null };
+    const result = { ok: false, complete: false, requested: count, intent: null, models: [], enhancedPrompt: null, rewrittenPrompt: null, images: [], errors: [], fatal: null, slots: [] };
 
     let catalogue;
     try { catalogue = buildCatalogue(await client.imageModels()); } catch (err) {
@@ -212,10 +233,11 @@ export function createImageGenerator({ client, download, textModel = null, log =
 
     const opts = { aspect, size, references, format };
     const slots = chains.map(() => null);
+    result.slots = chains.map(() => ({ attempts: [] })); // what each model did on each slot, for callers that explain a run
     const drawn = () => slots.filter(Boolean).length;
     // Progress is cosmetic: a throwing listener must never fail an image run.
     const onImage = (slot) => { try { onProgress?.({ ready: drawn(), total: want, slot, model: slots[slot].model.id, name: slots[slot].model.name, image: toResultImage(slots[slot], slot) }); } catch (err) { log(`progress listener failed: ${err.message}`); } };
-    let run = await attempt(finalPrompt, chains, slots, opts, onImage);
+    let run = await attempt(finalPrompt, chains, slots, opts, onImage, result.slots);
     result.errors.push(...run.errors);
 
     // Retry chain for the images still missing: a model-written rewrite after a refusal,
@@ -232,7 +254,7 @@ export function createImageGenerator({ client, download, textModel = null, log =
       if (!p || tried.has(p)) continue;
       tried.add(p);
       log('retrying with a rewritten prompt');
-      run = await attempt(p, chains, slots, opts, onImage);
+      run = await attempt(p, chains, slots, opts, onImage, result.slots);
       result.errors.push(...run.errors.map(e => `after rewrite: ${e}`));
     }
 

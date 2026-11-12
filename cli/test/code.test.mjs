@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { isCodeRequest } from '../core/intent-code.mjs';
 import { PHASE, outcomeOf } from '../core/outcome.mjs';
 import { OpenRouterError } from '../image/openrouter.mjs';
-import { MAX_FILE_CHARS, extractCode, fenceFor, fileChecks, languageOf, parseFiles, safePath } from '../code/files.mjs';
+import { MAX_FILE_CHARS, codeBlocks, extractCode, fenceFor, fileChecks, languageOf, parseFiles, safePath } from '../code/files.mjs';
 import { codePrompts } from '../code/prompts.mjs';
 import { FIX, buildReadme, createCodePipeline, mapLimited, normalizeReview, normalizeSpec } from '../code/pipeline.mjs';
 import { createSyntaxChecker } from '../code/syntax.mjs';
@@ -135,6 +135,14 @@ test('a fence shown inside a generated file does not cut the file', () => {
   assert.equal(extractCode(`Use ${F}x${F} here\n${F}js\nreal()\n${F}`), 'real()\n');
 });
 
+test('codeBlocks: a 4-backtick labelled fence inside a 3-backtick block is content; only a bare 4-backtick line closes it (CommonMark)', () => {
+  const F = '```';
+  // the labelled ```` line is inside the block; the bare ```` line closes it, so the block is "intro" plus that line
+  const text = [`${F}markdown`, 'intro', '````python', 'print(1)', '````', 'after'].join('\n');
+  assert.deepEqual(codeBlocks(text).map(b => [b.info, b.code]), [['markdown', 'intro\n````python\nprint(1)']]);
+  // a labelled ```` line closes nothing: without a bare closing line the outer block is unclosed, so it is no block
+  assert.deepEqual(codeBlocks([`${F}markdown`, '````python', 'print(1)'].join('\n')), []);
+});
 test('fileChecks: empty files and syntax errors fail; stubs and secrets warn', () => {
   const items = fileChecks([
     { path: 'a.py', content: 'def f():\n    # TODO: implement\n    pass\n' },

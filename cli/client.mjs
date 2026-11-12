@@ -33,23 +33,25 @@ export async function getProviders(url) {
 }
 
 // Vane runs in Docker; if it is unreachable, try to start the container once and wait.
-export async function getProvidersStartingVane(url, container) {
+// deps replaces the docker call, the provider fetch, the pause and the clock (tests only; the defaults are the real ones).
+export async function getProvidersStartingVane(url, container, deps = {}) {
+  const { exec = execFileSync, providers = getProviders, wait = sleep, now = Date.now, waitMs = STARTUP_WAIT_MS } = deps;
   try {
-    return await getProviders(url);
+    return await providers(url);
   } catch (err) {
     if (!isConnectionError(err)) throw err;
     process.stderr.write(`Vane not reachable at ${url}; starting container "${container}"...\n`);
     try {
-      execFileSync('docker', ['start', container], { stdio: 'ignore', timeout: 60_000 });
+      exec('docker', ['start', container], { stdio: 'ignore', timeout: 60_000 });
     } catch {
       throw new Error(`Could not start Docker container "${container}". Is Docker Desktop running?`);
     }
-    const deadline = Date.now() + STARTUP_WAIT_MS;
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 2000));
-      try { return await getProviders(url); } catch { /* still starting */ }
+    const deadline = now() + waitMs;
+    while (now() < deadline) {
+      await wait(2000);
+      try { return await providers(url); } catch { /* still starting */ }
     }
-    throw new Error(`Vane did not become ready within ${STARTUP_WAIT_MS / 1000}s`);
+    throw new Error(`Vane did not become ready within ${waitMs / 1000}s`);
   }
 }
 
@@ -207,16 +209,19 @@ async function postSearch(opts, body, chatKey) {
 }
 
 // Vane streams NDJSON: {type:'init'|'sources'|'response'|'done'|'error', data}.
+const CUT_SHORT = 'Vane closed the stream in the middle of the answer';
 async function readStream(res, onToken) {
   const decoder = new TextDecoder();
   let buf = '';
   let message = '';
   let sources = [];
+  let sawDone = false;
   const handle = (line) => {
     if (!line.trim()) return;
     const ev = JSON.parse(line);
     if (ev.type === 'sources') sources = ev.data;
     else if (ev.type === 'response') { message += ev.data; onToken(ev.data); }
+    else if (ev.type === 'done') sawDone = true;
     else if (ev.type === 'error') throw new Error(`Vane error: ${typeof ev.data === 'string' ? ev.data : JSON.stringify(ev.data)}`);
   };
   for await (const chunk of res.body) {
@@ -227,9 +232,11 @@ async function readStream(res, onToken) {
   // what is left is a line the stream ended in the middle of (Vane restarted, the connection dropped): say that,
   // not "Unexpected end of JSON input"; the tokens already printed stay on the screen
   try { handle(buf); } catch (err) {
-    if (err instanceof SyntaxError) throw new Error('Vane closed the stream in the middle of the answer');
+    if (err instanceof SyntaxError) throw new Error(CUT_SHORT);
     throw err;
   }
+  // a stream that ends cleanly without done was cut between events: the answer is not complete
+  if (!sawDone) throw new Error(CUT_SHORT);
   return { message, sources };
 }
 

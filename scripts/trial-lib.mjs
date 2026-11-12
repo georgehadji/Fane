@@ -92,15 +92,18 @@ export async function ask(client, model, { system, user }, { json = false, tempe
   }
 }
 
+// Every worker is awaited before the first failure is rethrown, so a result still in flight is saved too.
 async function pool(items, n, fn) {
   const queue = [...items];
-  await Promise.all(Array.from({ length: n }, async () => { for (let m = queue.shift(); m; m = queue.shift()) await fn(m); }));
+  const settled = await Promise.allSettled(Array.from({ length: n }, async () => { for (let m = queue.shift(); m; m = queue.shift()) await fn(m); }));
+  const failed = settled.find(s => s.status === 'rejected');
+  if (failed) throw failed.reason;
 }
 
 // Tries every candidate (trialOne(client, model) -> { out, unanswered }) and saves the results to `file`, also when
 // the run stops halfway. parts(out) are the verdicts with `problems`; line(model, out) is the line printed for one.
-// A free model with a call that got no answer (rate limit, timeout: freellmapi's quotas, not the model's writing)
-// is not saved, so a later run tries it again.
+// One rule for paid and free models: a model with a call that got no answer (rate limit, timeout, network: not the
+// model's writing) is not saved, so a later run tries it again.
 export async function runTrial({ file, values, client, candidates, trialOne, parts, line }) {
   let saved = { models: {} };
   try { saved = JSON.parse(await readFile(file, 'utf8')); } catch { /* first run */ }
@@ -108,7 +111,7 @@ export async function runTrial({ file, values, client, candidates, trialOne, par
   try {
     await pool(candidates, Number(values.concurrency), async (m) => {
       const { out, unanswered } = await trialOne(client, m);
-      if (unanswered && values.free) return console.log(`${m.id.padEnd(46)} not saved: a call got no answer (${parts(out).flatMap(x => x.problems || []).find(p => /^[1-5]\d\d [A-Z]/.test(p)) || 'no status'})`);
+      if (unanswered) return console.log(`${m.id.padEnd(46)} not saved: a call got no answer (${parts(out).flatMap(x => x.problems || []).find(p => /^[1-5]\d\d [A-Z]/.test(p)) || 'no status'})`);
       spent += out.cost;
       saved.models[m.id] = out;
       tried++;
