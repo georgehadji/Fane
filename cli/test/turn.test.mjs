@@ -111,15 +111,18 @@ test('turn: an update that throws is logged and ignored; the run still ends well
   assert.deepEqual(r.summaries().map(s => s.ok), [true]);
 });
 
-test('turn: a queued render that fails does not hide the failure message, and is not left unhandled', async () => {
+test('turn: a render that throws is logged and skipped; later updates still show and the run ends well', async () => {
   const r = rig();
-  const onProgress = r.turn.progress(() => () => { throw new Error('render broke'); });
+  const onProgress = r.turn.progress((e) => () => { if (e.n === 1) throw new Error('render broke'); return `render ${e.n}`; });
   await r.turn.run('first', async () => {
-    onProgress({ phase: 'x', status: 'ok' });
-    await r.turn.settle(); // the same rejection surfaces here, in the pipeline's own path
-  }, { failed: (err) => r.turn.say(`failed: ${err.message}`) });
-  assert.equal(r.blocks.get('b1'), 'failed: render broke<!--t-->');
-  assert.equal(r.summaries().length, 1);
+    onProgress({ phase: 'x', status: 'ok', n: 1 });
+    onProgress({ phase: 'y', status: 'ok', n: 2 });
+    await r.turn.settle();
+    return { ok: true };
+  });
+  assert.equal(r.blocks.get('b1'), 'render 2<!--t-->');
+  assert.ok(r.lines.some(l => /could not render the progress: render broke/.test(l)));
+  assert.deepEqual(r.summaries().map(s => s.ok), [true]);
 });
 
 test('turn: every log line carries the run id', async () => {

@@ -32,7 +32,8 @@ export function createTurn({ feature, prompts, emit, update, log, tag = (m) => m
       if (at < 0) phases.push(rec); else phases[at] = rec;
     }
     const render = handle(e);
-    if (render) queue = queue.then(async () => say(await render()));
+    // A render that throws is logged and skipped: left rejected, it would end every later update and go unhandled.
+    if (render) queue = queue.then(async () => say(await render())).catch((err) => log(`could not render the progress: ${err.message}`));
   };
   const spend = (usd) => { cost = (cost || 0) + usd; };
   const settle = () => queue;
