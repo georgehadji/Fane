@@ -129,7 +129,8 @@ test('createXSearch: an HTTP error, a thrown fetch and a timeout are [] and a lo
   const log = (m) => logs.push(m);
   assert.deepEqual(await createXSearch({ fetchImpl: async () => ({ ok: false, status: 429 }), readKey: async () => 'k', log })({ queries: ['q'], block: {} }), []);
   assert.deepEqual(await createXSearch({ fetchImpl: async () => { throw new Error('offline'); }, readKey: async () => 'k', log })({ queries: ['q'], block: {} }), []);
-  const slow = (url, { signal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+  // a real fetch keeps the event loop alive while it waits; AbortSignal.timeout's own timer does not (Node 20), so the stub holds it
+  const slow = (url, { signal }) => new Promise((_, reject) => { const hold = setTimeout(() => {}, 5000); signal.addEventListener('abort', () => { clearTimeout(hold); reject(signal.reason); }); });
   assert.deepEqual(await createXSearch({ fetchImpl: slow, readKey: async () => 'k', timeoutMs: 20, log })({ queries: ['q'], block: {} }), []);
   assert.deepEqual(logs, ['x_search: HTTP 429', 'x_search failed: offline', 'x_search failed: timed out']);
 });
