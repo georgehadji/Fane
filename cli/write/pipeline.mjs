@@ -9,7 +9,7 @@
 // `degraded`, so a weakened run is never presented as a clean one.
 import { checkCitations, firstComment, renumber, runChecks, sourcesSection, stripCitations } from './checks.mjs';
 import { REPORT, clampPostWords, clampReportWords, isPost, isReport } from '../core/formats.mjs';
-import { mergeSources, normalizeNotes, normalizePlan, runPool } from './report.mjs';
+import { hasReportShape, mergeSources, normalizeNotes, normalizePlan, runPool } from './report.mjs';
 import { AUDIT_DIMENSIONS, MIN_CLAIM_SUPPORT, auditResult, claimLedger, claimSupportRatio } from './gate.mjs';
 import { countTells, detectLanguage, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
 import { createRoleCaller, noteOf, statusOf } from './llm.mjs';
@@ -82,6 +82,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
     const refuse = (prev, next, shrink = 0.6) => {
       if (wordCount(next) < wordCount(prev) * shrink) return 'much shorter than its input';
       if (/^\s*#\s/m.test(prev) && !/^\s*#\s/m.test(next)) return 'lost the title';
+      if (report && hasReportShape(prev) && !hasReportShape(next)) return 'lost a fixed section of the report';
       const before = checkCitations(prev, sources).cited;
       if (before >= 3 && checkCitations(next, sources).cited < before * 0.5) return 'dropped most citations';
       return null;
@@ -140,7 +141,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
         subs = [{ question: topic, query: topic, covers: '' }];
       }
       emit({ phase: 'sources', status: PHASE.running });
-      const found = await runPool(subs, REPORT.concurrency, (s) => retrieve(s.query));
+      const found = await runPool(subs, REPORT.researchAtATime[mode] || REPORT.concurrency, (s) => retrieve(s.query));
       found.forEach((f, i) => { if (f.error) degraded.push(`research for "${subs[i].question}" failed (${f.error.message || f.error}): that part rests on the other sub-questions' pages`); });
       const merged = mergeSources(found.map(f => f.value || []), REPORT);
       sources = merged.sources;
@@ -278,6 +279,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       // 8. Finish: cited sources numbered 1..n in order of appearance, a sources list written by code, checks.
       const raw = checkCitations(body, sources);
       if (raw.invalid.length) degraded.push(`removed citations to sources that do not exist: ${raw.invalid.map(n => `[${n}]`).join(' ')}`);
+      if (report && !hasReportShape(body)) degraded.push('the report does not have its fixed sections (Summary, Key figures, Where the sources disagree or are thin): the writer changed them');
       const { text, used } = renumber(body, sources);
       // with no citation at all `used` is empty, and the citation check must still see the sources to fail
       const checks = runChecks(text, { lang, sources: used.length ? used : sources, targetWords: words, format });

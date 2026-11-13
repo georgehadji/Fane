@@ -163,7 +163,7 @@ export async function runArticleEdit(opts) {
   const retrieve = vaneRetrieve(opts, mode);
   const log = (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); };
   const edit = createArticleEditor({ client, log, maxCost: opts.effort?.maxCost });
-  const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: opts.query, lang, mode, effort: opts.effort, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: (e) => { if (e.status !== 'running') log(`${e.phase} ${e.status}${e.note ? `: ${e.note}` : ''}`); } });
+  const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: opts.query, lang, format: earlier.report ? 'report' : 'article', mode, effort: opts.effort, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: (e) => { if (e.status !== 'running') log(`${e.phase} ${e.status}${e.note ? `: ${e.note}` : ''}`); } });
   await writeArticleResult(r, opts);
 }
 

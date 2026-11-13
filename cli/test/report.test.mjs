@@ -179,13 +179,23 @@ test('a plan that fails or is empty falls back to the question as one sub-questi
   }
 });
 
+test('Quality researches one sub-question at a time', async () => {
+  let active = 0, peak = 0;
+  const four = { sub_questions: [1, 2, 3, 4].map(i => ({ question: `Question ${i}?`, query: `query ${i}` })) };
+  const c = fake({ plan: JSON.stringify(four) });
+  const r = await run(c, { mode: 'quality' }, async (q) => { active++; peak = Math.max(peak, active); await new Promise(x => setTimeout(x, 5)); active--; return pagesFor(q); });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(peak, 1);
+  assert.equal(r.subQuestions.length, 4);
+});
+
 test('Balanced researches at most two sub-questions at a time and fact-checks against all the pages', async () => {
   let active = 0, peak = 0;
   const four = { sub_questions: [1, 2, 3, 4].map(i => ({ question: `Question ${i}?`, query: `query ${i}` })) };
   const c = fake({ plan: JSON.stringify(four) });
   const r = await run(c, { mode: 'balanced' }, async (q) => { active++; peak = Math.max(peak, active); await new Promise(x => setTimeout(x, 5)); active--; return pagesFor(q); });
   assert.equal(r.ok, true, r.error);
-  assert.equal(peak, REPORT.concurrency);
+  assert.equal(peak, REPORT.researchAtATime.balanced);
   assert.equal(r.subQuestions.length, 4);
   assert.ok(c.calls.some(x => x.role === 'factcheck'));
   assert.equal(c.calls.filter(x => x.role === 'plan').length, 1);
@@ -246,4 +256,16 @@ test('the CLI: --report is the article feature with the report format, its own w
   assert.equal(route('write a report on heat pumps', '--no-auto-article'), null);
   assert.equal(route('write an article about heat pumps').report, false);
   assert.equal(route('write a report generator in Python').code, true);
+});
+
+test('an editing pass that renames the fixed sections is rejected, and a draft without them is noted', async () => {
+  // Quality, 2026-11-13: the style and copy passes left a report with no Summary and no "Where the sources disagree" section
+  const renamed = REPORT_TEXT.replace('## Summary', '## Overview').replace('## Where the sources disagree or are thin', '## Caveats');
+  const c = fake({ polish: renamed });
+  const r = await run(c, { mode: 'balanced' });
+  assert.equal(r.ok, true, r.error);
+  assert.match(r.article, /## Summary/);
+  assert.ok(r.degraded.some(d => /polish was rejected \(lost a fixed section of the report\)/.test(d)), r.degraded.join('; '));
+  const d = await run(fake({ draft: renamed, polish: renamed }));
+  assert.ok(d.degraded.some(x => /does not have its fixed sections/.test(x)), d.degraded.join('; '));
 });

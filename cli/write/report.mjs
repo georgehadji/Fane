@@ -2,6 +2,14 @@
 // sub-questions, researches each one, asks for notes per sub-question, then writes one report. A model's JSON is read
 // here, and it is the trust boundary: counts, lengths and source numbers are enforced in code, whatever the model said.
 
+import { reportHeadings } from './prompts.mjs';
+
+// A report is told by its three fixed sections (formats.mjs REPORT; prompts.mjs reportHeadings), in either language: the answer
+// carries no mark, and an earlier answer from before this check still reads. Its key figures are a Markdown table.
+const linesOf = (t) => String(t).split('\n').map(l => l.trim());
+export const hasReportShape = (t) => { const lines = linesOf(t); return ['en', 'el'].some(l => Object.values(reportHeadings(l)).every(h => lines.includes(`## ${h}`))); };
+export const hasTable = (t) => linesOf(t).some(l => l.startsWith('|') && l.includes('---'));
+
 const text = (s, n) => (typeof s === 'string' ? s.replace(/\s+/g, ' ').trim().slice(0, n) : '');
 const key = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 

@@ -38,7 +38,7 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   const report = isReportRequest(query);
   const platform = report ? null : postPlatform(query);
   // A follow-up edit: the message reads like one ("shorter", "rewrite the intro") and the answer before it is an article of ours
-  // (a report's answer is one too: it has a title and a sources list, and is edited as an article).
+  // (a report's answer is one too: parseArticleAnswer tells it by its three fixed sections, and the editor keeps them).
   let earlier = null;
   if (!report && !platform && !isArticleRequest(query)) {
     // "make a Python script that ..." starts like an edit; the code hook, which runs after this one, takes it
@@ -53,7 +53,7 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
   const lang = earlier ? targetLanguage(query, earlier.lang) : detectLanguage(query);
   const state = { lang, phases: [], running: earlier ? 'edit' : report ? 'plan' : 'sources', draft: null };
-  const turn = createTurn({ feature: report ? 'report' : platform ? 'post' : earlier?.format ? 'post-edit' : earlier ? 'article-edit' : 'article', prompts, emit, update, log, tag: tagged });
+  const turn = createTurn({ feature: report ? 'report' : platform ? 'post' : earlier?.format ? 'post-edit' : earlier?.report ? 'report-edit' : earlier ? 'article-edit' : 'article', prompts, emit, update, log, tag: tagged });
   const { say } = turn;
   log = turn.log;
   await turn.run(renderArticleProgress(state), async () => {
@@ -74,7 +74,7 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
         if (e.phase === 'sources' && e.status === 'done') researchDone();
         if (e.status === 'running') { state.running = e.phase; return () => renderArticleProgress(state); }
       });
-      const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, format: earlier.format || 'article', mode: useMode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: onEdit });
+      const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, format: earlier.format || (earlier.report ? 'report' : 'article'), mode: useMode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: onEdit });
       await turn.settle();
       say(!r.ok ? renderArticleFailure({ ...r, edit: true, post: !!earlier.format }, lang) : earlier.format ? renderPostResult(r) : renderArticleResult(r));
       return r;

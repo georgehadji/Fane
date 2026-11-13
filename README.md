@@ -342,7 +342,7 @@ vane --post facebook "tidal power in Orkney" --words 90 --out post.txt
 - "do deep research on …";
 - «γράψε μια έκθεση για …», «κάνε βαθιά έρευνα για …».
 
-"Write a report generator in Python" stays code. A report is several researches, so it takes and costs several times an article; that has not been measured yet (the paid comparison with a Quality article, `bench/reports.json`, is not run). `--words` takes 600–3500 (default: Speed 900, Balanced 1500, Quality 2200). A sub-question whose research or notes fail is listed under the report and the others carry on; no source at all fails the run. A follow-up edit in Vane's chat ("make it shorter") treats the report as an article, and the CLI has no edit for reports.
+"Write a report generator in Python" stays code. A report is several researches, so it takes and costs several times an article; that has not been measured yet (the paid comparison with a Quality article, `bench/reports.json`, is not run). A follow-up in the web chat ("make it shorter", "translate it to Greek") edits the report and keeps its fixed sections and key figures table; `--edit-article` does the same for a file from `--report`. `--words` takes 600–3500 (default: Speed 900, Balanced 1500, Quality 2200). A sub-question whose research or notes fail is listed under the report and the others carry on; no source at all fails the run. A follow-up edit in Vane's chat ("make it shorter") treats the report as an article, and the CLI has no edit for reports.
 
 ### Code (`--code`)
 

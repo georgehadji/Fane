@@ -4,13 +4,14 @@
 // citations renumbered, sources list written by code, checks run. Pure except for the injected client.
 import { ANSWER_MARKER } from '../image/present.mjs';
 import { checkCitations, firstComment, renumber, runChecks, sourcesSection, stripCitations } from './checks.mjs';
-import { POST_MARK, isPost } from '../core/formats.mjs';
+import { POST_MARK, isPost, isReport } from '../core/formats.mjs';
 import { namesPost } from '../core/intent-article.mjs';
 import { detectLanguage, fold, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
 import { createRoleCaller } from './llm.mjs';
 import { DEFAULT_MODE, tokensFor } from './models.mjs';
 import { resolveEffort } from '../core/effort.mjs';
 import { prompts } from './prompts.mjs';
+import { hasReportShape, hasTable } from './report.mjs';
 
 // The verbs that start an edit request. Questions ("why", "what", "explain"), anything with a question mark
 // ("?", or ";" in Greek), thanks and praise ("Πολύ καλό, ευχαριστώ!") are not edits: Vane answers them.
@@ -40,6 +41,8 @@ export function targetLanguage(instruction, fallback) {
   return /^(?:english|αγγλικ)/u.test(m[1]) ? 'en' : 'el';
 }
 
+export { hasReportShape };
+
 const SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹';
 const SOURCES_AT = /\n\n## (?:Sources|Πηγές)\n\n/;
 
@@ -63,7 +66,7 @@ export function parseArticleAnswer(answer) {
     .replace(new RegExp(`\\[([${SUP}]+)\\]\\([^)\\s]*\\)`, 'g'), (_, sup) => `[${[...sup].map(c => SUP.indexOf(c)).join('')}]`)
     .replace(/\[\d+\](?:\s\[\d+\])+/g, (run) => `[${[...run.matchAll(/\d+/g)].map(x => x[0]).join(', ')}]`)
     .trim();
-  return { body, sources: Array.from(sources, s => s || { title: '', url: '', content: '' }), lang: detectLanguage(body) };
+  return { body, sources: Array.from(sources, s => s || { title: '', url: '', content: '' }), lang: detectLanguage(body), ...(hasReportShape(body) ? { report: true } : {}) };
 }
 
 const COMMENT_AT = /\n\n\*\*(?:First comment|Πρώτο σχόλιο)\*\*\n\n/;
@@ -98,7 +101,7 @@ export const MAX_NEW_SOURCES = 8;
 export function createArticleEditor({ client, log = () => {}, now = Date.now, maxCost }) {
   const call = createRoleCaller({ client, log, maxCost });
   return async function editArticle({ body, sources, instruction, lang, format = 'article', mode = DEFAULT_MODE, effort = resolveEffort(mode), chains, prices, retrieve, onProgress = () => {} }) {
-    const post = isPost(format);
+    const post = isPost(format), report = isReport(format);
     const t0 = now();
     lang ||= detectLanguage(body);
     const emit = (e) => { try { onProgress(e); } catch { /* a throwing listener must not stop the edit */ } };
@@ -128,6 +131,8 @@ export function createArticleEditor({ client, log = () => {}, now = Date.now, ma
 
     const next = lang === 'el' ? repairFinalNu(repairHomoglyphs(r.text).text).text : r.text;
     if (!post && /^\s*#\s/m.test(body) && !/^\s*#\s/m.test(next)) return { ok: false, error: 'the edit lost the title, so the article was not changed', ...base };
+    if (report && !hasReportShape(next)) return { ok: false, error: 'the edit removed a section of the report, so the report was not changed', ...base };
+    if (report && hasTable(body) && !hasTable(next)) return { ok: false, error: 'the edit removed the key figures table, so the report was not changed', ...base };
     if (wordCount(next) < wordCount(body) * 0.25) return { ok: false, error: 'the edit left less than a quarter of the text, so the article was not changed', ...base };
     if (post) {
       // the published post has no [n] markers (stripCitations); its sources stay as they were in the first comment

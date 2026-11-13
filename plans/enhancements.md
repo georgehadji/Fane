@@ -225,5 +225,5 @@ Because it runs inside the cache, the cost is paid once per topic per refresh, m
 - Source-reliability scoring: large, and there is no agreed way to judge it.
 - Skipping Vane's classifier for summaries: only if item 1's timing shows the classifier dominates.
 - Moving `KLEON`/`MEDIUM` onto the shared cache: a cleanup with upgrade targets, after phase C.
-- Follow-up edits of reports.
+- ~~Follow-up edits of reports.~~ Done 2026-11-13 (`hasReportShape`, `reportEditRule`, `report-edit.test.mjs`).
 - The phone layout of the summary page: unchecked, a check rather than a plan item; do it with item 4's live check (`resize_window` mobile).

@@ -83,6 +83,8 @@ const REPORT_HEADINGS = {
   el: { summary: 'Σύνοψη', figures: 'Βασικά στοιχεία', gaps: 'Όπου οι πηγές διαφωνούν ή είναι περιορισμένες' },
 };
 export const reportHeadings = (lang) => REPORT_HEADINGS[lang] || REPORT_HEADINGS.en;
+// Appended to a follow-up edit of a report: the fixed sections, in the headings of the language the edit leaves it in.
+const reportEditRule = (lang) => { const h = reportHeadings(lang); return ` This is a research report with fixed sections: "## ${h.summary}" first, the body sections, "## ${h.figures}" as a Markdown table (keep it a table and its columns), and "## ${h.gaps}" last. Keep all three fixed sections and their order, with these headings (in this language). When a change alters a figure or a fact, change it everywhere it appears: summary, body and table. Only the last section may write about the sources.`; };
 
 const notesBlock = (notes, sources) => notes.map((n, i) => {
   const body = n.facts ? (n.facts.length ? n.facts.map(f => `- ${f.text} [${f.sources.join(', ')}]`).join('\n') : '- (the sources gave no usable fact for this)') : sourceBlock(n.group.map(g => sources[g - 1]), { excerpt: 350, numbers: n.group });
@@ -168,7 +170,7 @@ export const prompts = {
     user: `Post:\n<post>\n${article}\n</post>\n\nRequest from the author (do exactly this and nothing else): ${instruction}\n\nThe post is now ${wordCount(article)} words; when the request names a length, aim at it closely.\nRules: change only what the request asks for; keep the rest of the text as it is. Add no fact that is not already in the post.${postEditRule(format)}\n\nOutput the full revised post only.`,
   }) : ({
     system: `You are an editor revising a finished article on the author's request. ${header(lang)}\n\n${HUMAN_RULES[lang] || HUMAN_RULES.en}`,
-    user: `${sourceBlock(sources, { excerpt: newFacts ? 900 : 0 })}\n\nArticle:\n<article>\n${article}\n</article>\n\nRequest from the author (do exactly this and nothing else): ${instruction}\n\nThe article is now ${wordCount(article)} words; when the request names a length, aim at it closely.\nRules: change only what the request asks for; keep the rest of the text as it is. ${newFacts ? 'Add no fact that is not already in the article or in a source excerpt above, and cite each new fact with the number of the source that says it.' : 'Add no fact that is not already in the article.'} Keep the "# " title and "## " headings unless the request is about them, keep each [n] citation next to the claim it supports, and use only the numbers listed above. Add no sources list. Output the full revised article only.`,
+    user: `${sourceBlock(sources, { excerpt: newFacts ? 900 : 0 })}\n\nArticle:\n<article>\n${article}\n</article>\n\nRequest from the author (do exactly this and nothing else): ${instruction}\n\nThe article is now ${wordCount(article)} words; when the request names a length, aim at it closely.\nRules: change only what the request asks for; keep the rest of the text as it is. ${newFacts ? 'Add no fact that is not already in the article or in a source excerpt above, and cite each new fact with the number of the source that says it.' : 'Add no fact that is not already in the article.'} Keep the "# " title and "## " headings unless the request is about them, keep each [n] citation next to the claim it supports, and use only the numbers listed above. Add no sources list.${isReport(format) ? reportEditRule(lang) : ''} Output the full revised article only.`,
   }),
 
   audit: ({ lang, article, ledger }) => ({

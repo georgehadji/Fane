@@ -26,6 +26,9 @@ export const REPORT = {
   maxWords: 3500,
   subQuestions: { speed: 3, balanced: 4, quality: 6 },
   concurrency: 2,
+  // Researches at a time per mode. Quality runs them one by one: two Quality researches together took Vane's Node process past its
+  // 4 GB heap ("Reached heap limit", three times, 2026-11-13) and restarted it, with every chat in progress.
+  researchAtATime: { speed: 2, balanced: 2, quality: 1 },
   perQuestion: 6,
   maxSources: 24,
 };
