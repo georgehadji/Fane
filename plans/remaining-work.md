@@ -68,7 +68,7 @@ Ask before running: it spends OpenRouter credits.
 
 ## 5. Follow-up edits of social posts
 
-**Status: done 2026-11-13, not committed.** Built as designed, with two deliberate cuts: a post edit never searches (a request to add facts gets a `degraded` note, because a post has no `[n]` markers to put a new source behind) and its sources stay as they were in the first comment. The mark is `postMark()` in `core/formats.mjs`; `cli/test/post-edit.test.mjs` holds the round trip, the editor, the routing and the failure wording. Needs `node scripts/apply.mjs` (hook folder, so a Vane restart).
+**Status: done 2026-11-13, pushed (086b4f8), applied and checked in the web chat.** Built as designed, with two deliberate cuts: a post edit never searches (a request to add facts gets a `degraded` note, because a post has no `[n]` markers to put a new source behind) and its sources stay as they were in the first comment. The mark is `postMark()` in `core/formats.mjs`; `cli/test/post-edit.test.mjs` holds the round trip, the editor, the routing and the failure wording. Needs `node scripts/apply.mjs` (hook folder, so a Vane restart).
 
 **Now.** `parseArticleAnswer` needs a `# ` title; posts have none, so "make it shorter" after a LinkedIn post becomes a search.
 
@@ -83,9 +83,9 @@ Ask before running: it spends OpenRouter credits.
 
 ## 6. Follow-up edits of generated code
 
-**Status: done 2026-11-13, not committed.** Built as designed, with these differences: `parseCodeAnswer` and `pickTargets` live in the new `cli/code/edit.mjs` (it reads what `present.mjs` wrote), `createCodeEditor` returns `editCode`, a change is reviewed in Balanced and Quality but its findings are listed, not fixed (ask for the fix as the next change), the README is left out of an edit's answer, and `isCodeEdit` needs only a leading edit verb (the hook's `parseCodeAnswer` check is the real gate). `cli/test/code-edit.test.mjs` holds the round trip, the editor, the routing and the patch upgrade. Needs `node scripts/apply.mjs` (hook folder, so a Vane restart).
+**Status: done 2026-11-13, pushed (fea1b23, fix 34840e1), applied and checked in the web chat (Speed only; Balanced's review step is covered by unit tests).** Built as designed, with these differences: `parseCodeAnswer` and `pickTargets` live in the new `cli/code/edit.mjs` (it reads what `present.mjs` wrote), `createCodeEditor` returns `editCode`, a change is reviewed in Balanced and Quality but its findings are listed, not fixed (ask for the fix as the next change), the README is left out of an edit's answer, and `isCodeEdit` needs only a leading edit verb (the hook's `parseCodeAnswer` check is the real gate). `cli/test/code-edit.test.mjs` holds the round trip, the editor, the routing and the patch upgrade. Lesson from the apply: an upgrade target's `marker` must not be text another hook in the same route also holds (the article hook has the same `lastAnswer`/`history` text), or the engine reports "already patched"; the test bundle now includes an article hook.
 
-**Now.** Not supported. A code answer has `CODE_ANSWER_MARKER`, `<h4>` paths, and fences from `fenceFor`.
+**Was.** Not supported. A code answer has `CODE_ANSWER_MARKER`, `<h4>` paths, and fences from `fenceFor`.
 
 **Design (in `cli/code`; detector in `core`).**
 
