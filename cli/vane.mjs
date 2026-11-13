@@ -17,7 +17,8 @@ import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
 import { isCodeRequest } from './core/intent-code.mjs';
 import { isBrainstormRequest } from './core/intent-brainstorm.mjs';
 import { REASONING_LEVELS, resolveEffort } from './core/effort.mjs';
-import { DEFAULTS, UsageError, VALID_MODES, VALID_SOURCES, addOpenRouterModel, findOpenRouterProvider, getProviders, getProvidersStartingVane, listOpenRouter, openRouterBaseUrlWarning, resolveModel, search, vaneModelRequest } from './client.mjs';
+import { findFreeLlm } from './image/openrouter.mjs';
+import { DEFAULTS, UsageError, VALID_MODES, VALID_SOURCES, addOpenRouterModel, findOpenRouterProvider, getModelProviders, getProviders, getProvidersStartingVane, listOpenRouter, openRouterBaseUrlWarning, resolveModel, search, vaneModelRequest } from './client.mjs';
 import { modeOf, listArticleModels, listCodeModels, listImageModels, runArticle, runArticleEdit, runBrainstorm, runCode, runImage } from './runners.mjs';
 export { DEFAULTS, findOpenRouterProvider, resolveModel } from './client.mjs';
 
@@ -429,6 +430,67 @@ function dockerOut(args, timeout = 30_000, input) {
   return execFileSync('docker', args, { encoding: 'utf8', stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], timeout, input }).trim();
 }
 
+// ---- doctor: the services beside Vane --------------------------------------
+// Ladder (paywalled pages) and freellmapi (free models) are optional, so a problem with either is a warning. Each probe
+// runs inside the Vane container: what matters is what Vane can reach, and `host.docker.internal` resolves only there.
+
+export const LADDER_DEFAULT_URL = 'http://host.docker.internal:9081';
+
+// Source for `node -e` in the container: prints {status} or {error}. A redirect is reported, not followed.
+export const probeScript = (url) => `fetch(${JSON.stringify(String(url))},{redirect:'manual',signal:AbortSignal.timeout(5000)}).then(r=>console.log(JSON.stringify({status:r.status})),e=>console.log(JSON.stringify({error:String((e&&e.cause&&e.cause.code)||(e&&e.name)||e)})))`;
+
+// One probe answer (`{status}` or `{error}`) as a doctor line. `up` says which statuses mean the service is the one expected.
+export function classifyProbe(probe, { name, why, fix, up = (s) => s >= 200 && s < 500 }) {
+  if (probe.error) return { level: 'warn', message: `${name} not reachable from the container (${probe.error}): ${why}. ${fix}` };
+  if (!up(probe.status)) return { level: 'warn', message: `${name} answered HTTP ${probe.status}, not what it should: another service on that port? ${why}. ${fix}` };
+  return { level: 'ok', message: `${name} reachable from the container (HTTP ${probe.status})` };
+}
+
+// The probes to run. `ladderUrl`: FANE_LADDER_URL as the container has it (undefined unset = the default, '' = the fallback is off);
+// `freeOrigin`: the origin of the Vane provider that points at freellmapi, or null.
+export function serviceRows({ ladderUrl, freeOrigin }) {
+  const rows = [];
+  const ladder = ladderUrl === undefined ? LADDER_DEFAULT_URL : String(ladderUrl).trim();
+  if (ladder) rows.push({ name: 'Ladder', url: ladder, why: 'paywalled or blocked pages are read without it', fix: 'Start it with: docker start weebot-ladder' });
+  if (freeOrigin) rows.push({ name: 'freellmapi', url: `${freeOrigin}/api/ping`, up: (s) => s === 200, why: 'free: models and the free chains cannot run without it', fix: 'Start it with: docker compose up -d (in the freellmapi folder, see README, Free models)' });
+  return rows;
+}
+
+// A restart policy of "no" means the container stays down after a reboot or a Docker restart.
+export function restartLine(name, policy) {
+  return !policy || policy === 'no'
+    ? { level: 'warn', message: `container "${name}" has no restart policy and stays down after a reboot: docker update --restart unless-stopped ${name}` }
+    : { level: 'ok', message: `container "${name}" restarts (${policy})` };
+}
+
+// The origin of the Vane provider that points at freellmapi, or null. The provider list holds its key: only the origin leaves.
+async function freeLlmOrigin(url) {
+  try {
+    const found = findFreeLlm(await getModelProviders(url));
+    return found ? new URL(found.baseUrl).origin : null;
+  } catch { return null; }
+}
+
+async function checkServices(container, freeOrigin, report) {
+  let ladderUrl;
+  try { ladderUrl = JSON.parse(dockerOut(['exec', container, 'node', '-e', 'console.log(JSON.stringify(process.env.FANE_LADDER_URL??null))'], 15_000)) ?? undefined; } catch { /* default */ }
+  if (ladderUrl === '') report('ok', 'Ladder fallback off (FANE_LADDER_URL is empty)');
+  for (const row of serviceRows({ ladderUrl, freeOrigin })) {
+    try {
+      const { level, message } = classifyProbe(JSON.parse(dockerOut(['exec', container, 'node', '-e', probeScript(row.url)], 20_000)), row);
+      report(level, message);
+    } catch (err) { report('warn', `${row.name} check failed: ${err.message.split('\n')[0]}`); }
+  }
+  const names = [container, 'weebot-ladder'];
+  try { names.push(...dockerOut(['ps', '-a', '--filter', 'label=com.docker.compose.service=freellmapi', '--format', '{{.Names}}']).split(/\s+/).filter(Boolean)); } catch { /* none */ }
+  for (const name of names) {
+    let policy;
+    try { policy = dockerOut(['inspect', '-f', '{{.HostConfig.RestartPolicy.Name}}', name]); } catch { continue; } // not a container here
+    const { level, message } = restartLine(name, policy);
+    report(level, message);
+  }
+}
+
 // Prints one line per check. Returns the number of failed checks (warnings do not count).
 async function doctor(opts) {
   const container = DEFAULTS.container;
@@ -443,6 +505,7 @@ async function doctor(opts) {
   catch { report('FAIL', 'Docker daemon not reachable. Start Docker Desktop.'); }
 
   let running = false;
+  let freeOrigin = null;
   if (dockerUp) {
     try {
       running = dockerOut(['inspect', '-f', '{{.State.Running}}', container]) === 'true';
@@ -465,6 +528,7 @@ async function doctor(opts) {
       if (warning) report('warn', warning);
       else report('ok', `OpenRouter provider "${provider.name}" found (-m vendor/model works)`);
     } catch (err) { report('warn', err.message); }
+    freeOrigin = await freeLlmOrigin(opts.url); // before any docker call: those block the loop, and Vane drops the idle connection meanwhile
   } catch (err) { report('FAIL', `Vane API ${opts.url} not reachable: ${err.message}`); }
 
   if (!running) return failures;
@@ -526,6 +590,8 @@ async function doctor(opts) {
     }
     else report(core.n > 0 ? 'ok' : 'warn', core.n > 0 ? `CORE academic engine returns results (${core.n} for "symplectic integrator")` : `CORE academic engine returned 0 results${core.down.length ? `: ${core.down.map(([, why]) => why).join(', ')}` : ''} (check the key)`);
   } catch (err) { report('warn', `CORE check failed: ${err.message.split('\n')[0]}`); }
+
+  await checkServices(container, freeOrigin, report);
 
   return failures;
 }

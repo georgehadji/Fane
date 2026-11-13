@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 // DEFAULTS read the environment at import time, so clear it first.
 for (const k of ['VANE_URL', 'VANE_CHAT_MODEL', 'VANE_EMBEDDING_MODEL', 'VANE_CONTAINER', 'VANE_SOURCES', 'VANE_MODE']) delete process.env[k];
-const { parseCli, resolveModel, findOpenRouterProvider, autoRoute } = await import('../vane.mjs');
+const { parseCli, resolveModel, findOpenRouterProvider, autoRoute, classifyProbe, probeScript, serviceRows, restartLine, LADDER_DEFAULT_URL } = await import('../vane.mjs');
 
 test('a query routed to images or articles has its options checked as if --image/--article was typed', () => {
   const route = (...argv) => autoRoute(parseCli(argv), argv);
@@ -167,4 +167,49 @@ test('featureOf: one feature flag per call; two or more is a UsageError naming t
   for (const [argv, flags] of clashes) {
     assert.throws(() => parseCli(argv), (e) => e instanceof UsageError && flags.every(f => e.message.includes(f)), argv.join(' '));
   }
+});
+
+const LADDER = { name: 'Ladder', why: 'paywalled pages are read without it', fix: 'docker start weebot-ladder' };
+const FREE = { name: 'freellmapi', why: 'free models need it', fix: 'docker compose up -d', up: (s) => s === 200 };
+
+test('classifyProbe: refused and timed out are warnings with the start command, never failures', () => {
+  for (const error of ['ECONNREFUSED', 'TimeoutError']) {
+    const r = classifyProbe({ error }, LADDER);
+    assert.equal(r.level, 'warn');
+    assert.ok(r.message.includes(error) && r.message.includes('docker start weebot-ladder'));
+  }
+});
+
+test('classifyProbe: an answer is ok unless the row says that status is the wrong service', () => {
+  assert.equal(classifyProbe({ status: 200 }, LADDER).level, 'ok');
+  assert.equal(classifyProbe({ status: 404 }, LADDER).level, 'ok'); // a proxy's root may answer anything below 500
+  assert.equal(classifyProbe({ status: 502 }, LADDER).level, 'warn');
+  assert.equal(classifyProbe({ status: 200 }, FREE).level, 'ok');
+  const other = classifyProbe({ status: 401 }, FREE); // the ping needs no key: 401 is another service on the port
+  assert.equal(other.level, 'warn');
+  assert.ok(other.message.includes('401') && other.message.includes('another service'));
+});
+
+test('serviceRows: Ladder by default, none when FANE_LADDER_URL is empty, freellmapi only with a provider', () => {
+  assert.deepEqual(serviceRows({ ladderUrl: undefined, freeOrigin: null }).map(r => [r.name, r.url]), [['Ladder', LADDER_DEFAULT_URL]]);
+  assert.deepEqual(serviceRows({ ladderUrl: '  ', freeOrigin: null }), []);
+  assert.deepEqual(serviceRows({ ladderUrl: 'http://x:1', freeOrigin: 'http://host.docker.internal:3001' }).map(r => [r.name, r.url]),
+    [['Ladder', 'http://x:1'], ['freellmapi', 'http://host.docker.internal:3001/api/ping']]);
+});
+
+test('probeScript is valid JavaScript for any address and carries the address as a string', () => {
+  for (const url of ['http://host.docker.internal:9081', 'http://x/"q\'']) {
+    const src = probeScript(url);
+    assert.doesNotThrow(() => new Function(src));
+    assert.ok(src.includes(JSON.stringify(url)));
+  }
+});
+
+test('restartLine: "no" and an empty policy warn with the docker update command', () => {
+  for (const policy of ['no', '']) {
+    const r = restartLine('weebot-ladder', policy);
+    assert.equal(r.level, 'warn');
+    assert.ok(r.message.includes('docker update --restart unless-stopped weebot-ladder'));
+  }
+  for (const policy of ['unless-stopped', 'always', 'on-failure']) assert.equal(restartLine('vane', policy).level, 'ok');
 });

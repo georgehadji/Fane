@@ -171,7 +171,7 @@ A call takes one feature flag (`--image`, `--article`, `--post`, `--edit-article
 | `--verify` | Check every cited sentence against the sources it cites (see below) |
 | `--min-support <0-1>` | With `--verify`: exit 1 if the supported share of cited sentences is lower |
 | `-t, --timeout` | `180` seconds, `600` with `--mode quality` |
-| `--doctor` | Check Docker, container, models, patches and SearXNG; exit 1 on a failed check |
+| `--doctor` | Check Docker, container, models, patches, SearXNG, and (as warnings) Ladder, freellmapi and restart policies; exit 1 on a failed check |
 | `--reasoning <r>` | With `--article`, `--post`, `--edit-article`, `--code` or `--brainstorm`: `minimal`, `low`, `medium` or `high`, how much the models think before answering (default: the mode's, `low`) |
 | `--max-cost <usd>` | With the same: stop before the next model call once the run has cost this much; overrides `FANE_MAX_COST` |
 
@@ -212,6 +212,19 @@ node scripts/code-trial.mjs --free --concurrency 3
 ```
 
 Run them again after adding provider keys to freellmapi. The answer names the model that wrote it (`free:gemini-3.8-flash`, or for a router entry the model freellmapi chose, `free:groq/llama-3.3-70b`). Free calls cost $0. Quality drops late in the day as the best free tiers run out; freellmapi gives up a call after 45 s of failover (`FALLBACK_TIME_BUDGET_MS`), so raise that for long Quality or Greek articles.
+
+**Keeping it up after a reboot.** Run freellmapi under Docker instead of `npm run dev`: its own `docker-compose.yml` has `restart: unless-stopped`, a `/api/ping` healthcheck and a port on `127.0.0.1:3001`, which Vane reaches as `host.docker.internal:3001`. To keep the database and provider keys of an existing dev install, copy `server/data/` somewhere safe first, stop the dev server, and add an untracked `docker-compose.override.yml` beside the compose file:
+
+```yaml
+services:
+  freellmapi:
+    environment:
+      FREEAPI_DB_PATH: /app/server/data/freeapi.db
+    volumes: !override
+      - ./server/data:/app/server/data
+```
+
+then `docker compose up -d` in the freellmapi folder (the keys in the database are encrypted with `ENCRYPTION_KEY` from its `.env`, which the container reads too). Ladder has the same need: `docker update --restart unless-stopped weebot-ladder`. Docker Desktop itself must start at sign-in (Settings → General → "Start Docker Desktop when you sign in"). `vane --doctor` warns when Ladder or freellmapi cannot be reached from the Vane container (it probes from there, because `host.docker.internal` resolves only inside) or a container has no restart policy; both services are optional, so these are warnings, never failures.
 
 ### Image generation (`--image`)
 

@@ -33,6 +33,8 @@ Every new patch: README row, `docs/index.html` patch count ("Forty-one" becomes 
 
 ### 7. freellmapi and Ladder survive a reboot
 
+**Done 2026-11-13.** Data backed up (`../freellmapi-data-backup-2026-11-13`, outside both repos), `weebot-ladder` is `unless-stopped`, the untracked `docker-compose.override.yml` is in the freellmapi folder (listed in its `.git/info/exclude`), the dev server was stopped and `docker compose up -d` started `freellmapi-freellmapi-1` (healthy, restart `unless-stopped`, on the dev database); `vane --doctor` is clean. Not checked: a Docker Desktop restart or reboot.
+
 **Now.** freellmapi runs as `npm run dev` from `C:\Users\tesse\Documents\Vibe Coding\freellmapi` (a plain background process: gone after a reboot or a Docker restart). `weebot-ladder` has restart policy `no`. `vane` has `unless-stopped`. On 2026-11-13 all three were down and a summary chat hung at "Brainstorming..." on `ECONNREFUSED` to port 3001.
 
 **Design.** Not Fane code: freellmapi is its own repository and already ships a `Dockerfile` and a `docker-compose.yml` (port `127.0.0.1:3001`, `restart: unless-stopped`, a `/api/ping` healthcheck, `env_file: .env`, named volume `freellmapi-data` at `/app/server/data`).
@@ -48,6 +50,8 @@ Every new patch: README row, `docs/index.html` patch count ("Forty-one" becomes 
 **Check.** Restart Docker Desktop; `docker ps` shows `vane`, `weebot-ladder` and `freellmapi` up; a Speed chat on `auto:fast` answers; `vane --doctor` (item 8) clean.
 
 ### 8. `--doctor` checks Ladder, freellmapi and restart policies
+
+**Done 2026-11-13** (`probeScript`, `classifyProbe`, `serviceRows`, `restartLine` in `cli/vane.mjs`, tests in `vane.test.mjs`). Found while building: the provider list must be read before the first docker call, because `execFileSync` blocks the loop and Vane drops the idle keep-alive connection (`UND_ERR_SOCKET`). Checked live: Ladder and freellmapi reachable from the container, the `weebot-ladder` restart warning appeared.
 
 **Now.** `doctor()` in `cli/vane.mjs` checks Docker, the `vane` container, the Vane API, patches, hook folders, SearXNG and CORE. It says nothing about Ladder or freellmapi, so "fane not running" needed manual digging.
 
