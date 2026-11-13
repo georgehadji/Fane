@@ -93,6 +93,26 @@ module.exports.LANG = function LANG(text) {
   return greek > latin ? 'el' : undefined;
 };
 
+// 'hello' | 'thanks' | 'bye' when the whole message is a greeting, thanks or goodbye (English or Greek, case, accents,
+// punctuation and emoji ignored), else ''. patch-always-search skips research for these and patch-sources-required
+// answers them with a fixed line: "hello" was researched as a topic and answered with an essay on its etymology.
+// Injected as source text through `ascii` ((SMALLTALK)(q): no imports, no closure; the Greek words become \u escapes).
+// shortcut: whole-message matches only, so "hello, what is a monad" is searched; a new phrase is a new word in the table.
+module.exports.SMALLTALK = function SMALLTALK(text) {
+  var s = String(text == null ? '' : text).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\u03c2/g, '\u03c3').replace(/[^a-z0-9\u03b1-\u03c9]+/g, ' ').trim();
+  var T = {
+    hello: ['hello', 'hi', 'hey', 'hiya', 'howdy', 'hallo', 'yo', 'greetings', 'hello there', 'hi there', 'hey there', 'hello again', 'good morning', 'good afternoon', 'good evening', 'good day', 'γεια', 'γεια σου', 'γεια σας', 'γεια χαρα', 'χαιρετε', 'καλημερα', 'καλησπερα', 'καλημερα σας', 'καλησπερα σας', 'χαιρετισμοι'],
+    thanks: ['thanks', 'thank you', 'thanks a lot', 'thanks so much', 'thank you very much', 'many thanks', 'thx', 'cheers', 'ok thanks', 'okay thanks', 'ευχαριστω', 'ευχαριστω πολυ', 'ευχαριστω παρα πολυ', 'ευχαριστουμε', 'ευχαριστουμε πολυ'],
+    bye: ['bye', 'goodbye', 'good bye', 'bye bye', 'see you', 'see you later', 'good night', 'goodnight', 'αντιο', 'τα λεμε', 'καληνυχτα', 'γεια σου αντιο'],
+  };
+  for (var k in T) if (T[k].indexOf(s) >= 0) return k;
+  return '';
+};
+
+// SMALLTALK as injectable source text: line breaks stay (`ascii` would escape them, which is invalid outside a string),
+// Greek letters (only inside its string literals) become \u escapes, so the bundle stays ASCII.
+module.exports.SMALLTALK_SOURCE = String(module.exports.SMALLTALK).replace(/\r/g, '').replace(/[^\x20-\x7e\n]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+
 // Target shared by patch-scholarly-sources and patch-social-sources (whichever runs first
 // applies it): rank search results on their original text, not on the metadata prefix those
 // patches add. patch-web-search later rewrites this code and leaves the marker.

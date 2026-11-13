@@ -904,3 +904,68 @@ test('SUMMARY_QUESTION is injectable: ASCII, no backticks, no closure', () => {
   assert.ok(!src.includes('`'));
   assert.deepEqual(new Function(`return (${src})(${JSON.stringify(asked('t', 'https://a.gr/'))})`)(), { title: 't', url: 'https://a.gr/' });
 });
+
+test('SMALLTALK: a whole-message greeting, thanks or goodbye, in English or Greek, and nothing longer', () => {
+  const { SMALLTALK, SMALLTALK_SOURCE } = require('../../patches/lib/vane.js');
+  for (const [q, kind] of [['hello', 'hello'], ['Hello!!', 'hello'], ['  hi there. ', 'hello'], ['Γεια σου!', 'hello'], ['Καλημέρα', 'hello'],
+    ['thanks a lot', 'thanks'], ['Ευχαριστώ πολύ', 'thanks'], ['ΕΥΧΑΡΙΣΤΩ', 'thanks'], ['bye', 'bye'], ['Αντίο', 'bye'], ['καληνύχτα', 'bye']]) {
+    assert.equal(SMALLTALK(q), kind, q);
+  }
+  for (const q of ['hello what is a monad', 'hi, who won the cup?', 'γεια σου τι είναι η μονάδα', 'thanks for the news on Greece', 'who said hello first', '', null, undefined, 'hello\nhttps://a.gr/']) {
+    assert.equal(SMALLTALK(q), '', String(q));
+  }
+  // injected as source text: ASCII (line breaks kept), no backticks, no closure, same answers
+  assert.ok(/^[\x20-\x7e\n]*$/.test(SMALLTALK_SOURCE), 'ASCII');
+  assert.ok(!SMALLTALK_SOURCE.includes('`'));
+  const injected = new Function(`return (${SMALLTALK_SOURCE})`)();
+  for (const q of ['Γεια σου!', 'ευχαριστώ', 'Αντίο', 'bye', 'hello what is a monad']) assert.equal(injected(q), SMALLTALK(q), q);
+});
+
+test('patch-always-search: research is skipped for small talk only, from a fresh or an earlier-patched container', () => {
+  const { TARGETS } = require('../../patches/patch-always-search.js');
+  const chat = { [FILES.chatRoute]: 'd.classification.skipSearch||(m=new f.A().research(1))', [FILES.searchRoute]: 'c.classification.skipSearch||(j=new g.A().research(1))' };
+  const v1 = { [FILES.chatRoute]: '(d.classification.skipSearch=!1)||(m=new f.A().research(1))', [FILES.searchRoute]: '(c.classification.skipSearch=!1)||(j=new g.A().research(1))' };
+  for (const files of [chat, v1]) {
+    const r = planPatch(files, TARGETS);
+    assert.deepEqual(r.errors, []);
+    assert.equal(r.applied.length + (r.upgraded || []).length, 2);
+    for (const f of [FILES.chatRoute, FILES.searchRoute]) assert.ok(/^[\x20-\x7e\n]*$/.test(r.next[f]), 'the bundle stays ASCII');
+    assert.deepEqual(planPatch(r.next, TARGETS).applied, []); // idempotent
+    // run the chat text: skipSearch is true for small talk (no research) and false for a question
+    const run = (q) => {
+      const d = { classification: { skipSearch: false } };
+      let searched = false;
+      const f = { A: function () { this.research = () => { searched = true; return 1; }; } };
+      new Function('d', 'b', 'f', `var m;${r.next[FILES.chatRoute]}`)(d, { followUp: q }, f);
+      return { skip: d.classification.skipSearch, searched };
+    };
+    assert.deepEqual(run('hello'), { skip: true, searched: false });
+    assert.deepEqual(run('Γεια σου!'), { skip: true, searched: false });
+    assert.deepEqual(run('what is a monad'), { skip: false, searched: true });
+  }
+});
+
+test('patch-sources-required: small talk gets one fixed line in its own script, with no model call, at any point of a chat', async () => {
+  const quality = require('../../patches/patch-quality-check.js');
+  const required = require('../../patches/patch-sources-required.js');
+  const route = `(async (b,o,n,s,calls)=>{let t=b.config.llm.streamText({messages:[{role:"system",content:s},...b.chatHistory,{role:"user",content:b.followUp}]}),u="";let out="";for await(let c of t)out+=c.contentChunk;return out})`;
+  let r = planPatch({ [FILES.chatRoute]: route }, quality.TARGETS.slice(0, 1));
+  r = planPatch(r.next, required.TARGETS.slice(0, 1));
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(planPatch(r.next, required.TARGETS.slice(0, 1)).applied, []);
+  const answer = eval(r.next[FILES.chatRoute]);
+  const ask = async (followUp, history = []) => {
+    const calls = [];
+    const llm = { streamText: ({ messages }) => { calls.push(messages[0].content); return (async function* () { yield { contentChunk: 'from the model' }; })(); } };
+    return { text: await answer({ config: { mode: 'speed', llm }, chatHistory: history, followUp }, { searchFindings: [] }, [], 'PROMPT', calls), calls };
+  };
+  const S = required.SMALLTALK_REPLIES;
+  assert.deepEqual(await ask('hello'), { text: S.hello.en, calls: [] });
+  assert.deepEqual(await ask('Γεια σου!'), { text: S.hello.el, calls: [] });
+  assert.deepEqual(await ask('ευχαριστώ πολύ', [['human', 'q'], ['assistant', 'a']]), { text: S.thanks.el, calls: [] });
+  assert.deepEqual(await ask('Thanks!', [['human', 'q'], ['assistant', 'a']]), { text: S.thanks.en, calls: [] });
+  assert.deepEqual(await ask('bye'), { text: S.bye.en, calls: [] });
+  // anything else is as before
+  assert.deepEqual(await ask('latest news in Greece?'), { text: required.NOTHING.en, calls: [] });
+  assert.deepEqual(await ask('translate that', [['human', 'q'], ['assistant', 'a']]), { text: 'from the model', calls: [`PROMPT${required.FOLLOW_UP_RULE}`] });
+});
