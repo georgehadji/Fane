@@ -284,7 +284,11 @@ test('patch-code-chat: the hook gets lastAnswer and history, and an installed ho
   const upgrade = TARGETS.find(t => t.name === 'code hook can read the previous answer');
   assert.deepEqual(upgrade.ladder, ['V1', 'V1+pipeline-abort']);
   for (const alt of upgrade.alts) {
-    const bundle = `H.${alt.from}${JSON.stringify(require('../../patches/lib/vane.js').CONFIG_JSON)},research:y});`;
+    const { CONFIG_JSON } = require('../../patches/lib/vane.js');
+    const { LAST_ANSWER } = require('../../patches/patch-image-chat.js');
+    // the article hook sits in the same route and already has lastAnswer/history: it must not make this one look upgraded
+    const article = `H.handleArticleRequest(b.followUp,{lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},research:y});`;
+    const bundle = `${article}H.${alt.from}${JSON.stringify(CONFIG_JSON)},research:y});`;
     const r = planPatch({ [upgrade.file]: bundle }, [upgrade]);
     assert.deepEqual(r.errors, [], alt.from);
     assert.ok(r.next[upgrade.file].includes('lastAnswer:') && r.next[upgrade.file].includes('history:b.chatHistory'));

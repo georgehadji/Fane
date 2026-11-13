@@ -37,8 +37,8 @@ const TARGETS = [
       { from: 'handleCodeRequest(b.followUp,{mode:b.config.mode,configPath:', to: `handleCodeRequest(b.followUp,{lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:` },
       { from: 'handleCodeRequest(b.followUp,{signal:a.faneSignal,mode:b.config.mode,configPath:', to: `handleCodeRequest(b.followUp,{signal:a.faneSignal,lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:` },
     ],
-    // patch-pipeline-abort puts `signal` in front of it (or leaves it where it was)
-    marker: `${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},research:`,
+    // No marker: the article hook holds the same lastAnswer/history text, so a marker made from it counted this hook as
+    // upgraded. Each alt's `to` starts with handleCodeRequest(, which is enough (and the second is what abort leaves).
   },
   {
     name: 'code answers keep their brackets',
