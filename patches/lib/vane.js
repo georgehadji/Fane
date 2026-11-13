@@ -9,6 +9,7 @@ module.exports = {
     searchRoute: `${SERVER}/app/api/search/route.js`,
     chatRoute: `${SERVER}/app/api/chat/route.js`,
     uploadsRoute: `${SERVER}/app/api/uploads/route.js`,
+    suggestionsRoute: `${SERVER}/app/api/suggestions/route.js`, // the "Related" questions: its prompt
     discoverRoute: `${SERVER}/app/api/discover/route.js`,
     discoverPage: `${SERVER}/app/discover/page.js`, // the Discover page, server-rendered
     homeNews: `${SERVER}/chunks/400.js`, // the home page's news card, server-rendered; the answer-mode menu is in it too (patch-mode-icons)

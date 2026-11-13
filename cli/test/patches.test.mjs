@@ -6,7 +6,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const { planPatch, isApplied } = require('../../patches/lib/apply-targets.js');
-const { FILES } = require('../../patches/lib/vane.js');
+const { FILES, APP_CSS_END, IMAGE_ANSWER_MARKER } = require('../../patches/lib/vane.js');
 
 const F = '/x/bundle.js';
 const T = (o) => ({ name: 't', file: F, ...o });
@@ -241,7 +241,8 @@ test('patch-answer-language: the writer prompt asks for the language of the ques
   const r = planPatch({ [FILES.research]: prompt }, TARGETS);
   assert.deepEqual(r.errors, []);
   const text = new Function(`${r.next[FILES.research]}; return w('ctx')`)();
-  assert.match(text, /### Formatting Instructions\n {4}- \*\*Language\*\*: Write the whole answer[^\n]*Greek\.\n {4}- \*\*Summary requests\*\*: [^\n]*«Περίληψη»[^\n]*\n[\s\S]*«## Σύνοψη»[\s\S]*«## Βασικά σημεία»[\s\S]*«Πηγή:»[\s\S]*never translate it[\s\S]*\n {4}- \*\*Structure\*\*/);
+  assert.match(text, /### Formatting Instructions\n {4}- \*\*Language\*\*: Write the whole answer[^\n]*Greek\.\n {4}- \*\*Summary requests\*\*: [^\n]*«Περίληψη»[^\n]*\n[\s\S]*«## Σύνοψη»[\s\S]*«## Βασικά σημεία»[\s\S]*«Πηγή: site name, date» in a paragraph, never as a heading[\s\S]*never translate it[\s\S]*\n {4}- \*\*Structure\*\*/);
+  assert.match(text, /Σύνοψη»: one paragraph[^\n]*citation of the page[\s\S]*do not repeat the citation in the bullets/); // cite once for a one-source summary
   assert.ok(/^[\x20-\x7e\n]*$/.test(r.next[FILES.research]), 'the bundle stays ASCII');
   assert.deepEqual(planPatch(r.next, TARGETS).applied, []);
   // a container patched with the language rule alone gets the summary rule in place
@@ -249,6 +250,26 @@ test('patch-answer-language: the writer prompt asks for the language of the ques
   const up = planPatch({ [FILES.research]: v1 }, TARGETS);
   assert.deepEqual(up.errors, []);
   assert.equal(up.next[FILES.research], r.next[FILES.research]);
+  // and so does one patched with the version that cited every bullet and let «Πηγή» be a heading
+  const wrap = (rules) => `const w=(a,b)=>\`\n\n    ${rules}\n    - **Structure**: Use headings.\n    \${a}\`;`;
+  // (V2), and one patched before «Πηγή» was kept clear of horizontal rules (V3)
+  for (const alt of [2, 3]) {
+    const up2 = planPatch({ [FILES.research]: wrap(TARGETS[0].alts[alt].from.replace(/\n {4}- \*\*Structure\*\*:$/, '')) }, TARGETS);
+    assert.deepEqual(up2.errors, [], `alt ${alt}`);
+    assert.equal(up2.next[FILES.research], r.next[FILES.research], `alt ${alt}`);
+  }
+  assert.match(text, /Do not write horizontal rules \(---\)/);
+});
+
+test('patch-suggestions-language: the Related questions follow the language of the conversation, once', () => {
+  const { TARGETS, RULE } = require('../../patches/patch-suggestions-language.js');
+  const bundle = 'const p=`Provide 4-5 suggestions.\nMake sure the suggestions are medium in length and are informative and relevant to the conversation.\nReturn JSON.`;';
+  const r = planPatch({ [FILES.suggestionsRoute]: bundle }, TARGETS);
+  assert.deepEqual([r.errors, r.applied.length], [[], 1]);
+  const text = new Function(`${r.next[FILES.suggestionsRoute]}; return p`)();
+  assert.ok(text.includes(`relevant to the conversation. ${RULE}\nReturn JSON.`));
+  assert.deepEqual(planPatch(r.next, TARGETS).applied, []); // the marker stops a second insert
+  assert.ok(!/[`$\\]/.test(RULE), 'it sits inside a template literal');
 });
 test('patch-discover-summary-greek: every Discover and home news link asks for a Greek summary, in an ASCII bundle', () => {
   const { TARGETS, ASK } = require('../../patches/patch-discover-summary-greek.js');
@@ -279,29 +300,52 @@ test('patch-discover-summary-greek: every Discover and home news link asks for a
   }
 });
 
-test('patch-summary-heading: a summary chat prints its title, not the address; other questions are untouched', () => {
+test('patch-summary-heading: a summary page links its title, puts the answer first and has no image column; other chats are untouched', () => {
   const greek = require('../../patches/patch-greek-lang.js');
-  const { TARGETS } = require('../../patches/patch-summary-heading.js');
-  const bundle = 'const h=e=>({className:"text-black dark:text-white font-medium text-3xl lg:w-9/12",children:e.message.query});';
-  // file order: patch-greek-lang writes the heading first, patch-summary-heading edits its output; both stay applied on a second pass
-  let files = { [FILES.messageClient]: bundle };
+  const imageUi = require('../../patches/patch-image-ui.js');
+  const summary = require('../../patches/patch-summary-heading.js');
+  const { TARGETS } = summary;
+  // the pieces of Vane's message component these patches edit: heading, answer column, side column
+  const bundle = 'const id=o=>o;const render=(e,r,a,p,b,h)=>({'
+    + 'head:id({className:"text-black dark:text-white font-medium text-3xl lg:w-9/12",children:e.message.query}),'
+    + 'col:{ref:a,className:"flex flex-col space-y-6 w-full lg:w-9/12",children:[p.length>0&&1]},'
+    + 'side:[0,b&&(0,r.jsxs)("div",{className:"lg:sticky lg:top-20 flex flex-col items-center space-y-3 w-full",children:[]})]});';
+  const css = `.a{}${APP_CSS_END}`;
+  // file order: patch-image-ui, patch-greek-lang write first, patch-summary-heading edits their output; all stay applied on a second pass
+  let files = { [FILES.messageClient]: bundle, [FILES.appCss]: css };
   for (let pass = 0; pass < 2; pass++) {
-    for (const targets of [[greek.TARGETS[0]], TARGETS]) {
+    for (const targets of [imageUi.TARGETS, [greek.TARGETS[0]], TARGETS]) {
       const r = planPatch(files, targets);
       assert.deepEqual(r.errors, [], `pass ${pass}`);
-      assert.equal(r.applied.length, pass === 0 ? 1 : 0, `pass ${pass}`);
+      assert.equal(r.applied.length, pass === 0 ? targets.length : 0, `pass ${pass}`);
       files = { ...files, ...r.next };
     }
   }
-  const text = files[FILES.messageClient];
-  assert.ok(/^[\x20-\x7e\n]*$/.test(String(require('../../patches/patch-summary-heading.js').HEAD)), 'what this patch injects is ASCII'); // greek-lang\'s LANG is not
-  const heading = new Function(`${text}; return h`)();
-  const shown = (query) => heading({ message: { query } }).children;
-  assert.equal(shown('Περίληψη: A title\nhttps://x.test/a?b=1&c=2'), 'Περίληψη: A title');
-  assert.equal(shown('Περίληψη: Τίτλος άρθρου\nhttps://x.test/a\n'), 'Περίληψη: Τίτλος άρθρου'); // a trailing newline is fine
-  assert.equal(heading({ message: { query: 'Περίληψη: Τίτλος άρθρου\nhttps://x.test/a' } }).lang, 'el'); // greek-lang's prop is still there
-  // untouched: no title (the old form), no address, other questions, and a second line that is not an address
-  for (const q of ['Περίληψη: https://x.test/a', 'Περίληψη: \nhttps://x.test/a', 'Περίληψη: A title', 'what is a title\nhttps://x.test/a', 'Περίληψη: A title\nand some more text']) assert.equal(shown(q), q, q);
+  for (const f of [summary.HEADING, summary.ISSUM]) assert.ok(/^[\x20-\x7e\n]*$/.test(String(f)), 'what this patch injects is ASCII'); // greek-lang's LANG is not
+  const jsx = { Fragment: 'F', jsxs: (type, props) => ({ type, props }), jsx: (type, props) => ({ type, props }) };
+  const render = new Function(`${files[FILES.messageClient]}; return render`)();
+  const page = (query, { b = true, h = 'answer' } = {}) => render({ message: { query } }, jsx, null, [], b, h);
+  const link = 'Περίληψη: Title\nhttps://x.test/a?b=1&c=2';
+  // heading: the word, then the title as a link whose tooltip is the address
+  const head = page(link).head.children;
+  assert.deepEqual([head.type, head.props.children[0]], ['F', 'Περίληψη: ']);
+  assert.deepEqual(head.props.children[1], { type: 'a', props: { href: 'https://x.test/a?b=1&c=2', target: '_blank', rel: 'noopener noreferrer', title: 'https://x.test/a?b=1&c=2', 'data-fane-source': '', children: 'Title' } });
+  assert.equal(page('Περίληψη: Τίτλος\nhttps://x.test/a\n').head.children.props.children[1].props.children, 'Τίτλος'); // a trailing newline is fine
+  assert.equal(page('Περίληψη: Τίτλος άρθρου\nhttps://x.test/a').head.lang, 'el'); // greek-lang's prop is still there
+  // heading untouched: no title (the old form), no address, other questions, and a second line that is not an address
+  for (const q of ['Περίληψη: https://x.test/a', 'Περίληψη: \nhttps://x.test/a', 'Περίληψη: A title', 'what is a title\nhttps://x.test/a', 'Περίληψη: A title\nand some more text', 'Περίληψη: A title\njavascript:alert(1)']) assert.equal(page(q).head.children, q, q);
+  // answer column flagged only for a summary; side column left out for a summary and for an image answer
+  assert.equal(page(link).col['data-fane-summary'], '');
+  assert.equal(page('what is a title').col['data-fane-summary'], undefined);
+  assert.deepEqual([page(link).side[1], page(link, { b: false }).side[1]], [false, false]);
+  assert.equal(page('what is a title').side[1].type, 'div');
+  assert.equal(page('what is a title', { h: `x${IMAGE_ANSWER_MARKER}` }).side[1], false); // patch-image-ui's guard is intact
+  // the stylesheet block: answer first, margins to the gap, heading link style
+  assert.ok(files[FILES.appCss].includes('[data-fane-summary]>:last-child{order:-1}'));
+  // a container patched with the first version (title as plain text) is upgraded in place
+  const old = planPatch({ [FILES.messageClient]: `id({lang:(0)${TARGETS[0].alts[1].from};` }, [TARGETS[0]]);
+  assert.deepEqual(old.errors, []);
+  assert.ok(old.next[FILES.messageClient].includes('function HEADING(q, r)'));
 });
 
 test('patch-discover-greek: the Discover search adds every Greek site and query of the topic, in Greek; a failing one adds nothing', async () => {

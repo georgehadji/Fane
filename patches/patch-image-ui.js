@@ -19,6 +19,8 @@ const TARGETS = [
     file: FILES.messageClient,
     from: FROM,
     to: FROM.replace(',b&&', `,b&&!h.includes(${JSON.stringify(IMAGE_ANSWER_MARKER)})&&`),
+    // patch-summary-heading adds a condition after this guard, so the whole `to` no longer matches.
+    marker: `!h.includes(${JSON.stringify(IMAGE_ANSWER_MARKER)})`,
   },
 ];
 
