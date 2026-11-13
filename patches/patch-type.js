@@ -106,23 +106,27 @@ const sofia = ([name, range]) => {
   const data = fs.readFileSync(path.join(__dirname, 'fonts', `sofia-sans-extra-condensed-${name}.woff2`)).toString('base64');
   return `@font-face{font-family:"Sofia Sans Extra Condensed";font-style:normal;font-weight:600;font-display:swap;src:url(data:font/woff2;base64,${data}) format("woff2");unicode-range:${range}}`;
 };
-const HEADINGS = String.raw`/* Sofia Sans, Copyright 2019 The Sofia Sans Project Authors (github.com/lettersoup/Sofia-Sans), SIL OFL 1.1 */
+const HEADINGS_V6 = String.raw`/* Sofia Sans, Copyright 2019 The Sofia Sans Project Authors (github.com/lettersoup/Sofia-Sans), SIL OFL 1.1 */
 ${SUBSETS.map(sofia).join('\n')}
 h1.text-5xl{font-family:"Sofia Sans Extra Condensed","PP Editorial",serif!important;font-weight:600;letter-spacing:-.01em}
 h3.text-sm.line-clamp-2{font-family:"Sofia Sans Extra Condensed",Commissioner,Montserrat,Arial,sans-serif;font-weight:600;font-size:1rem;line-height:1.2}
 h2.text-3xl.line-clamp-3{font-family:"Sofia Sans Extra Condensed",Commissioner,Montserrat,Arial,sans-serif!important;font-weight:600;letter-spacing:0}`;
-const TYPE = `/*fane:type-6*/\n${BASE}\n${PAGES}\n${LINKS}\n${SERIF}\n${HEADINGS}`;
+// The sixth version, with the card title at 16px (too small to read comfortably).
+const TYPE_V6 = `/*fane:type-6*/\n${BASE}\n${PAGES}\n${LINKS}\n${SERIF}\n${HEADINGS_V6}`;
+// Seventh: the card title at 1.1875rem (19px). In a 712px window 18 of 277 titles were cut at two lines at 20px, 8 at 19px, 2 at 18px.
+const HEADINGS = HEADINGS_V6.replace('font-size:1rem;line-height:1.2', 'font-size:1.1875rem;line-height:1.15');
+const TYPE = `/*fane:type-7*/\n${BASE}\n${PAGES}\n${LINKS}\n${SERIF}\n${HEADINGS}`;
 
 const TARGETS = [
   {
     name: 'Commissioner, Literata answers, Sofia Sans headings, Discover and Library type',
     file: FILES.appCss,
     // an older block is replaced where it stands (patch-colors may sit between it and the stylesheet's last rule)
-    alts: [{ from: TYPE_V5, to: TYPE }, { from: TYPE_V4, to: TYPE }, { from: TYPE_V3, to: TYPE }, { from: TYPE_V2, to: TYPE }, { from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
-    ladder: ['V5', 'V4', 'V3', 'V2', 'V1', 'fresh'],
-    marker: '/*fane:type-6*/',
+    alts: [{ from: TYPE_V6, to: TYPE }, { from: TYPE_V5, to: TYPE }, { from: TYPE_V4, to: TYPE }, { from: TYPE_V3, to: TYPE }, { from: TYPE_V2, to: TYPE }, { from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
+    ladder: ['V6', 'V5', 'V4', 'V3', 'V2', 'V1', 'fresh'],
+    marker: '/*fane:type-7*/',
   },
 ];
 
-module.exports = { TARGETS, TYPE, TYPE_V1, TYPE_V2, TYPE_V3, TYPE_V4, TYPE_V5 };
+module.exports = { TARGETS, TYPE, TYPE_V1, TYPE_V2, TYPE_V3, TYPE_V4, TYPE_V5, TYPE_V6 };
 if (require.main === module) run('patch-type', TARGETS);

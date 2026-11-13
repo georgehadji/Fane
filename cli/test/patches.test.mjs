@@ -161,7 +161,7 @@ test('patch-type: a stylesheet patched with an earlier version is upgraded in pl
   const colors = require('../../patches/patch-colors.js');
   const type = require('../../patches/patch-type.js');
   const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
-  for (const old of [type.TYPE_V1, type.TYPE_V2, type.TYPE_V3, type.TYPE_V4, type.TYPE_V5].flatMap(v => [`x{}${end}\n${v}\n\n${colors.COLORS}\n`, `x{}${end}\n${colors.COLORS}\n\n${v}\n`])) {
+  for (const old of [type.TYPE_V1, type.TYPE_V2, type.TYPE_V3, type.TYPE_V4, type.TYPE_V5, type.TYPE_V6].flatMap(v => [`x{}${end}\n${v}\n\n${colors.COLORS}\n`, `x{}${end}\n${colors.COLORS}\n\n${v}\n`])) {
     const r = planPatch({ [FILES.appCss]: old }, type.TARGETS);
     assert.deepEqual(r.errors, []);
     const css = r.next[FILES.appCss];
