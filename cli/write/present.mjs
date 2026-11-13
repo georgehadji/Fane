@@ -11,8 +11,8 @@ import { mapOutsideFences, mapProse, segments } from '../core/markdown.mjs';
 const NBSP = ' ';
 
 const LABELS = {
-  en: { rewrite: 'Trimming to the length', edit: 'Editing the article', sources: 'Researching sources', queries: 'Writing search queries', outline: 'Planning the outline', draft: 'Writing the draft', factcheck: 'Checking the facts', critique: 'Reviewing the argument', revise: 'Revising', polish: 'Polishing', style: 'Editing the style', copy: 'Copy editing', audit: 'Final check' },
-  el: { rewrite: 'Περικοπή στο ζητούμενο μήκος', edit: 'Επεξεργασία του κειμένου', sources: 'Αναζήτηση πηγών', queries: 'Διατύπωση αναζητήσεων', outline: 'Σχεδιασμός δομής', draft: 'Συγγραφή του κειμένου', factcheck: 'Έλεγχος γεγονότων', critique: 'Κριτική ανάγνωση', revise: 'Αναθεώρηση', polish: 'Επιμέλεια', style: 'Επιμέλεια ύφους', copy: 'Γλωσσική επιμέλεια', audit: 'Τελικός έλεγχος' },
+  en: { plan: 'Planning the research', notes: 'Taking notes', rewrite: 'Trimming to the length', edit: 'Editing the article', sources: 'Researching sources', queries: 'Writing search queries', outline: 'Planning the outline', draft: 'Writing the draft', factcheck: 'Checking the facts', critique: 'Reviewing the argument', revise: 'Revising', polish: 'Polishing', style: 'Editing the style', copy: 'Copy editing', audit: 'Final check' },
+  el: { plan: 'Σχεδιασμός της έρευνας', notes: 'Σημειώσεις από τις πηγές', rewrite: 'Περικοπή στο ζητούμενο μήκος', edit: 'Επεξεργασία του κειμένου', sources: 'Αναζήτηση πηγών', queries: 'Διατύπωση αναζητήσεων', outline: 'Σχεδιασμός δομής', draft: 'Συγγραφή του κειμένου', factcheck: 'Έλεγχος γεγονότων', critique: 'Κριτική ανάγνωση', revise: 'Αναθεώρηση', polish: 'Επιμέλεια', style: 'Επιμέλεια ύφους', copy: 'Γλωσσική επιμέλεια', audit: 'Τελικός έλεγχος' },
 };
 const WORDS = {
   en: { words: 'words', sources: 'sources', source: 'source', draft: 'Draft. Checking and editing next…', modes: { speed: 'Speed', balanced: 'Balanced', quality: 'Quality' } },

@@ -5,7 +5,7 @@
 //  - Web pages are untrusted data: every source block says so, and no prompt acts on text inside it.
 //  - The draft is told the human-voice rules at write time (cheaper than undoing tells afterwards),
 //    with a rule set per language: the Greek one is native Greek, not a translation.
-import { POSTS, isPost } from '../core/formats.mjs';
+import { POSTS, isPost, isReport } from '../core/formats.mjs';
 import { LANGUAGE_NAMES, wordCount } from '../core/language.mjs';
 
 const JSON_ONLY = 'Reply with one JSON object and nothing else: no prose before or after, no code fence, no reasoning.';
@@ -71,9 +71,23 @@ export const postEditRule = (format) => (isPost(format) ? `\n\nShape to keep:\n-
 
 const clip = (s, n) => (String(s || '').length > n ? `${String(s).slice(0, n).trimEnd()}…` : String(s || ''));
 
-export function sourceBlock(sources, { excerpt = 700 } = {}) {
-  return `<sources>\n${sources.map((s, i) => `[${i + 1}] ${clip(s.title, 160)} (${s.url})\n${clip(s.content, excerpt)}`).join('\n\n')}\n</sources>`;
+// `numbers`: the number each source goes by (a report's sub-question shows its sources under their numbers in the whole list).
+export function sourceBlock(sources, { excerpt = 700, numbers } = {}) {
+  return `<sources>\n${sources.map((s, i) => `[${numbers ? numbers[i] : i + 1}] ${clip(s.title, 160)} (${s.url})\n${clip(s.content, excerpt)}`).join('\n\n')}\n</sources>`;
 }
+
+// A report's fixed sections (formats.mjs REPORT). The pipeline's `notes` are [{question, facts | null, group}]: a null
+// `facts` means the notes call failed, so that sub-question's own sources go to the draft instead.
+const REPORT_HEADINGS = {
+  en: { summary: 'Summary', figures: 'Key figures', gaps: 'Where the sources disagree or are thin' },
+  el: { summary: 'Σύνοψη', figures: 'Βασικά στοιχεία', gaps: 'Όπου οι πηγές διαφωνούν ή είναι περιορισμένες' },
+};
+export const reportHeadings = (lang) => REPORT_HEADINGS[lang] || REPORT_HEADINGS.en;
+
+const notesBlock = (notes, sources) => notes.map((n, i) => {
+  const body = n.facts ? (n.facts.length ? n.facts.map(f => `- ${f.text} [${f.sources.join(', ')}]`).join('\n') : '- (the sources gave no usable fact for this)') : sourceBlock(n.group.map(g => sources[g - 1]), { excerpt: 350, numbers: n.group });
+  return `<sub_question n="${i + 1}">\n${n.question}\n${body}\n</sub_question>`;
+}).join('\n\n');
 
 const header = (lang) => `${LANGUAGE_RULES[lang] || LANGUAGE_RULES.en}\n${UNTRUSTED}\n${NO_THINKING}`;
 
@@ -89,7 +103,25 @@ export const prompts = {
     user: `Topic: ${topic}\nTarget length: about ${words} words.\n${dateRule(today)}\n\n${sourceBlock(sources, { excerpt: 350 })}\n\nPlan the article. Shape:\n{"title": "...", "central_question": "what the article answers (answerable from the sources)", "thesis": "the one claim it argues", "sections": [{"heading": "...", "points": ["..."], "sources": [1, 3], "words": 200}], "counterarguments": ["the strongest objection and how the article answers it"], "ending": "the last real point (not a summary)"}\nRules: 3 to 5 sections; section word counts add up to about ${words}; every point rests on a numbered source; include at least one counterargument; the thesis is more than a restatement of the topic.`,
   }),
 
-  draft: ({ topic, lang, words, sources, outline, today, format }) => (isPost(format) ? {
+  // The plan of a report: sub-questions that together answer the question. `query` is English because most sources are.
+  plan: ({ topic, lang, today, max }) => ({
+    system: `You plan the research for a report. ${header(lang)}\n${JSON_ONLY}`,
+    user: `Question: ${topic}\n${dateRule(today)}\n\nSplit the question into ${Math.min(3, max)} to ${max} sub-questions that together answer it. Shape:\n{"sub_questions": [{"question": "a self-contained question in ${LANGUAGE_NAMES[lang]}", "query": "a short English web search query that would find sources for it", "covers": "what this part of the report establishes, in a few words"}]}\nRules: each sub-question can be answered from web sources; they do not overlap; none repeats the whole question; at most ${max}.`,
+  }),
+
+  // The facts of one sub-question, from its own sources only, under the numbers the whole report uses.
+  notes: ({ topic, lang, today, sub, sources, numbers }) => ({
+    system: `You take research notes for a report. Every note comes from the sources and nowhere else. ${header(lang)}\n${JSON_ONLY}`,
+    user: `Report question: ${topic}\nSub-question: ${sub.question}\n${dateRule(today)}\n\n${sourceBlock(sources, { excerpt: 900, numbers })}\n\nNote what the sources say that answers the sub-question. Shape:\n{"facts": [{"text": "one fact in ${LANGUAGE_NAMES[lang]}", "sources": [2]}]}\nRules: at most 8 facts, the most relevant first; copy numbers, names and dates exactly as the source has them; keep the year of a figure when the source gives it; "sources" uses only the numbers above; a fact no source states is left out; skip what does not help answer the sub-question.`,
+  }),
+
+  draft: ({ topic, lang, words, sources, outline, today, format, notes }) => (isReport(format) ? (() => {
+    const h = reportHeadings(lang);
+    return {
+      system: `You are a research analyst writing a report. Every factual claim comes from the notes. ${header(lang)}\n\n${HUMAN_RULES[lang] || HUMAN_RULES.en}`,
+      user: `Question: ${topic}\nLength: about ${words} words.\n${dateRule(today)}\n\nResearch notes, one block per sub-question (the numbers in brackets are source numbers):\n\n${notesBlock(notes, sources)}\n\nWrite the report in Markdown, in this order:\n- "# " and a title that names the subject.\n- "## ${h.summary}": 3 to 5 sentences that answer the question directly.\n- One "## " section per sub-question, in the order given, each with a short heading of your own (not the whole question).\n- "## ${h.figures}": a Markdown table of the main figures (columns: figure, value, year if known). The [n] citation goes inside the value cell. Only figures from the notes; leave the section out when there are none.\n- "## ${h.gaps}": the one place to write about the sources. Name claims where sources disagree (each side with its [n]) and sub-questions the sources cover thinly. If nothing disagrees and nothing is thin, one sentence says so.\nRules: after each claim put its source number in brackets, [2] or [1, 4], using only the numbers above. Copy numbers, names and dates exactly. A claim the notes do not support is left out. No invented quotes. Do NOT write a sources list; it is added afterwards.\nOutput the report only.`,
+    };
+  })() : isPost(format) ? {
     system: `You write ${POSTS[format].name} posts that share researched facts. Every factual claim comes from the sources. ${header(lang)}\n\n${HUMAN_RULES[lang] || HUMAN_RULES.en}`,
     user: `Topic: ${topic}\nLength: about ${words} words, never more than ${POSTS[format].maxChars} characters.\n${dateRule(today)}\n\n${sourceBlock(sources)}\n\nWrite the post.\n- ${postShape(format)}\n- After each claim taken from a source put its number in brackets: [2] or [1, 4]; they are removed before posting. Name the source of a key figure in words ("the IEA's 2025 report") when the source says who it is.\n- Copy numbers, names and dates exactly as the source has them. A claim no source supports is left out. No invented quotes.\nOutput the post only.`,
   } : {

@@ -5,6 +5,7 @@ import { TIER_FOR_MODE, buildCatalogue, viaOf } from './image/catalogue.mjs';
 import { imageSubject, parseImageOptions } from './image/intent.mjs';
 import { IMAGE_TEXT_MODEL } from './image/generate.mjs';
 import { articleTopic, parseArticleOptions, postTopic } from './core/intent-article.mjs';
+import { reportTopic } from './core/intent-report.mjs';
 import { POSTS } from './core/formats.mjs';
 import { buildTextCatalogue, selectChains, selectFreeChains } from './write/catalogue.mjs';
 import { detectLanguage } from './core/language.mjs';
@@ -109,7 +110,7 @@ export async function runArticle(opts) {
   const retrieve = vaneRetrieve(opts, mode);
   const write = createArticlePipeline({ client, retrieve, maxCost: opts.effort?.maxCost, log: (m) => { if (!opts.json) process.stderr.write(`vane: ${m}\n`); } });
   const post = opts.post; // a platform of formats.mjs, or undefined for an article
-  const topic = post ? postTopic(opts.query) : articleTopic(opts.query);
+  const topic = post ? postTopic(opts.query) : opts.report ? reportTopic(opts.query) : articleTopic(opts.query);
   // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
   const lang = opts.lang ?? detectLanguage(opts.query);
   const explicit = opts['article-model'].length > 0;
@@ -119,7 +120,7 @@ export async function runArticle(opts) {
     mode,
     effort: opts.effort,
     lang,
-    format: post || 'article',
+    format: post || (opts.report ? 'report' : 'article'),
     words: opts.words ?? parseArticleOptions(opts.query, { post: !!post }).words,
     models: opts['article-model'],
     chains: chosen?.chains,

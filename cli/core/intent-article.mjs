@@ -6,27 +6,24 @@ import { isBrainstormRequest } from './intent-brainstorm.mjs';
 import { isCodeRequest } from './intent-code.mjs';
 import { DEFAULT_PLATFORM } from './formats.mjs';
 import { detectLanguage, fold } from './language.mjs';
-import { POLITE } from './polite.mjs';
+import { isReportRequest } from './intent-report.mjs';
+import { EL_VERB, EN_VERB, LINK, POLITE } from './polite.mjs';
 
-// POLITE: the shared polite openings (./polite.mjs)
-const EN_VERB = String.raw`(?:write|draft|compose|create|prepare|produce|generate)`;
-const EN_NOUN = String.raw`(?:article|blog ?post|blog|essay|op-?ed|long-?form piece|report|white ?paper)`;
+// POLITE, the verbs and LINK: shared with the report detector (./polite.mjs). A report is not an article: it has its own
+// detector (./intent-report.mjs), so "report" and «έκθεση» are not article nouns.
+const EN_NOUN = String.raw`(?:article|blog ?post|blog|essay|op-?ed|long-?form piece|white ?paper)`;
 const EN_ADJ = String.raw`(?:(?:new|short|long|detailed|well[- ]researched|researched|in-depth|short|brief|full|complete|good|balanced|thoughtful|engaging|fact[- ]based|sourced),?\s+){0,3}`;
 const EN = new RegExp(String.raw`^\s*${POLITE}${EN_VERB}\s+(?:me\s+|us\s+)?(?:(?:an?|the|one)\s+)?(?:\d{3,4}[- ]words?\s+)?${EN_ADJ}${EN_NOUN}s?(?![\p{L}])`, 'iu');
 
 // Over folded text: no accents, final sigma written as sigma.
-const EL_VERB = String.raw`(?:γραψε|γραψτε|γραψου|συνταξε|συνταξτε|δημιουργησε|δημιουργηστε|ετοιμασε|ετοιμαστε|φτιαξε|φτιαξτε|παραγαγε|γραψεισ|γραψετε)`;
-const EL_NOUN = String.raw`(?:αρθρο\p{L}*|δοκιμι\p{L}*|εκθεσ\p{L}*|αναρτησ\p{L}*|ποστ|blogpost|blog post|blog)`;
+const EL_NOUN = String.raw`(?:αρθρο\p{L}*|δοκιμι\p{L}*|αναρτησ\p{L}*|ποστ|blogpost|blog post|blog)`;
 const EL = new RegExp(String.raw`^\s*${POLITE}${EL_VERB}\s+(?:μου\s+|μασ\s+)?(?:(?:ενα|μια|μιασ|το|τον|την|εναν)\s+)?(?:\p{L}+\s+){0,2}?${EL_NOUN}(?![\p{L}])`, 'iu');
 
 // A code request is never an article: "write a report generator in Python" has "report" after the verb.
 export const isArticleRequest = (text) => {
   const t = String(text || '');
-  return (EN.test(t) || EL.test(fold(t))) && !isCodeRequest(t) && !isBrainstormRequest(t); // «γράψε 5 τίτλους για ...»
+  return (EN.test(t) || EL.test(fold(t))) && !isCodeRequest(t) && !isBrainstormRequest(t) && !isReportRequest(t); // «γράψε 5 τίτλους για ...»
 };
-
-// Over folded text, after the request words: "about", "για", "σχετικά με" ...
-const LINK = /^\s*(?:about|on|regarding|concerning|covering|exploring|that (?:explains|covers|looks at|argues)|of|for|για|σχετικα με|με θεμα|περι|πανω σε|οσον αφορα|που εξηγει|[:\-–])\s*/iu;
 
 // The subject without the request words: "write an article about tidal power" -> "tidal power".
 export function articleTopic(text) {

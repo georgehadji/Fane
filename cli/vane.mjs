@@ -11,7 +11,8 @@ import { FAMILIES, TIERS, VIAS } from './image/catalogue.mjs';
 import { isImageRequest } from './image/intent.mjs';
 import { ASPECT_RATIOS, DEFAULT_IMAGES, IMAGE_SIZES, IMAGE_TEXT_MODEL, MAX_IMAGES } from './image/generate.mjs';
 import { isArticleRequest, postPlatform } from './core/intent-article.mjs';
-import { POSTS, POST_PLATFORMS } from './core/formats.mjs';
+import { POSTS, POST_PLATFORMS, REPORT } from './core/formats.mjs';
+import { isReportRequest } from './core/intent-report.mjs';
 import { LANGUAGES, fold } from './core/language.mjs';
 import { DEFAULT_WORDS, MAX_WORDS, MIN_WORDS } from './write/models.mjs';
 import { isCodeRequest } from './core/intent-code.mjs';
@@ -31,6 +32,7 @@ const USAGE = `Usage: vane "<question>" [options]
        vane --article "<topic>" [-o speed|balanced|quality] [--lang el|en] [--words ${DEFAULT_WORDS}] [--out article.md]
        vane --edit-article article.md "<change>" [-o speed|balanced|quality] [--out new.md]
        vane --post ${POST_PLATFORMS.join('|')} "<topic>" [-o speed|balanced|quality] [--lang el|en] [--words n] [--out post.txt]
+       vane --report "<question>" [-o speed|balanced|quality] [--lang el|en] [--words n] [--out report.md]
        vane --image "<prompt>" [-n ${DEFAULT_IMAGES}] [--tier ${TIERS.join('|')}] [--family <f>] [--aspect 1:1] [--out-dir dir]
        vane --code "<request>" [-o speed|balanced|quality] [--out-dir dir]
        vane --brainstorm "<problem>" [-o speed|balanced|quality] [--lang el|en] [--out ideas.md]
@@ -101,6 +103,12 @@ Articles (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; sources come 
                          markers are removed and the sources printed as the first comment. Requests like
                          "write a LinkedIn post about ..." or «γράψε μια ανάρτηση για ...» do this automatically.
                          --words: ${POST_PLATFORMS.map(p => `${POSTS[p].name} ${POSTS[p].minWords}-${POSTS[p].maxWords}, default ${POSTS[p].words}`).join('; ')}
+      --report           A researched report instead of an article: the question is split into sub-questions (Speed
+                         ${REPORT.subQuestions.speed}, Balanced ${REPORT.subQuestions.balanced}, Quality ${REPORT.subQuestions.quality}), each researched on its own, then written as a summary, one
+                         section per sub-question, a table of key figures and a section on where the sources disagree
+                         or are thin. Costs several times an article. Requests like "write a report on ..." or
+                         «γράψε μια έκθεση για ...» do this automatically. --words: ${REPORT.minWords}-${REPORT.maxWords}, default by mode
+                         (${Object.entries(REPORT.words).map(([m, w]) => `${m} ${w}`).join(', ')}). No follow-up edits of reports in the CLI.
 
 Code (OpenRouter, needs OPENROUTER_API_KEY or --key-from-vane; documentation comes from Vane's own research):
       --code             Write code for the request: a spec, one file at a time, a hostile review, fixes and tests.
@@ -136,14 +144,15 @@ Env: VANE_URL, VANE_CHAT_MODEL, VANE_EMBEDDING_MODEL, VANE_CONTAINER, VANE_SOURC
 Exit codes: 0 ok, 1 runtime error (or no sources with --require-sources, or support below --min-support), 2 usage error`;
 
 // The options of the text pipelines' profile (core/effort.mjs), which a search or an image run has no use for.
-const TEXT_ONLY = '--reasoning and --max-cost apply only to --article, --post, --edit-article, --code and --brainstorm';
+const TEXT_ONLY = '--reasoning and --max-cost apply only to --article, --post, --report, --edit-article, --code and --brainstorm';
 const usesEffortFlags = (o) => o.reasoning !== undefined || o['max-cost'] !== undefined;
 
 // The one table of feature flags. --post is the article feature with a platform, so it is its own flag here.
 const FEATURE_FLAGS = [
   ['--image', 'image', (v) => v.image],
-  ['--article', 'article', (v) => v.article && v.post === undefined], // a post sets article too: it counts once, as --post
+  ['--article', 'article', (v) => v.article && v.post === undefined && !v.report], // a post or a report sets article too: it counts once, as --post / --report
   ['--post', 'article', (v) => v.post !== undefined],
+  ['--report', 'article', (v) => v.report],
   ['--edit-article', 'edit-article', (v) => v['edit-article'] !== undefined],
   ['--code', 'code', (v) => v.code],
   ['--brainstorm', 'brainstorm', (v) => v.brainstorm],
@@ -206,6 +215,7 @@ export function parseCli(argv) {
       out: { type: 'string' },
       'edit-article': { type: 'string' },
       post: { type: 'string' },
+      report: { type: 'boolean', default: false },
       code: { type: 'boolean', default: false },
       'code-model': { type: 'string', multiple: true, default: [] },
       'list-code-models': { type: 'boolean', default: false },
@@ -241,8 +251,9 @@ export function parseCli(argv) {
   }
   // A post sets article below, so featureOf cannot tell --article from it: the clash is checked here, before that.
   if (values.post !== undefined && values.article) throw new UsageError('A call takes one feature flag, but got --article and --post.');
+  if (values.report && values.article) throw new UsageError('A call takes one feature flag, but got --article and --report.');
   const feature = featureOf(values);
-  if (values.post !== undefined) values.article = true; // a post is the article pipeline with another format (posts.test pins it)
+  if (values.post !== undefined || values.report) values.article = true; // a post or a report is the article pipeline with another format (posts.test pins it)
   const article = feature === 'article' || feature === 'edit-article' || feature === 'list-article';
   if (feature) {
     if (values.tier && !TIERS.includes(values.tier)) throw new UsageError(`Invalid --tier "${values.tier}". Use: ${TIERS.join(', ')}`);
@@ -265,7 +276,7 @@ export function parseCli(argv) {
   }
   if (article && values.words !== undefined) {
     const n = Number(values.words);
-    const [min, max] = values.post ? [POSTS[values.post].minWords, POSTS[values.post].maxWords] : [MIN_WORDS, MAX_WORDS];
+    const [min, max] = values.post ? [POSTS[values.post].minWords, POSTS[values.post].maxWords] : values.report ? [REPORT.minWords, REPORT.maxWords] : [MIN_WORDS, MAX_WORDS];
     if (!Number.isInteger(n) || n < min || n > max) throw new UsageError(`Invalid --words "${values.words}" (${min}-${max})`);
     values.words = n;
   }
@@ -289,7 +300,8 @@ export function autoRoute(opts, argv) {
   if (!opts['no-auto-image'] && isImageRequest(opts.query)) return parseCli(['--image', ...argv]);
   if (!opts['no-auto-brainstorm'] && isBrainstormRequest(opts.query)) return parseCli(['--brainstorm', ...argv]);
   if (!opts['no-auto-code'] && isCodeRequest(opts.query)) return parseCli(['--code', ...argv]);
-  // a post before an article: «ανάρτηση» matches both
+  // a report has its own detector, and «έκθεση» is not an article noun; a post before an article: «ανάρτηση» matches both
+  if (!opts['no-auto-article'] && isReportRequest(opts.query)) return parseCli(['--report', ...argv]);
   const platform = opts['no-auto-article'] ? null : postPlatform(opts.query);
   if (platform) return parseCli(['--post', platform, ...argv]);
   if (!opts['no-auto-article'] && isArticleRequest(opts.query)) return parseCli(['--article', ...argv]);

@@ -15,6 +15,23 @@ export const DEFAULT_PLATFORM = 'linkedin';
 
 export const isPost = (format) => Object.hasOwn(POSTS, String(format));
 
+// Researched reports (write/pipeline.mjs, format 'report'): the question is split into sub-questions, each researched on
+// its own, then written as fixed sections. Per mode: the length, how many sub-questions the plan may have (the fan-out is
+// the expensive part: each is a full Vane research). `concurrency`: researches at a time (Vane's research is heavy and
+// SearXNG engines get suspended); `perQuestion` and `maxSources`: sources kept per sub-question and in all.
+export const REPORT = {
+  name: 'Report',
+  words: { speed: 900, balanced: 1500, quality: 2200 },
+  minWords: 600,
+  maxWords: 3500,
+  subQuestions: { speed: 3, balanced: 4, quality: 6 },
+  concurrency: 2,
+  perQuestion: 6,
+  maxSources: 24,
+};
+export const isReport = (format) => format === 'report';
+export const clampReportWords = (n, mode) => Math.min(REPORT.maxWords, Math.max(REPORT.minWords, Math.round(Number(n) || REPORT.words[mode] || REPORT.words.balanced)));
+
 // The invisible mark a web post answer carries, so a follow-up edit ("make it shorter") knows the earlier answer is a
 // post and for which platform: a post has no "# " title to recognise it by. Written by renderPostResult, read by parsePostAnswer.
 export const postMark = (format) => `<!--fane:post:${format}-->`;

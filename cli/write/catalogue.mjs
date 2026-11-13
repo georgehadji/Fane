@@ -79,7 +79,7 @@ function diverse(list, better) {
 }
 
 // Order in which roles take primaries from the ranked list: neighbours differ in lab.
-const ROLE_ORDER = ['draft', 'critique', 'factcheck', 'revise', 'audit', 'polish', 'style', 'copy', 'outline'];
+const ROLE_ORDER = ['draft', 'critique', 'factcheck', 'revise', 'audit', 'polish', 'style', 'copy', 'outline', 'plan', 'notes'];
 const BANDS = { speed: [0, 1 / 3], balanced: [1 / 3, 2 / 3], quality: [2 / 3, 1] };
 
 // trial: { [modelId]: { en: { ok, tellsPerThousand }, el: { ok, tellsPerThousand }, json: { ok } } }

@@ -7,7 +7,7 @@ import { DEFAULT_TEXT_MODEL } from '../image/openrouter.mjs';
 import { HEADROOM } from '../core/effort.mjs';
 
 export { MODES, DEFAULT_MODE } from '../core/effort.mjs';
-export const ROLES = ['queries', 'outline', 'draft', 'factcheck', 'critique', 'revise', 'polish', 'style', 'copy', 'audit'];
+export const ROLES = ['queries', 'outline', 'draft', 'factcheck', 'critique', 'revise', 'polish', 'style', 'copy', 'audit', 'plan', 'notes'];
 
 export const PHASES = {
   speed: ['queries', 'outline', 'draft'],
@@ -21,6 +21,15 @@ export const POST_PHASES = {
   speed: ['queries', 'draft'],
   balanced: ['queries', 'draft', 'factcheck', 'revise', 'polish'],
   quality: ['queries', 'draft', 'factcheck', 'revise', 'polish'],
+};
+
+// Reports (formats.mjs REPORT): a plan of sub-questions (the search queries come from it, so no 'queries' call), one notes
+// call per sub-question, then the draft. No outline (the sections are fixed) and no critique (the structure is not the
+// author's). The revision runs only when claims failed the fact-check.
+export const REPORT_PHASES = {
+  speed: ['plan', 'notes', 'draft'],
+  balanced: ['plan', 'notes', 'draft', 'factcheck', 'revise', 'polish'],
+  quality: ['plan', 'notes', 'draft', 'factcheck', 'revise', 'style', 'copy', 'audit'],
 };
 
 export const DEFAULT_WORDS = 900;
@@ -41,7 +50,7 @@ export const chainsFor = (models) => {
 // cut at a 2048 default.
 const TOKENS_PER_WORD = { en: 1.5, el: 3.6 };
 const PROSE = new Set(['draft', 'rewrite', 'revise', 'polish', 'style', 'copy']);
-const JSON_TOKENS = { queries: 800, outline: 3000, factcheck: 4000, critique: 3500, audit: 2500 };
+const JSON_TOKENS = { queries: 800, outline: 3000, factcheck: 4000, critique: 3500, audit: 2500, plan: 2500, notes: 3000 };
 // Room for thinking on top of the answer, even at low effort: the first live run in Vane's web UI had an
 // outline cut off at 3880 tokens by three models in a row, and a Quality copy edit cut off at 4975 tokens
 // (qwen3.8-max-prime; its fallback took 79 s). A cap is not a spend: only generated tokens are paid.

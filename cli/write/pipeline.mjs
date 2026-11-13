@@ -8,12 +8,13 @@
 // values ({ ok: false, error }); a phase that fails after the draft is skipped and listed in
 // `degraded`, so a weakened run is never presented as a clean one.
 import { checkCitations, firstComment, renumber, runChecks, sourcesSection, stripCitations } from './checks.mjs';
-import { clampPostWords, isPost } from '../core/formats.mjs';
+import { REPORT, clampPostWords, clampReportWords, isPost, isReport } from '../core/formats.mjs';
+import { mergeSources, normalizeNotes, normalizePlan, runPool } from './report.mjs';
 import { AUDIT_DIMENSIONS, MIN_CLAIM_SUPPORT, auditResult, claimLedger, claimSupportRatio } from './gate.mjs';
 import { countTells, detectLanguage, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
 import { createRoleCaller, noteOf, statusOf } from './llm.mjs';
 import { PHASE, isStopped, phaseRecord } from '../core/outcome.mjs';
-import { DEFAULT_MODE, MODES, PHASES, POST_PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
+import { DEFAULT_MODE, MODES, PHASES, POST_PHASES, REPORT_PHASES, chainsFor, clampWords, tokensFor } from './models.mjs';
 import { resolveEffort } from '../core/effort.mjs';
 import { postEditRule, prompts } from './prompts.mjs';
 
@@ -44,14 +45,14 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
   return async function writeArticle({ topic, mode = DEFAULT_MODE, effort, lang, words, models, chains, prices, format = 'article', onProgress = () => {} }) {
     if (!MODES.includes(mode)) throw new Error(`unknown mode "${mode}"`);
     effort ??= resolveEffort(mode);
-    const post = isPost(format);
-    if (!post && format !== 'article') throw new Error(`unknown format "${format}"`);
+    const post = isPost(format), report = isReport(format);
+    if (!post && !report && format !== 'article') throw new Error(`unknown format "${format}"`);
     const t0 = now();
     const today = new Date(t0).toISOString().slice(0, 10); // prompts give figures their year and prefer new sources
     lang ||= detectLanguage(topic);
-    words = post ? clampPostWords(words, format) : clampWords(words);
+    words = post ? clampPostWords(words, format) : report ? clampReportWords(words, mode) : clampWords(words);
     chains ||= chainsFor(models);
-    const plan = (post ? POST_PHASES : PHASES)[mode];
+    const plan = (post ? POST_PHASES : report ? REPORT_PHASES : PHASES)[mode];
     const phases = [], degraded = [];
     let cost = 0, calls = 0, repaired = 0;
     const emit = (e) => { try { onProgress(e); } catch { /* a throwing listener must not stop the article */ } };
@@ -125,9 +126,52 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       }
     }
 
-    let sources = [], body = '';
-    try {
-      // 1. Sources: the topic, plus English queries when the topic is not English (most sources are).
+    let sources = [], body = '', outline = null, notes = null, subs = [];
+
+    // A report (formats.mjs REPORT): plan sub-questions, research each (REPORT.concurrency at a time, each a full Vane
+    // research), merge the pages into one numbered list, and take notes per sub-question from its own pages. A failed
+    // research or notes call only weakens that part (listed in `degraded`); no page at all fails the run, as for an article.
+    async function gatherReport() {
+      const max = REPORT.subQuestions[mode];
+      const p = await step('plan', { max });
+      subs = p.ok ? normalizePlan(p.data, { max }) : [];
+      if (!subs.length) {
+        degraded.push(p.ok ? 'the plan had no usable sub-question: the report was researched as one question' : 'the plan failed: the report was researched as one question');
+        subs = [{ question: topic, query: topic, covers: '' }];
+      }
+      emit({ phase: 'sources', status: PHASE.running });
+      const found = await runPool(subs, REPORT.concurrency, (s) => retrieve(s.query));
+      found.forEach((f, i) => { if (f.error) degraded.push(`research for "${subs[i].question}" failed (${f.error.message || f.error}): that part rests on the other sub-questions' pages`); });
+      const merged = mergeSources(found.map(f => f.value || []), REPORT);
+      sources = merged.sources;
+      const rec = phaseRecord('sources', sources.length ? PHASE.ok : PHASE.failed, { model: null, ms: 0, note: `${sources.length} sources for ${subs.length} sub-question${subs.length === 1 ? '' : 's'}` });
+      phases.push(rec);
+      emit({ ...rec });
+      emit({ phase: 'sources', status: 'done', note: rec.note });
+      if (!sources.length) {
+        const why = found.find(f => f.error)?.error?.message;
+        return { ok: false, error: `no sources found for this question${why ? ` (${why})` : ''}; a report without sources would be unchecked`, phases, language: lang, mode, reasoning: effort.reasoning, calls, cost };
+      }
+      if (sources.length < THIN_SOURCES) degraded.push(`only ${sources.length} source${sources.length === 1 ? '' : 's'} found: thinly sourced`);
+      const done = await runPool(subs, REPORT.concurrency, async (s, i) => {
+        const group = merged.groups[i];
+        if (!group.length) return { question: s.question, facts: [], group };
+        const r = await step('notes', { sub: s, sources: group.map(g => sources[g - 1]), numbers: group });
+        return { question: s.question, group, facts: r.ok ? normalizeNotes(r.data, group) : null, why: r.ok ? '' : (r.errors.at(-1) || 'no answer') };
+      });
+      const stop = done.find(d => d.error); // a refusal from the provider (or the user's stop) ends the run, once the other calls have returned
+      if (stop) throw stop.error;
+      notes = done.map(d => d.value);
+      for (const n of notes) {
+        if (!n.group.length) degraded.push(`no sources for "${n.question}": that section rests on the other sub-questions' pages`);
+        else if (!n.facts) degraded.push(`notes for "${n.question}" failed (${n.why}): the draft read that sub-question's pages directly`);
+        else if (!n.facts.length) degraded.push(`the pages for "${n.question}" gave no usable fact`);
+      }
+    }
+
+    // An article: sources (the topic, plus English queries when the topic is not English: most sources are), outline.
+    async function gatherArticle() {
+      // 1. Sources
       emit({ phase: 'sources', status: PHASE.running });
       let queries = [topic];
       if (lang !== 'en' && plan.includes('queries')) {
@@ -151,15 +195,19 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
       if (sources.length < THIN_SOURCES) degraded.push(`only ${sources.length} source${sources.length === 1 ? '' : 's'} found: thinly sourced`);
 
       // 2. Outline (optional: without it the draft is written from the sources alone).
-      let outline = null;
       if (plan.includes('outline')) {
         const o = await step('outline', { sources });
         if (o.ok && Array.isArray(o.data.sections)) outline = o.data;
         else degraded.push('the outline failed: the draft was written without a plan');
       }
+    }
+
+    try {
+      const early = report ? await gatherReport() : await gatherArticle();
+      if (early) return early;
 
       // 3. Draft (required).
-      const d = await step('draft', { sources, outline });
+      const d = await step('draft', { sources, outline, notes });
       if (!d.ok) return { ok: false, error: `the draft failed: ${d.errors.join('; ')}`, phases, language: lang, mode, reasoning: effort.reasoning, calls, cost, sources };
       body = fix(d.text);
       phases.at(-1).words = wordCount(body);
@@ -243,6 +291,7 @@ export function createArticlePipeline({ client, retrieve, log = () => {}, now = 
         article: post ? `${published.post}${published.comment ? `\n\n---\n\n${published.comment}` : ''}\n` : text.trimEnd() + sourcesSection(used, lang),
         ...published,
         title: post ? '' : titleOf(text),
+        ...(report ? { subQuestions: subs.map(s => s.question) } : {}),
         language: lang,
         mode,
         reasoning: effort.reasoning,

@@ -96,8 +96,8 @@ test('greekTypography reports straight quotes, a "?" and polytonic accents', () 
 // ---- intent ----
 
 test('isArticleRequest: English and Greek requests, with a writing verb', () => {
-  for (const q of ['write an article about tidal power', 'Please draft a 800-word blog post on AI', 'Can you write me an essay on why sleep matters', 'write a short, well researched report about bees',
-    'γράψε ένα άρθρο για την τεχνητή νοημοσύνη', 'Γράψε μου ένα εκτενές άρθρο σχετικά με την ενέργεια', 'συντάξτε μια έκθεση για το διάστημα', 'Δημιούργησε μια ανάρτηση για το blog μου', 'ΓΡΆΨΕ ΈΝΑ ΔΟΚΊΜΙΟ για τη μνήμη']) {
+  for (const q of ['write an article about tidal power', 'Please draft a 800-word blog post on AI', 'Can you write me an essay on why sleep matters',
+    'γράψε ένα άρθρο για την τεχνητή νοημοσύνη', 'Γράψε μου ένα εκτενές άρθρο σχετικά με την ενέργεια', 'Δημιούργησε μια ανάρτηση για το blog μου', 'ΓΡΆΨΕ ΈΝΑ ΔΟΚΊΜΙΟ για τη μνήμη']) {
     assert.equal(isArticleRequest(q), true, q);
   }
 });

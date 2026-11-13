@@ -193,6 +193,8 @@ Because it runs inside the cache, the cost is paid once per topic per refresh, m
 ## Phase E: report mode
 
 ### 9. Report mode
+**Done 2026-11-13, except the paid bench** (`cli/write/report.mjs`, the `report` branch of `createArticlePipeline`, `core/intent-report.mjs`, `REPORT`/`REPORT_PHASES`, `plan`/`notes` roles and prompts, `--report`, the hook; tests in `report.test.mjs`, `intent-routing.test.mjs`). "Write a report on …" and «γράψε έκθεση» are reports now, no longer articles. `bench/reports.json` and the comparison with a Quality article are not run (they cost about $3-5 and are asked first); the cost multiple, the audit prompt's fit for a report and two research panels at once in Vane's UI are unmeasured.
+
 
 **Goal.** The nearest thing to Perplexity's Deep Research Fane can do well: a question split into sub-questions, each researched, then a structured, cited report. Not a fourth Vane mode (the mode menu, `patch-mode-icons`, `patch-quality-mode` and every phase table would grow); a request kind, like articles and posts.
 

@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 import { isCodeRequest } from '../core/intent-code.mjs';
+import { isReportRequest } from '../core/intent-report.mjs';
 import { PHASE, outcomeOf } from '../core/outcome.mjs';
 import { OpenRouterError } from '../image/openrouter.mjs';
 import { MAX_FILE_CHARS, codeBlocks, extractCode, fenceFor, fileChecks, languageOf, parseFiles, safePath } from '../code/files.mjs';
@@ -81,7 +82,9 @@ test('code requests: a request verb and a code noun, or "in <language>"; text an
 
 test('code requests are not articles or posts, and the CLI routes them to --code', () => {
   assert.equal(isArticleRequest('write a report generator in Python'), false);
-  assert.equal(isArticleRequest('write a report on Python adoption'), true);
+  assert.equal(isArticleRequest('write a report on Python adoption'), false); // a report has its own detector (intent-report.mjs)
+  assert.equal(isReportRequest('write a report on Python adoption'), true);
+  assert.equal(isReportRequest('write a report generator in Python'), false);
   assert.equal(postPlatform('write a LinkedIn post scheduler in Python'), null);
   assert.equal(postPlatform('write a LinkedIn post about Python'), 'linkedin');
   const route = (...argv) => autoRoute(parseCli(argv), argv);

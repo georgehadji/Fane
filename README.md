@@ -160,7 +160,7 @@ vane "Explain HTTP/3" --stream --require-sources
 
 On Windows PowerShell, `npm` may be blocked by the execution policy. Use `npm.cmd`, or run the command from Git Bash.
 
-A call takes one feature flag (`--image`, `--article`, `--post`, `--edit-article`, `--code`, `--brainstorm`); combining two, such as `--brainstorm --article`, exits 2 with a message.
+A call takes one feature flag (`--image`, `--article`, `--post`, `--report`, `--edit-article`, `--code`, `--brainstorm`); combining two, such as `--brainstorm --article`, exits 2 with a message.
 
 | Option | Default |
 |---|---|
@@ -175,7 +175,7 @@ A call takes one feature flag (`--image`, `--article`, `--post`, `--edit-article
 | `--min-support <0-1>` | With `--verify`: exit 1 if the supported share of cited sentences is lower |
 | `-t, --timeout` | `180` seconds, `600` with `--mode quality` |
 | `--doctor` | Check Docker, container, models, patches, SearXNG, and (as warnings) Ladder, freellmapi and restart policies; exit 1 on a failed check |
-| `--reasoning <r>` | With `--article`, `--post`, `--edit-article`, `--code` or `--brainstorm`: `minimal`, `low`, `medium` or `high`, how much the models think before answering (default: the mode's, `low`) |
+| `--reasoning <r>` | With `--article`, `--post`, `--report`, `--edit-article`, `--code` or `--brainstorm`: `minimal`, `low`, `medium` or `high`, how much the models think before answering (default: the mode's, `low`) |
 | `--max-cost <usd>` | With the same: stop before the next model call once the run has cost this much; overrides `FANE_MAX_COST` |
 
 Environment overrides: `VANE_URL`, `VANE_CHAT_MODEL`, `VANE_EMBEDDING_MODEL`, `VANE_CONTAINER`, `VANE_SOURCES`, `VANE_MODE`.
@@ -333,6 +333,16 @@ There is no outline, structural critique or audit, because a post has no section
 vane "write a LinkedIn post about heat pumps in cold climates" -o balanced
 vane --post facebook "tidal power in Orkney" --words 90 --out post.txt
 ```
+
+### Researched reports (`--report`)
+
+`vane --report "<question>"` splits the question into sub-questions (Speed 3, Balanced 4, Quality 6), researches each one on its own (two at a time), takes notes from each one's own pages, and writes a report: a summary, one section per sub-question, a table of key figures with every cell cited, and a section on where the sources disagree or are thin. The fact-check and the edits run as for an article, and Quality adds the audit. These requests do it automatically, in the CLI and in Vane's chat (`--no-auto-article` searches instead):
+
+- "write a report on …", "prepare a detailed report about …";
+- "do deep research on …";
+- «γράψε μια έκθεση για …», «κάνε βαθιά έρευνα για …».
+
+"Write a report generator in Python" stays code. A report is several researches, so it takes and costs several times an article; that has not been measured yet (the paid comparison with a Quality article, `bench/reports.json`, is not run). `--words` takes 600–3500 (default: Speed 900, Balanced 1500, Quality 2200). A sub-question whose research or notes fail is listed under the report and the others carry on; no source at all fails the run. A follow-up edit in Vane's chat ("make it shorter") treats the report as an article, and the CLI has no edit for reports.
 
 ### Code (`--code`)
 

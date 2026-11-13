@@ -15,6 +15,7 @@ import { buildTextCatalogue, selectChains, selectFreeChains } from './catalogue.
 import { createArticleEditor, isArticleEdit, parseArticleAnswer, parsePostAnswer, targetLanguage } from './edit.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from '../core/intent-article.mjs';
 import { isCodeRequest } from '../core/intent-code.mjs';
+import { isReportRequest, reportTopic } from '../core/intent-report.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES, chainsFor } from './models.mjs';
 import { createTurn } from '../core/turn.mjs';
@@ -32,11 +33,14 @@ const TRIAL_FILE = new URL('./trial.json', import.meta.url);
 // Returns false when the message is neither an article request nor an edit of the article the previous
 // answer was (Vane then answers as usual). client, trial, pipeline and editor are injectable for tests.
 export async function handleArticleRequest(query, { emit, update, configPath, mode, history, lastAnswer, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, signal, client, trial, pipeline, editor } = {}) {
-  // A social post ("write a LinkedIn post about ...") before an article: «ανάρτηση» matches both.
-  const platform = postPlatform(query);
-  // A follow-up edit: the message reads like one ("shorter", "rewrite the intro") and the answer before it is an article of ours.
+  // A researched report ("write a report on ...") first: it has its own detector. Then a social post ("write a LinkedIn
+  // post about ...") before an article: «ανάρτηση» matches both.
+  const report = isReportRequest(query);
+  const platform = report ? null : postPlatform(query);
+  // A follow-up edit: the message reads like one ("shorter", "rewrite the intro") and the answer before it is an article of ours
+  // (a report's answer is one too: it has a title and a sources list, and is edited as an article).
   let earlier = null;
-  if (!platform && !isArticleRequest(query)) {
+  if (!report && !platform && !isArticleRequest(query)) {
     // "make a Python script that ..." starts like an edit; the code hook, which runs after this one, takes it
     if (isImageRequest(query) || isCodeRequest(query) || !isArticleEdit(query)) return false;
     const before = await previousAnswer(history, lastAnswer);
@@ -45,11 +49,11 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
     // Vane's own answers have a "# " title too
     if (!earlier || (!earlier.format && !earlier.sources.length)) return false;
   }
-  const topic = earlier ? query : platform ? postTopic(query) : articleTopic(query);
+  const topic = earlier ? query : report ? reportTopic(query) : platform ? postTopic(query) : articleTopic(query);
   // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
   const lang = earlier ? targetLanguage(query, earlier.lang) : detectLanguage(query);
-  const state = { lang, phases: [], running: earlier ? 'edit' : 'sources', draft: null };
-  const turn = createTurn({ feature: platform ? 'post' : earlier?.format ? 'post-edit' : earlier ? 'article-edit' : 'article', prompts, emit, update, log, tag: tagged });
+  const state = { lang, phases: [], running: earlier ? 'edit' : report ? 'plan' : 'sources', draft: null };
+  const turn = createTurn({ feature: report ? 'report' : platform ? 'post' : earlier?.format ? 'post-edit' : earlier ? 'article-edit' : 'article', prompts, emit, update, log, tag: tagged });
   const { say } = turn;
   log = turn.log;
   await turn.run(renderArticleProgress(state), async () => {
@@ -85,13 +89,13 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
       if (e.phase !== 'done') return () => renderArticleProgress(state);
     });
     const write = pipeline || createArticlePipeline({ client, retrieve, log });
-    const r = await write({ topic, mode: useMode, lang, words: parseArticleOptions(query, { post: !!platform }).words, format: platform || 'article', chains: chosen.chains, prices: chosen.prices, onProgress });
+    const r = await write({ topic, mode: useMode, lang, words: parseArticleOptions(query, { post: !!platform }).words, format: platform || (report ? 'report' : 'article'), chains: chosen.chains, prices: chosen.prices, onProgress });
     await turn.settle();
     say(!r.ok ? renderArticleFailure({ ...r, post: !!platform }, lang) : platform ? renderPostResult(r) : renderArticleResult(r));
     return r;
   }, { failed: (err) => {
     const isPostTurn = !!(platform || earlier?.format);
-    log(`${isPostTurn ? 'post' : 'article'} failed: ${err.message}`);
+    log(`${report ? 'report' : isPostTurn ? 'post' : 'article'} failed: ${err.message}`);
     say(renderArticleFailure({ error: err.message, post: isPostTurn, edit: !!earlier }, lang));
   } });
   return true;

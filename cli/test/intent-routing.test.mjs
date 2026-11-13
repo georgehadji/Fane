@@ -6,17 +6,23 @@ import assert from 'node:assert/strict';
 import { isArticleRequest, postPlatform } from '../core/intent-article.mjs';
 import { isCodeRequest } from '../core/intent-code.mjs';
 import { isBrainstormRequest } from '../core/intent-brainstorm.mjs';
+import { isReportRequest } from '../core/intent-report.mjs';
 
 const hits = (q) => [
-  isBrainstormRequest(q) && 'brainstorm', isCodeRequest(q) && 'code', postPlatform(q) && 'post', isArticleRequest(q) && 'article',
+  isBrainstormRequest(q) && 'brainstorm', isCodeRequest(q) && 'code', isReportRequest(q) && 'report', postPlatform(q) && 'post', isArticleRequest(q) && 'article',
 ].filter(Boolean);
 
 const TABLE = {
   article: [
     'Write an article about solar power', 'please write an article about solar power', 'Could you write an essay on Plato',
     'I need you to write an article about quantum computing', 'Help me write a blog post about sourdough', "Let's write an article about remote work",
-    'I want you to write a report on EU energy policy', "I'd like you to draft an essay about Stoicism", 'Παρακαλώ γράψε ένα άρθρο για την ενέργεια',
+    "I'd like you to draft an essay about Stoicism", 'Παρακαλώ γράψε ένα άρθρο για την ενέργεια',
     'Help me draft an essay on the French Revolution',
+  ],
+  report: [
+    'Write a report on EU energy policy', 'I want you to write a report on EU energy policy', 'Please prepare a detailed report about heat pumps',
+    'write a short, well researched report about bees', 'Do a deep research on battery recycling', 'Could you write a comprehensive report on EV adoption',
+    'Γράψε μια έκθεση για την αιολική ενέργεια', 'συντάξτε μια έκθεση για το διάστημα', 'Κάνε βαθιά έρευνα για την ενέργεια',
   ],
   post: [
     'Write a LinkedIn post about our launch', 'Please write a Facebook post about the sale', 'I need you to write a LinkedIn post about hiring',

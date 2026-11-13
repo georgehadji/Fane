@@ -11,3 +11,9 @@ const EL = ['παρακαλω', 'μπορεισ να', 'θα ηθελα να', '
 export const politeWith = (extra = []) => String.raw`(?:${[...EN, ...EL, ...extra].map(p => `${p}\\s+`).join('|')})*`;
 
 export const POLITE = politeWith();
+
+// Words the article and report detectors share: the writing verbs (English as written, Greek over folded text) and the
+// words that link a request to its subject ("about", «για», a colon), over folded text.
+export const EN_VERB = String.raw`(?:write|draft|compose|create|prepare|produce|generate)`;
+export const EL_VERB = String.raw`(?:γραψε|γραψτε|γραψου|συνταξε|συνταξτε|δημιουργησε|δημιουργηστε|ετοιμασε|ετοιμαστε|φτιαξε|φτιαξτε|παραγαγε|γραψεισ|γραψετε)`;
+export const LINK = /^\s*(?:about|on|regarding|concerning|covering|exploring|that (?:explains|covers|looks at|argues)|of|for|για|σχετικα με|με θεμα|περι|πανω σε|οσον αφορα|που εξηγει|[:\-–])\s*/iu;
