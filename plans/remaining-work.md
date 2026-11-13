@@ -83,6 +83,8 @@ Ask before running: it spends OpenRouter credits.
 
 ## 6. Follow-up edits of generated code
 
+**Status: done 2026-11-13, not committed.** Built as designed, with these differences: `parseCodeAnswer` and `pickTargets` live in the new `cli/code/edit.mjs` (it reads what `present.mjs` wrote), `createCodeEditor` returns `editCode`, a change is reviewed in Balanced and Quality but its findings are listed, not fixed (ask for the fix as the next change), the README is left out of an edit's answer, and `isCodeEdit` needs only a leading edit verb (the hook's `parseCodeAnswer` check is the real gate). `cli/test/code-edit.test.mjs` holds the round trip, the editor, the routing and the patch upgrade. Needs `node scripts/apply.mjs` (hook folder, so a Vane restart).
+
 **Now.** Not supported. A code answer has `CODE_ANSWER_MARKER`, `<h4>` paths, and fences from `fenceFor`.
 
 **Design (in `cli/code`; detector in `core`).**

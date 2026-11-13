@@ -79,6 +79,14 @@ Rules: the smallest set of source files that does the job, at most ${MAX_FILES};
     user: `${request(text)}\n\n${specSummary(spec)}\n\n${fenced(file, MAX_FILE_CHARS)}\n\nFixes to apply to ${file.path}:\n${issues.map(i => `- [${i.severity}] ${i.issue}${i.fix ? ` Fix: ${i.fix}` : ''}`).join('\n')}\n\nKeep the file's exports and everything that is not part of a fix as it is. Output the complete corrected file ${file.path} in one fenced code block and nothing else.`,
   }),
 
+  // A follow-up change to code an earlier answer wrote: one call per file the change may touch. `others` are the
+  // project's other files, clipped, so a rename or a new parameter can be matched; a file the change does not reach
+  // comes back as the single word UNCHANGED (no tokens spent on a copy).
+  edit: ({ change, file, others = [], language }) => ({
+    system: `You are a senior software engineer applying one requested change to one file of an existing project. Change only what the request asks for; keep everything else exactly as it is, including names, exports and comments. ${NO_THINKING}\n\n${CONTRACT}`,
+    user: `<change>\n${change}\n</change>\n\n${language ? `Language: ${language}\n` : ''}Files of the project: ${[file.path, ...others.map(o => o.path)].join(', ')}\n${others.length ? `\nThe other files, for reference only (do not output them):\n${others.map(o => fenced(o, 3_000)).join('\n\n')}\n` : ''}\n${fenced(file, MAX_FILE_CHARS)}\n\nApply the change to ${file.path}. If the change does not touch this file, answer exactly UNCHANGED and nothing else. Otherwise output the complete changed file ${file.path} in one fenced code block and nothing else.`,
+  }),
+
   tests: ({ spec, files, issues }) => ({
     system: `You are a TDD specialist. Write tests that catch real bugs, not happy-path theatre: normal cases, boundary values, invalid input, error paths, and a regression test for each issue the review found. Use the language's usual test framework (pytest for Python, node:test for JavaScript without a framework, the framework the project already uses otherwise). Tests run without modification and without network access. ${NO_THINKING}\n\n${CONTRACT}`,
     user: `${specSummary(spec)}\nTest strategy: ${spec.test_strategy || 'unit tests of the public interface'}\nTest command: ${spec.test_command || 'the usual one for the language'}\n${issues?.length ? `\nIssues the review found (each gets a regression test):\n${issues.map(i => `- [${i.file}] ${i.issue}`).join('\n')}\n` : ''}\n${files.map(f => fenced(f, 12_000)).join('\n\n')}\n\nWrite the test files. For each one write a line "File: <path>" and then the whole file in one fenced code block. Test files must not have the path of a source file above. Output only the test files.`,

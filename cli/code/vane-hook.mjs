@@ -7,15 +7,16 @@
 // CODE_ANSWER_MARKER, so the patched browser code leaves its "[x]" alone.
 import { openRouterClientFromVane, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
-import { escapeHtml, providerMissing, quiet } from '../image/present.mjs';
+import { escapeHtml, previousAnswer, providerMissing, quiet } from '../image/present.mjs';
 import { detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
 import { retryEmpty } from '../write/research.mjs';
 import { buildCodeCatalogue, selectCodeChains, selectFreeCodeChains } from './catalogue.mjs';
-import { isCodeRequest } from '../core/intent-code.mjs';
+import { isCodeEdit, isCodeRequest } from '../core/intent-code.mjs';
 import { createTurn } from '../core/turn.mjs';
+import { parseCodeAnswer } from './edit.mjs';
 import { codeChainsFor } from './models.mjs';
-import { createCodePipeline } from './pipeline.mjs';
+import { createCodeEditor, createCodePipeline } from './pipeline.mjs';
 import { readTrial } from '../write/trial.mjs';
 import { codePrompts } from './prompts.mjs';
 import { codeTagged, renderCodeFailure, renderCodeProgress, renderCodeResult } from './present.mjs';
@@ -25,13 +26,22 @@ const TRIAL_FILE = new URL('./trial.json', import.meta.url);
 
 // research(query) -> [{ title, url, content }] (Vane's research on this chat's model and mode).
 // researchDone() closes Vane's research display. emit(markdown) -> blockId, update(blockId, markdown).
-// Returns false when the message is not a coding request (Vane then answers as usual).
-// client, trial, pipeline and checkSyntax are injectable for tests.
-export async function handleCodeRequest(query, { emit, update, configPath, mode, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, signal, client, trial, pipeline, checkSyntax } = {}) {
-  if (!isCodeRequest(query) || isImageRequest(query)) return false;
+// lastAnswer() -> text of the previous answer, history -> the browser's chat history (see previousAnswer).
+// Returns false when the message is neither a coding request nor an edit of the code the previous answer was
+// (Vane then answers as usual). client, trial, pipeline, editor and checkSyntax are injectable for tests.
+export async function handleCodeRequest(query, { emit, update, configPath, mode, history, lastAnswer, research, researchDone = () => {}, log = (m) => console.log(`fane: ${m}`), readConfig, signal, client, trial, pipeline, editor, checkSyntax } = {}) {
+  if (isImageRequest(query)) return false;
+  // A request for new code first ("write a function that ..."); else a change to the code of the answer before
+  // ("add input validation"), which needs that answer to be a code answer of ours (it carries CODE_ANSWER_MARKER).
+  let earlier = null;
+  if (!isCodeRequest(query)) {
+    if (!isCodeEdit(query)) return false;
+    earlier = parseCodeAnswer(await previousAnswer(history, lastAnswer));
+    if (!earlier) return false;
+  }
   const lang = detectLanguage(query);
-  const state = { lang, phases: [], running: 'spec', files: null };
-  const turn = createTurn({ feature: 'code', prompts: codePrompts, emit, update, log, tag: codeTagged });
+  const state = { lang, phases: [], running: earlier ? 'edit' : 'spec', files: null };
+  const turn = createTurn({ feature: earlier ? 'code-edit' : 'code', prompts: codePrompts, emit, update, log, tag: codeTagged });
   const { say } = turn;
   log = turn.log;
   await turn.run(renderCodeProgress(state), async () => {
@@ -45,7 +55,6 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
       only: codeChainsFor,
     });
     if (!chosen) return say(quiet([escapeHtml('No model has passed the coding trial: run node scripts/code-trial.mjs.')]));
-    const retrieve = retryEmpty(research);
     const onProgress = turn.progress((e) => {
       if (e.status === 'preview') { if (e.files) state.files = e.files; }
       else if (e.status === 'running') state.running = e.phase;
@@ -55,14 +64,21 @@ export async function handleCodeRequest(query, { emit, update, configPath, mode,
       }
       if (e.phase !== 'done') return () => renderCodeProgress(state);
     });
-    const write = pipeline || createCodePipeline({ client, retrieve, checkSyntax: checkSyntax || createSyntaxChecker(), log });
-    const r = await write({ request: query, mode: useMode, lang, chains: chosen.chains, prices: chosen.prices, onProgress });
+    let r;
+    if (earlier) {
+      // no research: a change works with the code the answer before already holds
+      const edit = editor || createCodeEditor({ client, checkSyntax: checkSyntax || createSyntaxChecker(), log });
+      r = await edit({ files: earlier.files, tests: earlier.tests, summary: earlier.summary, language: earlier.language, change: query, mode: useMode, lang, chains: chosen.chains, prices: chosen.prices, onProgress });
+    } else {
+      const write = pipeline || createCodePipeline({ client, retrieve: retryEmpty(research), checkSyntax: checkSyntax || createSyntaxChecker(), log });
+      r = await write({ request: query, mode: useMode, lang, chains: chosen.chains, prices: chosen.prices, onProgress });
+    }
     await turn.settle();
-    say(r.ok ? renderCodeResult(r) : renderCodeFailure(r, lang));
+    say(r.ok ? renderCodeResult(r) : renderCodeFailure({ ...r, edit: !!earlier }, lang));
     return r;
   }, { failed: (err) => {
-    log(`code failed: ${err.message}`);
-    say(renderCodeFailure({ error: err.message }, lang));
+    log(`code ${earlier ? 'edit ' : ''}failed: ${err.message}`);
+    say(renderCodeFailure({ error: err.message, edit: !!earlier }, lang));
   } });
   return true;
 }

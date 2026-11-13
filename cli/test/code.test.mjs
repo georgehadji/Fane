@@ -512,7 +512,8 @@ test('the web answer: files in fences longer than their backticks, escaped paths
   const { CODE_ANSWER_MARKER: inPatches } = require('../../patches/lib/vane.js');
   assert.equal(CODE_ANSWER_MARKER, inPatches);
   const { TARGETS } = require('../../patches/patch-code-chat.js');
-  assert.ok(TARGETS[1].to.startsWith(`s=s.includes(${JSON.stringify(CODE_ANSWER_MARKER)})?s:l.length>0?`));
+  const brackets = TARGETS.find(t => t.name === 'code answers keep their brackets');
+  assert.ok(brackets.to.startsWith(`s=s.includes(${JSON.stringify(CODE_ANSWER_MARKER)})?s:l.length>0?`));
 });
 
 test('hook: not a coding request -> false; no trial -> a message; a run -> files in the answer, research closed', async () => {

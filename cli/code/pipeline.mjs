@@ -12,6 +12,7 @@ import { createRoleCaller, noteOf, statusOf } from '../write/llm.mjs';
 import { PHASE, isStopped, phaseRecord } from '../core/outcome.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
 import { DEFAULT_MODE, MODES } from '../write/models.mjs';
+import { pickTargets } from './edit.mjs';
 import { MAX_FILE_CHARS, extractCode, fileChecks, parseFiles, safePath, sameFile } from './files.mjs';
 import { CODE_JSON_ROLES, CODE_PHASES, CONCURRENCY, MAX_FILES, codeChainsFor, codeTokensFor } from './models.mjs';
 import { resolveEffort } from '../core/effort.mjs';
@@ -301,6 +302,118 @@ export function createCodePipeline({ client, retrieve, checkSyntax = notChecked,
       const readme = buildReadme({ request, spec, files, tests, review, fixes, open, mode, lang, stopped: !!stoppedBy });
       emit({ phase: 'done', status: 'done' });
       return { ok: true, request, language: lang, mode, reasoning: effort.reasoning, spec, files, tests, readme, review, fixes, open, docs, cve, checks, phases, degraded, calls, cost, stopped: stoppedBy, ms: now() - t0 };
+    } catch (err) {
+      if (err instanceof Stop) return { ...fail(err.message), fatal: true, status: err.status };
+      throw err;
+    }
+  };
+}
+
+// The word a file's answer is when the change does not touch it (codePrompts.edit asks for exactly this).
+const UNCHANGED = /^\s*`{0,3}\s*UNCHANGED\s*\.?\s*`{0,3}\s*$/i;
+
+// A follow-up change to code an earlier answer wrote (edit.mjs parseCodeAnswer): one `edit` call per file the change
+// may touch (pickTargets), the same refusal rules as a fix (empty, much shorter, a parsing file that stops parsing), a
+// review of the changed files in Balanced and Quality, and the same result shape as createCodePipeline, so
+// renderCodeResult shows it. Nothing is searched, and findings are listed, not fixed: ask for the fix as the next change.
+// -> { ok: true, edit: true, changed: [paths], files, tests, ... } | { ok: false, error }
+export function createCodeEditor({ client, checkSyntax = notChecked, log = () => {}, now = Date.now, maxCost }) {
+  const call = createRoleCaller({ client, log, maxCost });
+
+  return async function editCode({ files, tests = [], summary = '', language = '', change, mode = DEFAULT_MODE, effort, lang, chains, prices, onProgress = () => {} }) {
+    if (!MODES.includes(mode)) throw new Error(`unknown mode "${mode}"`);
+    effort ??= resolveEffort(mode);
+    const t0 = now();
+    lang = LANGUAGE_NAMES[lang] ? lang : detectLanguage(change);
+    chains ||= codeChainsFor();
+    const phases = [], degraded = [];
+    let cost = 0, calls = 0;
+    const emit = (e) => { try { onProgress(e); } catch { /* a throwing listener must not stop the edit */ } };
+    const fail = (error, more = {}) => ({ ok: false, edit: true, error, phases, language: lang, mode, reasoning: effort.reasoning, calls, cost, ...more });
+
+    async function check(list) {
+      if (!list.length) return;
+      let results = [];
+      try { results = await checkSyntax(list); } catch (err) { degraded.push(`the syntax check failed (${err.message})`); }
+      for (const f of list) f.syntax = results.find(r => r.path === f.path) || { status: 'unchecked' };
+    }
+    async function step(role, prompt, file) {
+      emit({ phase: role, status: PHASE.running, file });
+      const started = now();
+      const r = await call(role, prompt, { chain: chains[role] || chains.fix || chains.generate, maxTokens: codeTokensFor(role, effort.headroom), reasoning: effort.reasoning, temperature: 0.2, prices, json: CODE_JSON_ROLES.has(role), code: true });
+      calls += r.attempts.length;
+      cost += r.cost;
+      const rec = phaseRecord(role, statusOf(r), { file, model: r.model || null, ms: now() - started, note: noteOf(r), cost: r.cost });
+      phases.push(rec);
+      emit({ ...rec });
+      if (r.fatal) throw Object.assign(new Stop(r.errors[0] || 'the provider refused the request'), { status: r.status });
+      return { ...r, rec };
+    }
+
+    try {
+      const sources = files.map(f => ({ ...f }));
+      const tested = tests.map(f => ({ ...f }));
+      const all = [...sources, ...tested];
+      await check(all); // the state before the change: a file that parsed must still parse
+      const { targets, skipped } = pickTargets(change, sources, tested);
+      if (skipped.length) degraded.push(`not changed (too long, or more than ${MAX_FILES} files): ${skipped.join(', ')}`);
+      if (!targets.length) return fail('no file of the project can take the change');
+
+      const landed = new Map();
+      let stoppedBy = null;
+      const reject = (file, r, why) => {
+        r.rec.status = PHASE.rejected; r.rec.note = why; emit({ ...r.rec }); // the first record said 'ok'
+        degraded.push(`the change to ${file.path} was not used (${why}): the earlier file was kept`);
+      };
+      try {
+        await mapLimited(targets, CONCURRENCY, async (file) => {
+          const others = all.filter(o => o.path !== file.path);
+          const r = await step('edit', codePrompts.edit({ change, file, others, language }), file.path);
+          if (!r.ok) { degraded.push(`${file.path} could not be changed (${r.errors.at(-1) || 'no answer'})`); return; }
+          if (UNCHANGED.test(r.text)) return;
+          const content = extractCode(r.text);
+          const why = refuse(file.content, content);
+          if (why) return reject(file, r, why);
+          if (content === file.content) return; // the model copied the file back
+          const next = { ...file, content };
+          await check([next]);
+          if (file.syntax.status === 'ok' && next.syntax.status === 'error') return reject(file, r, `the changed file does not parse (${next.syntax.detail})`);
+          landed.set(file.path, next);
+        });
+      } catch (err) {
+        if (!(err instanceof Stop) || isStopped(err) || !landed.size) throw err;
+        stoppedBy = { status: err.status ?? null, error: err.message };
+        degraded.unshift(`stopped (${err.message}): the changes written so far are kept, the rest of the work was not done`);
+      }
+      if (!landed.size) return fail(degraded.length ? `no file was changed: ${degraded.join('; ')}` : 'the change did not alter any file', { degraded });
+
+      const finalSources = sources.map(f => landed.get(f.path) || f);
+      const finalTests = tested.map(f => landed.get(f.path) || f);
+      const changedFiles = [...finalSources, ...finalTests].filter(f => landed.has(f.path));
+
+      // A review of what changed (Balanced and Quality). Its findings are listed; fixing them is the next request.
+      let review = null;
+      if (CODE_PHASES[mode].includes('review') && !stoppedBy) {
+        const spec = { language, framework: '', summary, files: [...finalSources, ...finalTests].map(f => ({ path: f.path, purpose: f.role === 'test' ? 'test' : '' })), dependencies: [], error_strategy: '', security_notes: [] };
+        try {
+          const r = await step('review', codePrompts.review({ spec, files: changedFiles, syntax: changedFiles.filter(f => f.syntax.status === 'error').map(f => ({ path: f.path, detail: f.syntax.detail })), cve: [] }));
+          if (r.ok) review = normalizeReview(r.data, changedFiles);
+          else degraded.push('the review failed: the change was not reviewed');
+        } catch (err) {
+          if (!(err instanceof Stop) || isStopped(err)) throw err;
+          stoppedBy = { status: err.status ?? null, error: err.message };
+          degraded.unshift(`stopped (${err.message}): the change is kept, it was not reviewed`);
+        }
+      }
+      const open = review ? [...review.critical, ...review.high, ...review.medium] : [];
+      for (const i of open) Object.assign(i, { fixState: FIX.notAttempted, fixNote: 'a change is reviewed, not fixed again: ask for the fix' });
+      const checks = fileChecks(changedFiles);
+      for (const c of checks) if (c.level === 'fail') degraded.push(`check "${c.name}" failed: ${c.detail}`);
+      emit({ phase: 'done', status: 'done' });
+      return {
+        ok: true, edit: true, request: change, language: lang, mode, reasoning: effort.reasoning, spec: { summary }, files: finalSources, tests: finalTests, readme: '',
+        review, fixes: [], open, docs: [], cve: [], checks, phases, degraded, calls, cost, stopped: stoppedBy, changed: changedFiles.map(f => f.path), ms: now() - t0,
+      };
     } catch (err) {
       if (err instanceof Stop) return { ...fail(err.message), fatal: true, status: err.status };
       throw err;

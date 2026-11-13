@@ -52,6 +52,21 @@ const EL_STRONG = new RegExp(String.raw`^${EL_ART}${EL_WORDS}(?:κωδικα|κ�
 const EL_AMBIGUOUS = new RegExp(String.raw`^${EL_ART}${EL_WORDS}(?:προγραμμα|εργαλει|βιβλιοθηκ)\p{L}*\s+(?:που|${LANG})(?![\p{L}\w+#])`, 'iu');
 const EL_IN_LANG = new RegExp(String.raw`(?:σε|με)\s+(?:την\s+|το\s+|τη\s+)?(?:${LANG}|go|c)(?![\w+#])`, 'iu');
 
+// A follow-up edit of code the previous answer wrote ("add input validation", "rename the function to parse_line",
+// «πρόσθεσε έλεγχο εισόδου»): a leading edit verb. Never a question ("?", or ";" in Greek), thanks or praise. This is only
+// half the test: the hook also needs the earlier answer to be a code answer of ours (parseCodeAnswer), so a loose
+// verb list here cannot send an ordinary chat to the editor. A request for NEW code ("write a function that ...")
+// is isCodeRequest's; ask that first.
+const EN_EDIT = /^\s*(?:(?:ok(?:ay)?|now|and|but|then|please|can you|could you|would you)[,.]?\s+)*(?:add|remove|delete|drop|change|rename|replace|fix|refactor|update|use|make|convert|port|rewrite|simplify|optimi[sz]e|extract|split|merge|handle|support|wrap|move|inline|document|comment|improve|clean up|speed up|shorten|reduce|increase|switch|swap|allow|require|validate|log|parse|cache|retry|return|print|accept|reject|also|instead)(?![\p{L}])/iu;
+const EL_EDIT = /^\s*(?:(?:ok|τωρα|και|αλλα|παρακαλω|μπορεισ να|θα μπορουσεσ να)\s+)*(?:προσθεσε|αφαιρεσε|διαγραψε|σβησε|αλλαξε|μετονομασε|αντικαταστησε|διορθωσε|ενημερωσε|χρησιμοποιησε|κανε|μετατρεψε|ξαναγραψε|απλοποιησε|βελτιωσε|βγαλε|βαλε|επιτρεψε|μετακινησε|χωρισε|τεκμηριωσε)(?![\p{L}])/iu;
+const NOT_CODE_EDIT = /\?|\bthank|ευχαριστ|μπραβο/u;
+export function isCodeEdit(text) {
+  const t = String(text || '');
+  const folded = fold(t);
+  if (NOT_CODE_EDIT.test(folded) || (/;/.test(folded) && /[α-ω]/.test(folded))) return false;
+  return EN_EDIT.test(t) || EL_EDIT.test(folded);
+}
+
 export function isCodeRequest(text) {
   const t = String(text || '');
   if (isBrainstormRequest(t)) return false; // "generate ideas for a game in Python" asks for ideas

@@ -17,12 +17,12 @@ export const codeTagged = (markdown) => tagged(`${markdown}\n\n${CODE_ANSWER_MAR
 const NBSP = ' ';
 
 const LABELS = {
-  en: { docs: 'Reading documentation', spec: 'Planning the files', generate: 'Writing the code', cve: 'Looking up known vulnerabilities', review: 'Reviewing the code', fix: 'Applying the fixes', tests: 'Writing the tests' },
-  el: { docs: 'Ανάγνωση τεκμηρίωσης', spec: 'Σχεδιασμός των αρχείων', generate: 'Συγγραφή του κώδικα', cve: 'Αναζήτηση γνωστών ευπαθειών', review: 'Αξιολόγηση του κώδικα', fix: 'Διορθώσεις', tests: 'Συγγραφή των ελέγχων' },
+  en: { docs: 'Reading documentation', spec: 'Planning the files', generate: 'Writing the code', cve: 'Looking up known vulnerabilities', review: 'Reviewing the code', fix: 'Applying the fixes', tests: 'Writing the tests', edit: 'Applying the change' },
+  el: { docs: 'Ανάγνωση τεκμηρίωσης', spec: 'Σχεδιασμός των αρχείων', generate: 'Συγγραφή του κώδικα', cve: 'Αναζήτηση γνωστών ευπαθειών', review: 'Αξιολόγηση του κώδικα', fix: 'Διορθώσεις', tests: 'Συγγραφή των ελέγχων', edit: 'Εφαρμογή της αλλαγής' },
 };
 const WORDS = {
-  en: { files: 'files', file: 'file', tests: 'Tests', testFiles: 'tests', review: 'Review', fixed: 'Fixed', open: 'Not fixed', approved: 'The review found no critical or high issue.', syntax: 'syntax', ok: 'parses', error: 'does not parse', unchecked: 'not checked', refs: 'References', draft: 'First version. Review and tests next…', modes: { speed: 'Speed', balanced: 'Balanced', quality: 'Quality' }, failed: 'The code could not be written.' },
-  el: { files: 'αρχεία', file: 'αρχείο', tests: 'Έλεγχοι', testFiles: 'έλεγχοι', review: 'Αξιολόγηση', fixed: 'Διορθώθηκαν', open: 'Δεν διορθώθηκαν', approved: 'Η αξιολόγηση δεν βρήκε σοβαρό πρόβλημα.', syntax: 'σύνταξη', ok: 'σωστή', error: 'λάθος', unchecked: 'χωρίς έλεγχο', refs: 'Πηγές', draft: 'Πρώτη μορφή. Ακολουθούν αξιολόγηση και έλεγχοι…', modes: { speed: 'Speed', balanced: 'Balanced', quality: 'Quality' }, failed: 'Δεν μπόρεσα να γράψω τον κώδικα.' },
+  en: { changed: 'changed', files: 'files', file: 'file', tests: 'Tests', testFiles: 'tests', review: 'Review', fixed: 'Fixed', open: 'Not fixed', approved: 'The review found no critical or high issue.', syntax: 'syntax', ok: 'parses', error: 'does not parse', unchecked: 'not checked', refs: 'References', draft: 'First version. Review and tests next…', modes: { speed: 'Speed', balanced: 'Balanced', quality: 'Quality' }, failed: 'The code could not be written.', editFailed: 'The change could not be applied.' },
+  el: { changed: 'άλλαξαν', files: 'αρχεία', file: 'αρχείο', tests: 'Έλεγχοι', testFiles: 'έλεγχοι', review: 'Αξιολόγηση', fixed: 'Διορθώθηκαν', open: 'Δεν διορθώθηκαν', approved: 'Η αξιολόγηση δεν βρήκε σοβαρό πρόβλημα.', syntax: 'σύνταξη', ok: 'σωστή', error: 'λάθος', unchecked: 'χωρίς έλεγχο', refs: 'Πηγές', draft: 'Πρώτη μορφή. Ακολουθούν αξιολόγηση και έλεγχοι…', modes: { speed: 'Speed', balanced: 'Balanced', quality: 'Quality' }, failed: 'Δεν μπόρεσα να γράψω τον κώδικα.', editFailed: 'Δεν μπόρεσα να εφαρμόσω την αλλαγή.' },
 };
 const words = (lang) => WORDS[lang] || WORDS.en;
 
@@ -52,7 +52,7 @@ export function renderCodeResult(r) {
   if (r.spec.summary) parts.push(`<p>${escapeHtml(r.spec.summary)}</p>`);
   parts.push(files(r.files));
   if (r.tests.length) parts.push(`<h3>${escapeHtml(W.tests)}</h3>`, files(r.tests));
-  parts.push(codeBlock({ path: 'README.md', content: r.readme }));
+  if (r.readme) parts.push(codeBlock({ path: 'README.md', content: r.readme })); // an edit leaves the README out: it would be stale
   if (r.review) {
     const review = [`<h3>${escapeHtml(W.review)}</h3>`];
     if (r.review.posture) review.push(`<p>${escapeHtml(r.review.posture)}</p>`);
@@ -61,13 +61,14 @@ export function renderCodeResult(r) {
     if (!r.fixes.length && !r.open.length) review.push(`<p>${escapeHtml(W.approved)}</p>`);
     parts.push(review.join('\n'));
   }
-  const refs = [...r.docs, ...r.cve].filter(s => isWebUrl(s.url));
+  const refs = [...(r.docs || []), ...(r.cve || [])].filter(s => isWebUrl(s.url));
   if (refs.length) parts.push(`<p>${escapeHtml(W.refs)}:<br>${refs.map(s => `<a href="${escapeHtml(safeUrl(s.url))}">${escapeHtml(s.title)}</a>`).join('<br>')}</p>`);
 
   const all = [...r.files, ...r.tests];
   const counts = { ok: 0, error: 0, unchecked: 0 };
   for (const f of all) counts[f.syntax?.status || 'unchecked']++;
   const summary = [
+    r.changed ? `${r.changed.length}${NBSP}${W.changed}` : null,
     `${r.files.length}${NBSP}${r.files.length === 1 ? W.file : W.files}`,
     r.tests.length ? `${r.tests.length}${NBSP}${W.testFiles}` : null,
     `${W.syntax}: ${['ok', 'error', 'unchecked'].filter(k => counts[k]).map(k => `${counts[k]}${NBSP}${W[k]}`).join(', ')}`,
@@ -81,5 +82,6 @@ export function renderCodeResult(r) {
 }
 
 export function renderCodeFailure(result, lang = 'en') {
-  return failed(escapeHtml(words(lang).failed), escapeHtml(failureReason(result)));
+  const W = words(lang);
+  return failed(escapeHtml(result.edit ? W.editFailed : W.failed), escapeHtml(failureReason(result)));
 }

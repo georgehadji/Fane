@@ -11,10 +11,10 @@
 // hook with it). That chunk is served with max-age=0: a normal reload picks the change up.
 const { run } = require('./lib/apply-targets');
 const { FILES, CONFIG_JSON, FANE_CODE_DIR, CODE_ANSWER_MARKER } = require('./lib/vane');
-const { FINISH } = require('./patch-image-chat');
+const { FINISH, LAST_ANSWER } = require('./patch-image-chat');
 const { CLASSIFY, RESEARCH } = require('./patch-article-chat');
 
-const HOOK = `if(await(async()=>{try{let H=await import(${JSON.stringify(`file://${FANE_CODE_DIR}/vane-hook.mjs`)});return await H.handleCodeRequest(b.followUp,{mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},research:${RESEARCH},researchDone:()=>a.emit("data",{type:"researchComplete"}),emit:x=>{let B={id:crypto.randomUUID(),type:"text",data:x};a.emitBlock(B);return B.id},update:(I,x)=>{let B=a.getBlock(I);B&&(B.data=x,a.updateBlock(I,[{op:"replace",path:"/data",value:x}]))}})}catch(E){console.log("fane: code hook unavailable:",E&&E.message);return!1}})()){${FINISH};return}/*fane:code-chat*/`;
+const HOOK = `if(await(async()=>{try{let H=await import(${JSON.stringify(`file://${FANE_CODE_DIR}/vane-hook.mjs`)});return await H.handleCodeRequest(b.followUp,{lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},research:${RESEARCH},researchDone:()=>a.emit("data",{type:"researchComplete"}),emit:x=>{let B={id:crypto.randomUUID(),type:"text",data:x};a.emitBlock(B);return B.id},update:(I,x)=>{let B=a.getBlock(I);B&&(B.data=x,a.updateBlock(I,[{op:"replace",path:"/data",value:x}]))}})}catch(E){console.log("fane: code hook unavailable:",E&&E.message);return!1}})()){${FINISH};return}/*fane:code-chat*/`;
 
 // In ChatProvider: `s` is a text block's data and `l` the answer's sources.
 const CITATIONS = 's=l.length>0?s.replace(/\\[([^\\]]+)\\]/g,';
@@ -26,6 +26,19 @@ const TARGETS = [
     from: CLASSIFY,
     to: HOOK + CLASSIFY,
     marker: '/*fane:code-chat*/',
+  },
+  {
+    // Upgrade for a hook installed before follow-up edits: hand over the previous answer and the history. The second
+    // form is what patch-pipeline-abort leaves (it put `signal` in front), the first the hook before that patch ran.
+    name: 'code hook can read the previous answer',
+    file: FILES.chatRoute,
+    ladder: ['V1', 'V1+pipeline-abort'],
+    alts: [
+      { from: 'handleCodeRequest(b.followUp,{mode:b.config.mode,configPath:', to: `handleCodeRequest(b.followUp,{lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:` },
+      { from: 'handleCodeRequest(b.followUp,{signal:a.faneSignal,mode:b.config.mode,configPath:', to: `handleCodeRequest(b.followUp,{signal:a.faneSignal,lastAnswer:${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:` },
+    ],
+    // patch-pipeline-abort puts `signal` in front of it (or leaves it where it was)
+    marker: `${LAST_ANSWER},history:b.chatHistory,mode:b.config.mode,configPath:${JSON.stringify(CONFIG_JSON)},research:`,
   },
   {
     name: 'code answers keep their brackets',
