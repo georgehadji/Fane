@@ -12,7 +12,10 @@ const { FILES, CONFIG_JSON, FANE_WRITE_DIR } = require('./lib/vane');
 
 // `a` is the tool's input and `c` the research block, both in scope where patch-social-sources builds its searches.
 // No backticks in injected code.
-const CALL = `(async()=>{try{return(await(await import(${JSON.stringify(`file://${FANE_WRITE_DIR}/xsearch.mjs`)})).searchX({queries:a.queries,block:c,configPath:${JSON.stringify(CONFIG_JSON)}}))||[]}catch(E){return[]}})()`;
+// `b.mode` is Vane's own mode (speed, balanced or quality); searchX takes its cap from it (Speed makes no call).
+const CALL = `(async()=>{try{return(await(await import(${JSON.stringify(`file://${FANE_WRITE_DIR}/xsearch.mjs`)})).searchX({queries:a.queries,block:c,mode:b.mode,configPath:${JSON.stringify(CONFIG_JSON)}}))||[]}catch(E){return[]}})()`;
+// The first version, in containers patched before the mode was passed (an upgrade `alts` entry below).
+const CALL_V1 = `(async()=>{try{return(await(await import(${JSON.stringify(`file://${FANE_WRITE_DIR}/xsearch.mjs`)})).searchX({queries:a.queries,block:c,configPath:${JSON.stringify(CONFIG_JSON)}}))||[]}catch(E){return[]}})()`;
 
 // patch-social-sources' own X filter, which ends the list the tool returns.
 const X_FILTER = 'x=>/^https?:\\/\\/(?:(?:www|mobile)\\.)?(?:x|twitter)\\.com\\/\\w+\\/status\\/\\d+/.test(String(x.metadata&&x.metadata.url))';
@@ -20,8 +23,11 @@ const X_FILTER = 'x=>/^https?:\\/\\/(?:(?:www|mobile)\\.)?(?:x|twitter)\\.com\\/
 const TARGETS = [
   {
     name: 'x_search runs with the other social searches',
-    from: '[F,R,X]=await Promise.all([',
-    to: `[XA,F,R,X]=await Promise.all([${CALL},`,
+    alts: [
+      { from: '[F,R,X]=await Promise.all([', to: `[XA,F,R,X]=await Promise.all([${CALL},` },
+      { from: `[XA,F,R,X]=await Promise.all([${CALL_V1},`, to: `[XA,F,R,X]=await Promise.all([${CALL},` },
+    ],
+    ladder: ['fresh+social-sources', 'V1'],
   },
   {
     name: 'x_search posts join the social results',
@@ -30,5 +36,5 @@ const TARGETS = [
   },
 ].map(t => ({ file: FILES.research, ...t }));
 
-module.exports = { TARGETS, CALL };
+module.exports = { TARGETS, CALL, CALL_V1 };
 if (require.main === module) run('patch-x-search', TARGETS);

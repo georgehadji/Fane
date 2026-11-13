@@ -176,6 +176,7 @@ Because it runs inside the cache, the cost is paid once per topic per refresh, m
 ## Phase D: x_search by mode
 
 ### 3. x_search is a per-mode budget
+**Done 2026-11-13** (`EFFORT.xSearchCalls`, `xCallBudget` and the per-call cap in `cli/write/xsearch.mjs`, `CALL`/`CALL_V1` in `patch-x-search`; tests in `x-search.test.mjs` and `effort.test.mjs`). The mode is `b.mode` in the social tool. Not run live: no xAI key is set, so a Balanced call and the Speed skip are shown by the unit tests only.
 
 **Now.** `patch-x-search` calls `searchX` in every mode, at most `FANE_X_MAX_CALLS` (2) per research. One call takes 40-90 s and about $0.15, which is most of a Speed answer's time.
 

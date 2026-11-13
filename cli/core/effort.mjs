@@ -19,11 +19,12 @@ export const HEADROOM = Object.freeze({ minimal: 4000, low: 8000, medium: 16000,
 // tier: the price band of images and of the text models' default chains. researchRounds: Vane's research loop
 // (module 87044, set by patch-quality-mode). staleRounds: rounds in a row with no new page URL before that loop ends
 // (null: no early stop; patch-quality-mode). cliTimeoutS: the CLI's default request timeout. patches/lib/vane.js
-// holds a copy of researchRounds and staleRounds; a test keeps both equal.
+// holds a copy of researchRounds and staleRounds; a test keeps both equal. xSearchCalls: xAI x_search calls one research
+// may make in the Social source (write/xsearch.mjs xCallBudget): one call takes 40-90 s and about $0.15, so Speed makes none.
 export const EFFORT = Object.freeze({
-  speed: Object.freeze({ tier: 'budget', reasoning: DEFAULT_REASONING, researchRounds: 2, staleRounds: null, cliTimeoutS: 180 }),
-  balanced: Object.freeze({ tier: 'value', reasoning: DEFAULT_REASONING, researchRounds: 6, staleRounds: 2, cliTimeoutS: 180 }),
-  quality: Object.freeze({ tier: 'premium', reasoning: DEFAULT_REASONING, researchRounds: 10, staleRounds: 2, cliTimeoutS: 600 }),
+  speed: Object.freeze({ tier: 'budget', reasoning: DEFAULT_REASONING, researchRounds: 2, staleRounds: null, xSearchCalls: 0, cliTimeoutS: 180 }),
+  balanced: Object.freeze({ tier: 'value', reasoning: DEFAULT_REASONING, researchRounds: 6, staleRounds: 2, xSearchCalls: 2, cliTimeoutS: 180 }),
+  quality: Object.freeze({ tier: 'premium', reasoning: DEFAULT_REASONING, researchRounds: 10, staleRounds: 2, xSearchCalls: 2, cliTimeoutS: 600 }),
 });
 
 // A spend cap in USD from the environment: a positive number, else no limit (FANE_MAX_COST).

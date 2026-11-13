@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { DEFAULT_X_MODEL, MAX_POSTS, XAI_URL, createXSearch, findXaiKey, parseResponse, searchX, toResults, xRequest } from '../write/xsearch.mjs';
+import { DEFAULT_X_MODEL, MAX_POSTS, XAI_URL, createXSearch, findXaiKey, parseResponse, searchX, toResults, xCallBudget, xRequest } from '../write/xsearch.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -154,6 +154,37 @@ test('searchX: reads the key from the Vane config it is given', async () => {
   assert.equal(fetchImpl.calls.length, 1);
 });
 
+test('xCallBudget: the mode sets the cap; the environment can lower or raise it, never for Speed; unknown mode is Balanced', () => {
+  assert.deepEqual(['speed', 'balanced', 'quality'].map(m => xCallBudget(m, {})), [0, 2, 2]);
+  assert.deepEqual([undefined, 'turbo', null].map(m => xCallBudget(m, {})), [2, 2, 2]);
+  assert.deepEqual([xCallBudget('balanced', { FANE_X_MAX_CALLS: '1' }), xCallBudget('quality', { FANE_X_MAX_CALLS: '5' }), xCallBudget('quality', { FANE_X_MAX_CALLS: '0' })], [1, 5, 0]);
+  assert.equal(xCallBudget('speed', { FANE_X_MAX_CALLS: '5' }), 0);
+  for (const bad of ['', 'x', '-1', '1.5']) assert.equal(xCallBudget('balanced', { FANE_X_MAX_CALLS: bad }), 2, JSON.stringify(bad));
+});
+
+test('searchX: Speed makes no call and never reads the key; Balanced and Quality keep two per research; the environment cannot wake Speed', async () => {
+  const fetchImpl = okFetch([post(1)]);
+  let reads = 0;
+  const readConfig = async () => { reads++; return JSON.stringify({ modelProviders: [{ config: { baseURL: 'https://api.x.ai/v1', apiKey: 'k' } }] }); };
+  const run = (mode, block, env = {}) => searchX({ queries: ['q'], block, mode, readConfig, fetchImpl, log: () => {}, env });
+  assert.deepEqual(await run('speed', {}), []);
+  assert.deepEqual(await run('speed', {}, { FANE_X_MAX_CALLS: '9' }), []);
+  assert.deepEqual([reads, fetchImpl.calls.length], [0, 0]);
+  for (const mode of ['balanced', 'quality', undefined]) assert.equal((await run(mode, {})).length, 1, String(mode));
+  assert.equal(fetchImpl.calls.length, 3);
+  // (with readConfig or fetchImpl searchX builds a searcher per call, so the per-research count is createXSearch's test)
+  assert.equal((await run('balanced', {}, { FANE_X_MAX_CALLS: '0' })).length, 0); // the environment can lower it to none
+});
+
+test('createXSearch: a cap given with the call replaces the factory default', async () => {
+  const fetchImpl = okFetch([post(1)]);
+  const search = createXSearch({ fetchImpl, readKey: async () => 'k', maxCalls: 2 });
+  const block = {};
+  await search({ queries: ['q'], block, maxCalls: 1 });
+  await search({ queries: ['q'], block, maxCalls: 1 });
+  assert.equal(fetchImpl.calls.length, 1);
+});
+
 // ---- the patch ----
 
 test('patch-x-search: the social tool gets the call in its Promise.all, in either order with patch-social-sources, twice, and a missing module changes nothing', async () => {
@@ -177,9 +208,9 @@ test('patch-x-search: the social tool gets the call in its Promise.all, in eithe
 
   // run it, the module stubbed
   const dir = mkdtempSync(join(tmpdir(), 'fane-x-'));
-  writeFileSync(join(dir, 'ok.mjs'), 'export const searchX = async ({ queries, block }) => [{ content: "[X | 2026-11-12] hi " + queries[0], metadata: { url: "https://x.com/u/status/9", title: "X post by @u" }, seen: block }];');
+  writeFileSync(join(dir, 'ok.mjs'), 'export const searchX = async ({ queries, block, mode }) => [{ content: "[X | 2026-11-12] hi " + queries[0], metadata: { url: "https://x.com/u/status/9", title: "X post by @u" }, seen: block, mode }];');
   const patched = x1.next[file];
-  assert.ok(patched.includes('searchX({queries:a.queries,block:c'));
+  assert.ok(patched.includes('searchX({queries:a.queries,block:c,mode:b.mode'));
   const k = async ({ queries }) => [{ metadata: { url: queries[0].startsWith('site:reddit.com') ? 'https://reddit.com/r/a' : queries[0].startsWith('site:x.com') ? 'https://x.com/h/status/1' : 'https://news.ycombinator.com/item?id=1' } }];
   const toolWith = (src) => { const m = { exports: null }; new Function('module', src)(m); return m.exports; };
   const block = {};
@@ -187,6 +218,17 @@ test('patch-x-search: the social tool gets the call in its Promise.all, in eithe
   const res = await toolWith(withStub)({ queries: ['solar'] }, { llm: 1 }, block, { k });
   assert.deepEqual(res.results.map(r => r.metadata.url), ['https://news.ycombinator.com/item?id=1', 'https://reddit.com/r/a', 'https://x.com/h/status/1', 'https://x.com/u/status/9']);
   assert.equal(res.results[3].seen, block); // the research block is what the cap counts against
+  assert.equal(res.results[3].mode, undefined);
+  const inSpeed = await toolWith(withStub)({ queries: ['solar'] }, { llm: 1, mode: 'speed' }, block, { k });
+  assert.equal(inSpeed.results[3].mode, 'speed'); // Vane's mode reaches searchX, which decides what it may spend
+
+  // a container patched before the mode was passed is upgraded in place, once
+  const v1 = planPatch(s1.next, [{ ...x.TARGETS[0], alts: [{ from: x.TARGETS[0].alts[0].from, to: x.TARGETS[0].alts[0].to.replace(x.CALL, x.CALL_V1) }] }, x.TARGETS[1]]);
+  assert.deepEqual(v1.errors, []);
+  const up = planPatch(v1.next, x.TARGETS);
+  assert.deepEqual([up.errors, up.applied.length], [[], 1]);
+  assert.equal(up.next[file], x1.next[file]);
+  assert.deepEqual(planPatch(up.next, x.TARGETS).applied, []);
 
   // the module is missing: the tool answers as before
   const res2 = await toolWith(patched)({ queries: ['solar'] }, { llm: 1 }, block, { k });
@@ -195,5 +237,5 @@ test('patch-x-search: the social tool gets the call in its Promise.all, in eithe
 
 test('patch-x-search: injected code is ASCII with no backticks', () => {
   const { TARGETS } = require('../../patches/patch-x-search.js');
-  for (const t of TARGETS) for (const s of [t.from, t.to]) assert.ok(/^[\x09\x0a\x20-\x7e]*$/.test(s) && !s.includes('`'), t.name);
+  for (const t of TARGETS) for (const a of t.alts || [t]) for (const s of [a.from, a.to]) assert.ok(/^[\x09\x0a\x20-\x7e]*$/.test(s) && !s.includes('`'), t.name);
 });

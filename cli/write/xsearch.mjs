@@ -5,11 +5,14 @@
 //  - The key is the API key of the Vane provider whose Base URL is api.x.ai (Settings -> Models, an OpenAI-compatible
 //    provider), like OpenRouter's and freellmapi's. No such provider, no call, no cost. The key is never logged.
 //  - It costs money ($5 per 1,000 posts fetched, plus Grok tokens, docs.x.ai), so one call per social_search at most,
-//    and at most `maxCalls` (2) per research (the research block is the key). A failure or a timeout is [].
+//    and at most `maxCalls` per research (the mode's EFFORT.xSearchCalls: none in Speed, 2 otherwise; the research
+//    block is the key). A failure or a timeout is [].
 //  - Posts are untrusted text. Only x.com / twitter.com status URLs are kept; when the response cites its sources
 //    (annotations), a post whose URL is not among them is dropped, because the model could have written the link itself.
 //  - Checked live 2026-11-13: the reply is a `message` item whose `output_text` holds the JSON array, and its `annotations`
 //    are `url_citation`s of the form x.com/i/status/<id> (not the handle form the text uses), so posts are matched by id.
+
+import { DEFAULT_MODE, EFFORT } from '../core/effort.mjs';
 
 export const XAI_HOST = 'api.x.ai';
 export const XAI_URL = `https://${XAI_HOST}/v1/responses`;
@@ -90,13 +93,13 @@ export const toResults = (posts) => posts.filter(p => p.text).map(p => {
 // readKey() -> the xAI key or null (read at every call: a key added in Vane's settings needs no restart).
 export function createXSearch({ fetchImpl = fetch, readKey, model = DEFAULT_X_MODEL, maxCalls = X_MAX_CALLS, timeoutMs = TIMEOUT_MS, log = () => {} } = {}) {
   const used = new WeakMap();
-  return async function search({ queries, block }) {
+  return async function search({ queries, block, maxCalls: cap = maxCalls }) {
     if (!block || typeof block !== 'object') return []; // no research to count the cost against: no call
     let key = null;
     try { key = await readKey(); } catch { /* no key */ }
     if (!key) return [];
     const n = used.get(block) || 0;
-    if (n >= maxCalls) return [];
+    if (n >= cap) return [];
     if (!(queries || []).some(q => String(q).trim())) return [];
     used.set(block, n + 1);
     try {
@@ -117,18 +120,31 @@ export function createXSearch({ fetchImpl = fetch, readKey, model = DEFAULT_X_MO
   };
 }
 
+// How many x_search calls one research may make: the mode's budget (EFFORT[mode].xSearchCalls; an unknown or missing
+// mode gets Balanced's). FANE_X_MAX_CALLS (a whole number, 0 or more) replaces it, lowering or raising the cost, but
+// never for a mode whose budget is 0: an environment variable cannot turn Speed into a slow mode.
+export function xCallBudget(mode, env = {}) {
+  const budget = (EFFORT[mode] || EFFORT[DEFAULT_MODE]).xSearchCalls;
+  if (budget === 0) return 0;
+  const raw = env.FANE_X_MAX_CALLS;
+  const max = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isInteger(max) && max >= 0 ? max : budget;
+}
+
 // What the patched social_search tool calls: the key from Vane's config.json (`configPath`), the model and the cap from
-// the environment (FANE_X_MODEL, FANE_X_MAX_CALLS). One searcher per process, so its per-research count lasts.
+// the mode (`mode`, Vane's own: speed, balanced or quality) and the environment (FANE_X_MODEL, FANE_X_MAX_CALLS).
+// Speed returns before the key is read. One searcher per process, so its per-research count lasts.
 // `fetchImpl`/`readConfig` are for tests and get a searcher of their own.
 let shared = null;
-export async function searchX({ queries, block, configPath, readConfig, env = process.env, fetchImpl, log = (m) => console.log(`fane: ${m}`) } = {}) {
+export async function searchX({ queries, block, mode, configPath, readConfig, env = process.env, fetchImpl, log = (m) => console.log(`fane: ${m}`) } = {}) {
+  const maxCalls = xCallBudget(mode, env);
+  if (maxCalls === 0) return [];
   const readKey = async () => {
     const { readFile } = await import('node:fs/promises');
     return findXaiKey(JSON.parse(readConfig ? await readConfig() : await readFile(configPath, 'utf8')).modelProviders);
   };
   const model = env.FANE_X_MODEL || DEFAULT_X_MODEL;
-  if (fetchImpl || readConfig) return createXSearch({ fetchImpl, readKey, log, model })({ queries, block });
-  const max = Number(env.FANE_X_MAX_CALLS);
-  shared ??= createXSearch({ readKey, log, model, maxCalls: Number.isInteger(max) && max >= 0 ? max : X_MAX_CALLS });
-  return shared({ queries, block });
+  if (fetchImpl || readConfig) return createXSearch({ fetchImpl, readKey, log, model, maxCalls })({ queries, block });
+  shared ??= createXSearch({ readKey, log, model });
+  return shared({ queries, block, maxCalls });
 }
