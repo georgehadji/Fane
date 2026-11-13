@@ -5,7 +5,7 @@
 // Vane renders raw HTML in answers.
 import { escapeHtml, failed, failureReason, formatDuration, quiet, stepsDone } from '../image/present.mjs';
 import { linkCitations, renumber, sourcesSection } from './checks.mjs';
-import { POSTS } from '../core/formats.mjs';
+import { POSTS, postMark } from '../core/formats.mjs';
 import { mapOutsideFences, mapProse, segments } from '../core/markdown.mjs';
 
 const NBSP = ' ';
@@ -104,12 +104,12 @@ export function renderPostResult(r) {
   const post = paragraphs.map(par => `<p>${par}</p>`).join('\n');
   // the comment as it is pasted, with the URLs written out: copying linked titles from the page loses the links
   const comment = r.comment ? `\n\n**${P.comment}**\n\n<p>${escapeHtml(r.comment).replace(/\n/g, '<br>')}</p>` : '';
-  return `${post}${comment.trimEnd()}\n\n${quiet([escapeHtml(summary), escapeHtml(P.copy), ...notes.map(n => escapeHtml(n))])}`;
+  return `${post}${comment.trimEnd()}\n\n${postMark(r.format)}\n\n${quiet([escapeHtml(summary), escapeHtml(P.copy), ...notes.map(n => escapeHtml(n))])}`;
 }
 
 // A run that produced no article.
 export function renderArticleFailure(result, lang = 'en') {
-  const head = result.post ? (lang === 'el' ? 'Δεν μπόρεσα να γράψω την ανάρτηση.' : 'The post could not be written.')
+  const head = result.post ? (lang === 'el' ? (result.edit ? 'Δεν μπόρεσα να αλλάξω την ανάρτηση.' : 'Δεν μπόρεσα να γράψω την ανάρτηση.') : result.edit ? 'The post could not be changed.' : 'The post could not be written.')
     : lang === 'el' ? (result.edit ? 'Δεν μπόρεσα να αλλάξω το άρθρο.' : 'Δεν μπόρεσα να γράψω το άρθρο.') : result.edit ? 'The article could not be changed.' : 'The article could not be written.';
   return failed(escapeHtml(head), escapeHtml(failureReason(result)));
 }

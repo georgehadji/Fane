@@ -130,7 +130,11 @@ export const prompts = {
 
   // A follow-up request on a finished article ("shorter", "rewrite the intro"). The article's own sources are
   // listed by title only (their text is not kept); `newFacts`: a search for this request added sources with excerpts.
-  rewrite: ({ lang, article, sources, instruction, newFacts = false }) => ({
+  // A post (`format` is a platform) has no title, headings, citations or sources list: it is edited as plain text.
+  rewrite: ({ lang, article, sources, instruction, newFacts = false, format }) => isPost(format) ? ({
+    system: `You are an editor revising a finished ${POSTS[format].name} post on the author's request. ${header(lang)}\n\n${HUMAN_RULES[lang] || HUMAN_RULES.en}`,
+    user: `Post:\n<post>\n${article}\n</post>\n\nRequest from the author (do exactly this and nothing else): ${instruction}\n\nThe post is now ${wordCount(article)} words; when the request names a length, aim at it closely.\nRules: change only what the request asks for; keep the rest of the text as it is. Add no fact that is not already in the post.${postEditRule(format)}\n\nOutput the full revised post only.`,
+  }) : ({
     system: `You are an editor revising a finished article on the author's request. ${header(lang)}\n\n${HUMAN_RULES[lang] || HUMAN_RULES.en}`,
     user: `${sourceBlock(sources, { excerpt: newFacts ? 900 : 0 })}\n\nArticle:\n<article>\n${article}\n</article>\n\nRequest from the author (do exactly this and nothing else): ${instruction}\n\nThe article is now ${wordCount(article)} words; when the request names a length, aim at it closely.\nRules: change only what the request asks for; keep the rest of the text as it is. ${newFacts ? 'Add no fact that is not already in the article or in a source excerpt above, and cite each new fact with the number of the source that says it.' : 'Add no fact that is not already in the article.'} Keep the "# " title and "## " headings unless the request is about them, keep each [n] citation next to the claim it supports, and use only the numbers listed above. Add no sources list. Output the full revised article only.`,
   }),

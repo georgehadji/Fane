@@ -68,6 +68,8 @@ Ask before running: it spends OpenRouter credits.
 
 ## 5. Follow-up edits of social posts
 
+**Status: done 2026-11-13, not committed.** Built as designed, with two deliberate cuts: a post edit never searches (a request to add facts gets a `degraded` note, because a post has no `[n]` markers to put a new source behind) and its sources stay as they were in the first comment. The mark is `postMark()` in `core/formats.mjs`; `cli/test/post-edit.test.mjs` holds the round trip, the editor, the routing and the failure wording. Needs `node scripts/apply.mjs` (hook folder, so a Vane restart).
+
 **Now.** `parseArticleAnswer` needs a `# ` title; posts have none, so "make it shorter" after a LinkedIn post becomes a search.
 
 **Design (in `cli/write`, no new layer).**

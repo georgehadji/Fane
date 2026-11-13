@@ -12,7 +12,7 @@ import { openRouterClientFromVane, withFreeLlm } from '../image/openrouter.mjs';
 import { isImageRequest } from '../image/intent.mjs';
 import { escapeHtml, previousAnswer, providerMissing, quiet, tagged } from '../image/present.mjs';
 import { buildTextCatalogue, selectChains, selectFreeChains } from './catalogue.mjs';
-import { createArticleEditor, isArticleEdit, parseArticleAnswer, targetLanguage } from './edit.mjs';
+import { createArticleEditor, isArticleEdit, parseArticleAnswer, parsePostAnswer, targetLanguage } from './edit.mjs';
 import { articleTopic, isArticleRequest, parseArticleOptions, postPlatform, postTopic } from '../core/intent-article.mjs';
 import { isCodeRequest } from '../core/intent-code.mjs';
 import { LANGUAGE_NAMES, detectLanguage } from '../core/language.mjs';
@@ -39,15 +39,17 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
   if (!platform && !isArticleRequest(query)) {
     // "make a Python script that ..." starts like an edit; the code hook, which runs after this one, takes it
     if (isImageRequest(query) || isCodeRequest(query) || !isArticleEdit(query)) return false;
-    earlier = parseArticleAnswer(await previousAnswer(history, lastAnswer));
-    // Vane's own answers have a "# " title too; ours end with a sources list (the CLI's --edit-article asks the same)
-    if (!earlier?.sources.length) return false;
+    const before = await previousAnswer(history, lastAnswer);
+    // a post carries its platform mark (it has no title); an article ends with a sources list (the CLI's --edit-article asks the same)
+    earlier = parsePostAnswer(before) || parseArticleAnswer(before);
+    // Vane's own answers have a "# " title too
+    if (!earlier || (!earlier.format && !earlier.sources.length)) return false;
   }
   const topic = earlier ? query : platform ? postTopic(query) : articleTopic(query);
   // the whole request, not the topic: "γράψε ένα άρθρο για το iPhone 17" is Greek although its topic is mostly Latin letters
   const lang = earlier ? targetLanguage(query, earlier.lang) : detectLanguage(query);
   const state = { lang, phases: [], running: earlier ? 'edit' : 'sources', draft: null };
-  const turn = createTurn({ feature: platform ? 'post' : earlier ? 'article-edit' : 'article', prompts, emit, update, log, tag: tagged });
+  const turn = createTurn({ feature: platform ? 'post' : earlier?.format ? 'post-edit' : earlier ? 'article-edit' : 'article', prompts, emit, update, log, tag: tagged });
   const { say } = turn;
   log = turn.log;
   await turn.run(renderArticleProgress(state), async () => {
@@ -68,9 +70,9 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
         if (e.phase === 'sources' && e.status === 'done') researchDone();
         if (e.status === 'running') { state.running = e.phase; return () => renderArticleProgress(state); }
       });
-      const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, mode: useMode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: onEdit });
+      const r = await edit({ body: earlier.body, sources: earlier.sources, instruction: query, lang, format: earlier.format || 'article', mode: useMode, chains: chosen.chains, prices: chosen.prices, retrieve, onProgress: onEdit });
       await turn.settle();
-      say(r.ok ? renderArticleResult(r) : renderArticleFailure({ ...r, edit: true }, lang));
+      say(!r.ok ? renderArticleFailure({ ...r, edit: true, post: !!earlier.format }, lang) : earlier.format ? renderPostResult(r) : renderArticleResult(r));
       return r;
     }
     const onProgress = turn.progress((e) => {
@@ -88,8 +90,9 @@ export async function handleArticleRequest(query, { emit, update, configPath, mo
     say(!r.ok ? renderArticleFailure({ ...r, post: !!platform }, lang) : platform ? renderPostResult(r) : renderArticleResult(r));
     return r;
   }, { failed: (err) => {
-    log(`${platform ? 'post' : 'article'} failed: ${err.message}`);
-    say(renderArticleFailure({ error: err.message, post: !!platform }, lang));
+    const isPostTurn = !!(platform || earlier?.format);
+    log(`${isPostTurn ? 'post' : 'article'} failed: ${err.message}`);
+    say(renderArticleFailure({ error: err.message, post: isPostTurn, edit: !!earlier }, lang));
   } });
   return true;
 }

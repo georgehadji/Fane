@@ -3,7 +3,8 @@
 // rewrites it (prompts.rewrite), and the result goes through the same finishing as a new article:
 // citations renumbered, sources list written by code, checks run. Pure except for the injected client.
 import { ANSWER_MARKER } from '../image/present.mjs';
-import { checkCitations, renumber, runChecks, sourcesSection } from './checks.mjs';
+import { checkCitations, firstComment, renumber, runChecks, sourcesSection, stripCitations } from './checks.mjs';
+import { POST_MARK, isPost } from '../core/formats.mjs';
 import { namesPost } from '../core/intent-article.mjs';
 import { detectLanguage, fold, repairFinalNu, repairHomoglyphs, wordCount } from '../core/language.mjs';
 import { createRoleCaller } from './llm.mjs';
@@ -65,6 +66,29 @@ export function parseArticleAnswer(answer) {
   return { body, sources: Array.from(sources, s => s || { title: '', url: '', content: '' }), lang: detectLanguage(body) };
 }
 
+const COMMENT_AT = /\n\n\*\*(?:First comment|Πρώτο σχόλιο)\*\*\n\n/;
+const unescapeHtml = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+
+// The text of an earlier answer -> { format, body, sources, lang } | null. The answer is what renderPostResult wrote:
+// the post as <p> paragraphs, the first comment (sources, one "n. Title: url" line each), the platform mark, the status
+// paragraph and the invisible marker. A post has no title, so the mark is what says it is one; null without it, or under 20 words.
+export function parsePostAnswer(answer) {
+  const text = String(answer || '').replace(ANSWER_MARKER, '');
+  const format = POST_MARK.exec(text)?.[1];
+  if (!isPost(format)) return null;
+  const [head, comment = ''] = text.replace(POST_MARK, '').replace(/\s*<p role="status"[\s\S]*?<\/p>\s*$/, '').split(COMMENT_AT);
+  const body = [...head.matchAll(/<p>([\s\S]*?)<\/p>/g)].map(m => unescapeHtml(m[1].replace(/<br>/g, '\n')).trim()).filter(Boolean).join('\n\n');
+  if (wordCount(body) < 20) return null;
+  const sources = [];
+  for (const line of comment.replace(/^<p>|<\/p>\s*$/g, '').split('<br>')) {
+    const m = /^(\d+)\.\s+(.+)$/.exec(unescapeHtml(line).trim());
+    if (!m) continue;
+    const u = /^(.*?):\s+(https?:\/\/\S+)$/.exec(m[2]);
+    sources[Number(m[1]) - 1] = { title: u ? u[1] : m[2], url: u ? u[2] : '', content: '' };
+  }
+  return { format, body, sources: Array.from(sources, s => s || { title: '', url: '', content: '' }), lang: detectLanguage(body) };
+}
+
 // How many sources a search for an edit may add.
 export const MAX_NEW_SOURCES = 8;
 
@@ -73,13 +97,14 @@ export const MAX_NEW_SOURCES = 8;
 // research, optional) is used when the request asks for something new; found pages are added after the old sources.
 export function createArticleEditor({ client, log = () => {}, now = Date.now, maxCost }) {
   const call = createRoleCaller({ client, log, maxCost });
-  return async function editArticle({ body, sources, instruction, lang, mode = DEFAULT_MODE, effort = resolveEffort(mode), chains, prices, retrieve, onProgress = () => {} }) {
+  return async function editArticle({ body, sources, instruction, lang, format = 'article', mode = DEFAULT_MODE, effort = resolveEffort(mode), chains, prices, retrieve, onProgress = () => {} }) {
+    const post = isPost(format);
     const t0 = now();
     lang ||= detectLanguage(body);
     const emit = (e) => { try { onProgress(e); } catch { /* a throwing listener must not stop the edit */ } };
     const degraded = [];
     let fresh = [];
-    if (retrieve && needsNewFacts(instruction)) {
+    if (retrieve && !post && needsNewFacts(instruction)) {
       emit({ phase: 'sources', status: 'running' });
       const title = /^\s*#\s+(.+)$/m.exec(body)?.[1].trim() || '';
       let found = [];
@@ -90,18 +115,27 @@ export function createArticleEditor({ client, log = () => {}, now = Date.now, ma
       emit({ phase: 'sources', status: 'done', note: `${fresh.length} new sources` });
       if (!fresh.length) degraded.push('the search found no new sources: the edit could only use what the article already says');
     }
+    // a post has no citation markers to put a new source behind: it is edited with what it already says
+    if (post && needsNewFacts(instruction)) degraded.push('a post is edited with what it already says: no new search for this request');
     const all = [...sources, ...fresh];
     emit({ phase: 'edit', status: 'running' });
     // "longer" can grow the text: room for half as much again.
-    const r = await call('rewrite', prompts.rewrite({ lang, article: body, sources: all, instruction, newFacts: fresh.length > 0 }), { chain: chains.draft, maxTokens: tokensFor('draft', Math.ceil(wordCount(body) * 1.5), lang, effort.headroom), reasoning: effort.reasoning, prices });
+    const r = await call('rewrite', prompts.rewrite({ lang, article: body, sources: post ? [] : all, instruction, newFacts: fresh.length > 0, format }), { chain: chains.draft, maxTokens: tokensFor('draft', Math.ceil(wordCount(body) * 1.5), lang, effort.headroom), reasoning: effort.reasoning, prices });
     emit({ phase: 'edit', status: r.ok ? 'ok' : 'failed', cost: r.cost });
     const base = { language: lang, mode, reasoning: effort.reasoning, calls: r.attempts.length, cost: r.cost };
     if (!r.ok) return { ok: false, fatal: r.fatal, status: r.status, error: `the edit failed: ${r.errors.join('; ')}`, ...base };
     sources = all;
 
     const next = lang === 'el' ? repairFinalNu(repairHomoglyphs(r.text).text).text : r.text;
-    if (/^\s*#\s/m.test(body) && !/^\s*#\s/m.test(next)) return { ok: false, error: 'the edit lost the title, so the article was not changed', ...base };
+    if (!post && /^\s*#\s/m.test(body) && !/^\s*#\s/m.test(next)) return { ok: false, error: 'the edit lost the title, so the article was not changed', ...base };
     if (wordCount(next) < wordCount(body) * 0.25) return { ok: false, error: 'the edit left less than a quarter of the text, so the article was not changed', ...base };
+    if (post) {
+      // the published post has no [n] markers (stripCitations); its sources stay as they were in the first comment
+      const text = stripCitations(next);
+      const checks = runChecks(text, { lang, targetWords: wordCount(text), format });
+      for (const i of checks.items) if (i.level === 'fail') degraded.push(`check "${i.name}" failed: ${i.detail}`);
+      return { ok: true, format, post: text, comment: firstComment(sources, lang), article: text, words: checks.words, sources, degraded, checks, ...base, ms: now() - t0 };
+    }
     const raw = checkCitations(next, sources);
     if (raw.invalid.length) degraded.push(`removed citations to sources that do not exist: ${raw.invalid.map(n => `[${n}]`).join(' ')}`);
     const { text, used } = renumber(next, sources);

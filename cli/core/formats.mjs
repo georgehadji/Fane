@@ -14,6 +14,11 @@ export const POST_PLATFORMS = Object.keys(POSTS);
 export const DEFAULT_PLATFORM = 'linkedin';
 
 export const isPost = (format) => Object.hasOwn(POSTS, String(format));
+
+// The invisible mark a web post answer carries, so a follow-up edit ("make it shorter") knows the earlier answer is a
+// post and for which platform: a post has no "# " title to recognise it by. Written by renderPostResult, read by parsePostAnswer.
+export const postMark = (format) => `<!--fane:post:${format}-->`;
+export const POST_MARK = /<!--fane:post:([a-z]+)-->/;
 export const clampPostWords = (n, platform) => {
   const p = POSTS[platform];
   return Math.min(p.maxWords, Math.max(p.minWords, Math.round(Number(n) || p.words)));
