@@ -56,6 +56,8 @@ const TARGETS = [
       { from: SEARCH_V2, to: SEARCH }, // a container patched before X was searched
     ],
     ladder: ['fresh', 'V1', 'V2'],
+    // patch-x-search edits the text this target writes; only SEARCH (not V1/V2) has the X site search
+    marker: '"site:x.com "+x',
   },
   {
     name: 'keyword-style social queries',
