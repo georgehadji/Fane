@@ -25,6 +25,7 @@ import { sourcesSection } from '../cli/write/checks.mjs';
 import { auditResult, claimLedger, claimSupportRatio } from '../cli/write/gate.mjs';
 import { countTells } from '../cli/core/language.mjs';
 import { createRoleCaller } from '../cli/write/llm.mjs';
+import { resolveEffort } from '../cli/core/effort.mjs';
 import { MODES, tokensFor } from '../cli/write/models.mjs';
 import { prompts } from '../cli/write/prompts.mjs';
 import { aggregate, median, runCli } from './bench.mjs';
@@ -162,6 +163,7 @@ async function main() {
       topics: { type: 'string', default: join(ROOT, 'bench', 'articles.json') },
       judge: { type: 'string', default: DEFAULT_JUDGE },
       budget: { type: 'string', default: '5' },
+      reasoning: { type: 'string' },
       out: { type: 'string' },
       baseline: { type: 'string' },
       'fail-on-regression': { type: 'boolean', default: false },
@@ -170,7 +172,7 @@ async function main() {
     },
   });
   if (values.help) {
-    console.log('Usage: node scripts/article-bench.mjs [--key-from-vane] [--modes speed,balanced,quality] [--runs N] [--only id,id]\n                                    [--topics file] [--judge model] [--budget USD] [--out file] [--baseline file] [--fail-on-regression]');
+    console.log('Usage: node scripts/article-bench.mjs [--key-from-vane] [--modes speed,balanced,quality] [--runs N] [--only id,id]\n                                    [--topics file] [--judge model] [--budget USD] [--reasoning low|medium|high] [--out file] [--baseline file] [--fail-on-regression]');
     return;
   }
   const modes = values.modes.split(',').map(s => s.trim()).filter(Boolean);
@@ -179,6 +181,7 @@ async function main() {
   if (!(Number.isInteger(runs) && runs >= 1)) throw new Error(`invalid --runs "${values.runs}"`);
   const budget = Number(values.budget);
   if (!(budget > 0)) throw new Error(`invalid --budget "${values.budget}"`);
+  if (values.reasoning !== undefined) resolveEffort('quality', { reasoning: values.reasoning }); // RangeError on an unknown level, before any paid call
   const only = values.only ? new Set(values.only.split(',').map(s => s.trim())) : null;
   const topics = JSON.parse(readFileSync(values.topics, 'utf8')).filter(t => !only || only.has(t.id));
   if (!topics.length) throw new Error('no topics selected');
@@ -193,7 +196,7 @@ async function main() {
   const results = [];
   const total = topics.length * modes.length * runs;
   let n = 0, spent = 0;
-  const save = () => writeFileSync(file, JSON.stringify({ meta: { date: new Date().toISOString(), judge: values.judge, modes, runs, spent: round(spent, 4) }, runs: results, summary: summarize(results) }, null, 2));
+  const save = () => writeFileSync(file, JSON.stringify({ meta: { date: new Date().toISOString(), judge: values.judge, modes, runs, reasoning: values.reasoning ?? null, spent: round(spent, 4) }, runs: results, summary: summarize(results) }, null, 2));
   try {
     run: for (let run = 1; run <= runs; run++) {
       for (const mode of modes) {
@@ -203,7 +206,7 @@ async function main() {
             break run;
           }
           n++;
-          const args = ['--article', t.q, '--json', '-o', mode, ...(t.words ? ['--words', String(t.words)] : [])];
+          const args = ['--article', t.q, '--json', '-o', mode, ...(t.words ? ['--words', String(t.words)] : []), ...(values.reasoning ? ['--reasoning', values.reasoning] : [])];
           const r = await runCli(args, (mode === 'quality' ? 1200 : 600) * 1000, env);
           let row = { id: t.id, mode, run }, out = null;
           try { out = JSON.parse(r.out); } catch { row.error = (r.err || `exit ${r.code}`).trim().split('\n').pop().slice(0, 200); }
