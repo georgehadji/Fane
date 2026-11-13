@@ -854,3 +854,53 @@ test('every patch in file order, then each target alone: whatever applied is rep
   assert.ok(applied.length >= 40, 'applied ' + applied.length + ', unbuilt ' + unbuilt.length);
   console.log('# cross-patch fixtures: ' + applied.length + ' targets applied and re-checked, ' + unbuilt.length + ' not buildable from their own from: ' + unbuilt.join('; '));
 });
+
+// ---- SUMMARY_QUESTION: one reader for the question patch-discover-summary-greek writes ----
+
+const { SUMMARY_QUESTION } = require('../../patches/lib/vane.js');
+const { ASK } = require('../../patches/patch-discover-summary-greek.js');
+const { ISSUM, HEADING } = require('../../patches/patch-summary-heading.js');
+
+// What the link builds: encodeURIComponent(ASK + (title ? title + "\n" : "") + url), decoded again by the chat page.
+const asked = (title, url) => ASK + (title ? `${title}\n` : '') + url;
+const ASKED = [
+  ['Η Ελλάδα κερδίζει τον τελικό', 'https://www.tanea.gr/2026/11/13/sports/final/'],
+  ['Q&A: prices & "quotes" \'here\'', 'https://example.com/a?b=1&c=2#frag'],
+  ['x'.repeat(300), 'https://example.com/long'],
+  ['', 'https://www.theatlantic.com/technology/archive/2026/11/x/123/'], // a story with no title
+  ['Two\nlines in a title', 'http://example.com/a'],
+];
+
+test('SUMMARY_QUESTION reads back what the summary link writes (title, address, untitled form)', () => {
+  for (const [title, url] of ASKED) {
+    const r = SUMMARY_QUESTION(asked(title, url));
+    assert.equal(r.url, url, url);
+    assert.equal(r.title, title.replace(/\s+/g, ' '), url);
+  }
+});
+
+test('SUMMARY_QUESTION refuses everything else: other languages, a non-http address, text after the address, no word', () => {
+  for (const q of ['Summary: https://example.com/a', `${ASK}ftp://example.com/a`, `${ASK}javascript:alert(1)`, `${ASK}t\nhttps://example.com/a and more`,
+    `${ASK}no address here`, 'what is a summary', '', undefined, null, 42, `x ${asked('t', 'https://a.gr/')}`]) {
+    assert.equal(SUMMARY_QUESTION(q), null, String(q));
+  }
+});
+
+test('the browser readers and SUMMARY_QUESTION agree on every question the link writes', () => {
+  const r = { Fragment: 'F', jsx: (t, p) => ({ t, p }), jsxs: (t, p) => ({ t, p }) };
+  for (const [title, url] of ASKED.filter(([t]) => !t.includes('\n'))) {
+    const q = asked(title, url);
+    assert.equal(ISSUM(q), SUMMARY_QUESTION(q) !== null, q);
+    // HEADING links the title to the address exactly when there is a title
+    const h = HEADING(q, r);
+    if (title) assert.equal(h.p.children[1].p.href, SUMMARY_QUESTION(q).url);
+    else assert.equal(h, q);
+  }
+});
+
+test('SUMMARY_QUESTION is injectable: ASCII, no backticks, no closure', () => {
+  const src = SUMMARY_QUESTION.toString();
+  assert.ok(/^[\x20-\x7e\n]*$/.test(src), 'ASCII');
+  assert.ok(!src.includes('`'));
+  assert.deepEqual(new Function(`return (${src})(${JSON.stringify(asked('t', 'https://a.gr/'))})`)(), { title: 't', url: 'https://a.gr/' });
+});

@@ -67,6 +67,10 @@ module.exports = {
   // each page it sends to the model (chunkChars with overlap characters shared), and how long one scrape may take.
   // Vane's scraper takes no timeout of its own (its navigation limit is 20 s) and no signal.
   PAGE_READ: { top: 3, chunks: 2, chunkChars: 4000, overlap: 500, timeoutMs: 8000 },
+  // A summary question reads only the page it names (patch-summary-source): the text the writer gets is cut to `chars`,
+  // a page with fewer than `minChars` of text counts as not read (Vane's own research runs instead), and one scrape
+  // is given `timeoutMs` (Vane's navigation limit is 20 s; the scraper takes no signal).
+  SUMMARY_READ: { chars: 12000, minChars: 400, timeoutMs: 20000 },
   // The Fane project page (docs/ served by GitHub Pages), linked from Vane's menu by patch-fane-link.
   FANE_PAGE_URL: 'https://georgehadji.github.io/Fane/',
   // Files under here are served to the browser from disk (max-age=0): a reload picks a change up, no restart needed.
@@ -98,4 +102,20 @@ module.exports.RANK_ON_ORIGINAL_TEXT = {
   from: 'let d=c.content||c.title,f=(await a.embedding.embedText([d]))[0];',
   to: 'let d=c.content||c.title,f=(await a.embedding.embedText([c.fane_text||d]))[0];',
   marker: '/*fane:rank-original*/',
+};
+
+// The question patch-discover-summary-greek writes, read back: "<word>: <title>\n<address>", or "<word>: <address>" for
+// a story with no title (<word> is Greek for "summary"; it is built from its char codes so the bundle stays ASCII).
+// {title, url} (title '' when there is none), or null for anything else, an address that is not http(s) included.
+// Injected as source text ((SUMMARY_QUESTION)(q): no imports, no closure, no backticks). The browser has its own
+// reader in patch-summary-heading (ISSUM, HEADING: they are in containers, so they stay as written); a test keeps them
+// in agreement on what patch-discover-summary-greek writes.
+module.exports.SUMMARY_QUESTION = function SUMMARY_QUESTION(q) {
+  var w = String.fromCharCode(928, 949, 961, 943, 955, 951, 968, 951) + ': ';
+  var s = String(q == null ? '' : q).trim();
+  if (s.indexOf(w) !== 0) return null;
+  var rest = s.slice(w.length), i = rest.lastIndexOf('\n');
+  var title = i < 0 ? '' : rest.slice(0, i).replace(/\s+/g, ' ').trim();
+  var url = (i < 0 ? rest : rest.slice(i + 1)).trim();
+  return /^https?:\/\/\S+$/.test(url) ? { title: title, url: url } : null;
 };

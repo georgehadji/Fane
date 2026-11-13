@@ -75,6 +75,8 @@ Not built: a `--doctor --fix` that starts the services itself (the CLI already s
 ## Phase B: the summary page
 
 ### 0. One parser for the summary question
+**Done 2026-11-13** (`SUMMARY_QUESTION` and `SUMMARY_READ` in `patches/lib/vane.js`; contract tests in `patches.test.mjs`). It takes the address from the last line, so a title with a line break still parses.
+
 
 **Now.** Three places know the shape «Περίληψη: <title>\n<address>»: `patch-discover-summary-greek` writes it (`ASK`), `patch-summary-heading` reads it in the browser (`ISSUM`, `HEADING`), and `patch-answer-language`'s prompt describes it. Items 1 and 4 need to read it on the server too.
 
@@ -83,6 +85,8 @@ Not built: a `--doctor --fix` that starts the services itself (the CLI already s
 **Files.** `patches/lib/vane.js`, `cli/test/patches.test.mjs`.
 
 ### 1. A summary reads only its page
+**Done 2026-11-13** (`patches/patch-summary-source.js`, `cli/test/summary-source.test.mjs`). Differences from the design: the research block with the one `reading` step is emitted only after the scrape succeeded (an earlier block would be doubled by Vane's own research on a fallback), and `</result>` is stripped from the page text as well as `</scraped_data>`, because the writer wraps each finding in `<result>`. Measured live (Speed, `auto:fast`): a Wikipedia page 8 s end to end, one source, log line `summary source: read ... no search`; a Wired story through the Discover link 12 000 of 22 021 characters. Not measured: the before timing and the paywalled (Ladder) case.
+
 
 **Now.** A summary question runs Vane's whole research: the classifier, then 2 (Speed) to 10 (Quality) rounds of researcher-model calls and web searches, then the writer. The question already names the one page that matters; the searches cost time and bring in sources about other things.
 
@@ -105,6 +109,8 @@ Interplay: `patch-quality-mode`'s anchors are inside the loop and on `?6:25`, un
 **Measure.** Before and after, three Discover summaries in Speed and Balanced (one Greek article, one English, one paywalled through Ladder): time to the first answer token and sources count. Expected: Speed under half the time, one source.
 
 ### 4. The Σύνοψη citation is enforced in code
+**Done 2026-11-13** (`patches/patch-summary-cite.js`, `cli/test/summary-cite.test.mjs`). The message query is not in scope inside `forEach(e=>...)` (the block shadows `e`), so a `FANE_Q` variable is declared in the `S.map` callback's `let` list. Live: the page shows one source and a chip after the Σύνοψη; at 375 px there is no horizontal scroll and the answer comes first. Not shown live: a model that omits `[1]` (the unit tests cover it).
+
 
 **Now.** The writer prompt asks for `[1]` at the end of the Σύνοψη paragraph; freellmapi's `auto:fast` left it out once. After item 1 a summary has exactly one source, so the rule is deterministic.
 
