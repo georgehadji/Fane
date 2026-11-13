@@ -10,3 +10,5 @@ Thumbs.db
 
 # Claude Code local state (launch config, worktrees)
 .claude/
+# npm lockfile for the zero-dependency CLI; not tracked
+cli/package-lock.json
