@@ -271,6 +271,31 @@ test('patch-suggestions-language: the Related questions follow the language of t
   assert.deepEqual(planPatch(r.next, TARGETS).applied, []); // the marker stops a second insert
   assert.ok(!/[`$\\]/.test(RULE), 'it sits inside a template literal');
 });
+test('patch-discover-cards: pictures load lazily and every card names its outlet, once, in browser files only', () => {
+  const { TARGETS, HOST } = require('../../patches/patch-discover-cards.js');
+  // the three cards as the pinned chunk writes them (shortened where the patch does not look)
+  const img = (d) => `(0,a.jsx)("img",{className:"object-cover w-full h-full group-hover:scale-105 transition-transform duration-${d}",src:new URL(e.thumbnail).origin,alt:e.title})`;
+  const box = (d) => `(0,a.jsx)("div",{className:"relative w-80 h-full overflow-hidden rounded-2xl flex-shrink-0",children:${img(d)}})`;
+  const text = (t) => `(0,a.jsxs)("div",{className:"flex flex-col justify-center flex-1 py-4",children:[(0,a.jsx)("h2",{children:e.title}),(0,a.jsx)("p",{className:"${t}",children:e.content})]})`;
+  const chunk = 'let c=({item:e})=>(0,a.jsxs)(o(),{children:[(0,a.jsx)("div",{className:"relative aspect-video overflow-hidden",children:' + img(300) + '}),(0,a.jsxs)("div",{className:"p-4",children:[(0,a.jsx)("h3",{children:e.title})]})]}),'
+    + 'h=({item:e,isLeft:l=!0})=>(0,a.jsx)(o(),{children:l?(0,a.jsxs)(a.Fragment,{children:[' + box(500) + ',' + text('x') + ']}):(0,a.jsxs)(a.Fragment,{children:[' + text('x') + ',' + box(500) + ']})});';
+  let files = { [FILES.discoverClient]: chunk, [FILES.appCss]: `.a{}${APP_CSS_END}` };
+  for (const pass of [0, 1]) {
+    const r = planPatch(files, TARGETS);
+    assert.deepEqual(r.errors, [], `pass ${pass}`);
+    assert.equal(r.applied.length, pass === 0 ? TARGETS.length : 0, `pass ${pass}`); // a second run inserts nothing
+    files = { ...files, ...r.next };
+  }
+  const out = files[FILES.discoverClient];
+  assert.equal(out.split('loading:"lazy",decoding:"async",src:').length - 1, 3); // card, row left, row right
+  assert.equal(out.split('"data-fane-outlet":""').length - 1, 3);
+  assert.ok(/"data-fane-outlet":"",children:\([^]*?\)\(e\.url\)}\),\(0,a\.jsx\)\("h3"/.test(out), 'the outlet comes before the card title');
+  assert.ok(files[FILES.appCss].includes('[data-fane-outlet]{'));
+  assert.ok(TARGETS.every(t => t.file.startsWith('/home/vane/public/')), 'the page is client-rendered: a reload is enough, no restart');
+  assert.ok(/^[\x20-\x7e\n]*$/.test(String(HOST)), 'what this patch injects is ASCII');
+  assert.deepEqual(['https://www.tanea.gr/2026/a?b=1', 'https://news.example.co.uk/x', 'not a url'].map(HOST), ['tanea.gr', 'news.example.co.uk', '']);
+});
+
 test('patch-discover-summary-greek: every Discover and home news link asks for a Greek summary, in an ASCII bundle', () => {
   const { TARGETS, ASK } = require('../../patches/patch-discover-summary-greek.js');
   // one fake bundle per file, holding each of its links as Vane writes them
