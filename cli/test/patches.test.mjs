@@ -241,25 +241,37 @@ test('patch-answer-language: the writer prompt asks for the language of the ques
   const r = planPatch({ [FILES.research]: prompt }, TARGETS);
   assert.deepEqual(r.errors, []);
   const text = new Function(`${r.next[FILES.research]}; return w('ctx')`)();
-  assert.match(text, /### Formatting Instructions\n {4}- \*\*Language\*\*: Write the whole answer[^\n]*Greek\.\n {4}- \*\*Structure\*\*/);
+  assert.match(text, /### Formatting Instructions\n {4}- \*\*Language\*\*: Write the whole answer[^\n]*Greek\.\n {4}- \*\*Summary requests\*\*: [^\n]*«Περίληψη»[^\n]*\n[\s\S]*«## Σύνοψη»[\s\S]*«## Βασικά σημεία»[\s\S]*«Πηγή:»[\s\S]*never translate it[\s\S]*\n {4}- \*\*Structure\*\*/);
+  assert.ok(/^[\x20-\x7e\n]*$/.test(r.next[FILES.research]), 'the bundle stays ASCII');
   assert.deepEqual(planPatch(r.next, TARGETS).applied, []);
+  // a container patched with the language rule alone gets the summary rule in place
+  const v1 = 'const w=(a,b)=>`\n\n    ### Formatting Instructions\n    - **Language**: Write the whole answer, headings included, in the language of the user\'s question, even when the sources are in another language. A question in Greek gets an answer in Greek.\n    - **Structure**: Use headings.\n    ${a}`;';
+  const up = planPatch({ [FILES.research]: v1 }, TARGETS);
+  assert.deepEqual(up.errors, []);
+  assert.equal(up.next[FILES.research], r.next[FILES.research]);
 });
 test('patch-discover-summary-greek: every Discover and home news link asks for a Greek summary, in an ASCII bundle', () => {
   const { TARGETS, ASK } = require('../../patches/patch-discover-summary-greek.js');
   // one fake bundle per file, holding each of its links as Vane writes them
-  const files = {};
-  for (const t of TARGETS) {
-    const v = /\$\{(\w)\.url\}/.exec(t.from)[1];
-    files[t.file] = `${files[t.file] || ''}links.push((${v})=>({href:\`/?${t.from} x"}));`;
-  }
-  const r = planPatch(files, TARGETS);
-  assert.deepEqual([r.errors, r.applied.length], [[], 6]);
-  assert.deepEqual(planPatch(r.next, TARGETS).applied, []);
-  for (const [file, text] of Object.entries(r.next)) {
-    assert.ok(/^[\x20-\x7e]*$/.test(text), file);
-    const links = [];
-    new Function('links', text)(links);
-    for (const make of links) assert.equal(make({ url: 'https://x.test/a' }).href, `/?q=${ASK}https://x.test/a`, file);
+  const bundles = (alt) => {
+    const files = {};
+    for (const t of TARGETS) {
+      const from = t.alts[alt].from, v = /\$\{(\w)\.url\}/.exec(from)[1];
+      files[t.file] = `${files[t.file] || ''}links.push((${v})=>({href:\`/?${from} x"}));`;
+    }
+    return files;
+  };
+  // alt 0 is Vane's own link; alt 1 is the link an earlier Fane wrote ("Περίληψη στα ελληνικά: ")
+  for (const alt of [0, 1]) {
+    const r = planPatch(bundles(alt), TARGETS);
+    assert.deepEqual([r.errors, r.applied.length + (r.upgraded?.length || 0)], [[], 6], `alt ${alt}`);
+    assert.deepEqual(planPatch(r.next, TARGETS).applied, []);
+    for (const [file, text] of Object.entries(r.next)) {
+      assert.ok(/^[\x20-\x7e]*$/.test(text), file);
+      const links = [];
+      new Function('links', text)(links);
+      for (const make of links) assert.equal(make({ url: 'https://x.test/a' }).href, `/?q=${ASK}https://x.test/a`, file);
+    }
   }
 });
 

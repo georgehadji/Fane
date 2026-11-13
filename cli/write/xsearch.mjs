@@ -8,8 +8,8 @@
 //    and at most `maxCalls` (2) per research (the research block is the key). A failure or a timeout is [].
 //  - Posts are untrusted text. Only x.com / twitter.com status URLs are kept; when the response cites its sources
 //    (annotations), a post whose URL is not among them is dropped, because the model could have written the link itself.
-//  - Not checked live (no xAI key at hand when this was written): where the final text and citations sit in the
-//    response. parseResponse reads the message text and every url it can find, and tolerates both.
+//  - Checked live 2026-11-13: the reply is a `message` item whose `output_text` holds the JSON array, and its `annotations`
+//    are `url_citation`s of the form x.com/i/status/<id> (not the handle form the text uses), so posts are matched by id.
 
 export const XAI_HOST = 'api.x.ai';
 export const XAI_URL = `https://${XAI_HOST}/v1/responses`;
@@ -17,7 +17,7 @@ export const DEFAULT_X_MODEL = 'grok-4.7'; // the model docs.x.ai uses in its x_
 export const X_MAX_CALLS = 2; // per research block
 export const MAX_POSTS = 8;
 export const POST_CHARS = 400;
-const TIMEOUT_MS = 45_000;
+const TIMEOUT_MS = 90_000; // a live call took 39 s (three server-side searches); 45 s timed out
 
 // An X post URL (profiles, searches and hashtag pages say little on their own).
 export const X_POST = /^https?:\/\/(?:(?:www|mobile)\.)?(?:x|twitter)\.com\/\w+\/status\/\d+/;
@@ -41,7 +41,8 @@ export const xRequest = (queries, model = DEFAULT_X_MODEL) => ({
 });
 
 const strip = (s) => String(s ?? '').replace(/<[^>]*>/g, ' ').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
-const canon = (u) => String(u).replace(/^https?:\/\/(?:(?:www|mobile)\.)?(?:x|twitter)\.com\//i, 'x.com/').replace(/[?#].*$/, '').toLowerCase();
+// A post is its status id: the live response cites x.com/i/status/<id> while the text links x.com/<handle>/status/<id>.
+const canon = (u) => /\/status\/(\d+)/.exec(String(u))?.[1] || '';
 
 // A Responses API body -> [{ url, text, date }]. The text is the "output_text" of the message items; citations are the
 // urls of their annotations and of content items typed "cite" or "url". Posts come from the JSON array in the text; when

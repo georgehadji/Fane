@@ -67,6 +67,13 @@ test('parseResponse: when the response cites its sources, a post it did not cite
   assert.equal(parseResponse(body(JSON.stringify([post(1), post(2)]))).length, 2);
 });
 
+test('parseResponse: xAI cites x.com/i/status/<id> while the text links x.com/<handle>/status/<id>: posts match by id', () => {
+  // the shape a live call returned on 2026-11-13: every post was dropped when the urls were compared as strings
+  const cited = [{ type: 'url_citation', url: 'https://x.com/i/status/1001' }, { type: 'url_citation', url: 'https://x.com/i/status/1003' }];
+  const out = parseResponse(body(JSON.stringify([post(1), post(2), post(3)]), cited));
+  assert.deepEqual(out.map(p => p.url), ['https://x.com/user1/status/1001', 'https://x.com/user3/status/1003']); // post 2 was not cited
+});
+
 test('parseResponse: prose instead of JSON falls back to the status links in it, with no text (so no source)', () => {
   const out = parseResponse(body('I found https://x.com/ann/status/55 and (https://x.com/bob/status/56).'));
   assert.deepEqual(out.map(p => p.url), ['https://x.com/ann/status/55', 'https://x.com/bob/status/56']);
