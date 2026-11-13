@@ -17,6 +17,7 @@ const TARGETS = [
     file: FILES.messageClient,
     from: QUESTION,
     to: QUESTION.replace('children:', `lang:(${LANG})(e.message.query),children:`),
+    marker: 'lg:w-9/12",lang:(function LANG(', // patch-summary-heading later changes what `children:` holds
   },
   {
     name: 'Greek answer marked lang="el"',

@@ -256,13 +256,13 @@ test('patch-discover-summary-greek: every Discover and home news link asks for a
   const bundles = (alt) => {
     const files = {};
     for (const t of TARGETS) {
-      const from = t.alts[alt].from, v = /\$\{(\w)\.url\}/.exec(from)[1];
+      const from = t.alts[alt].from, v = /(\w)\.url\}`,className/.exec(from)[1];
       files[t.file] = `${files[t.file] || ''}links.push((${v})=>({href:\`/?${from} x"}));`;
     }
     return files;
   };
-  // alt 0 is Vane's own link; alt 1 is the link an earlier Fane wrote ("Περίληψη στα ελληνικά: ")
-  for (const alt of [0, 1]) {
+  // alt 0 is Vane's own link; alt 1 is the link an earlier Fane wrote ("Περίληψη στα ελληνικά: "); alt 2 has no title
+  for (const alt of [0, 1, 2]) {
     const r = planPatch(bundles(alt), TARGETS);
     assert.deepEqual([r.errors, r.applied.length + (r.upgraded?.length || 0)], [[], 6], `alt ${alt}`);
     assert.deepEqual(planPatch(r.next, TARGETS).applied, []);
@@ -270,9 +270,38 @@ test('patch-discover-summary-greek: every Discover and home news link asks for a
       assert.ok(/^[\x20-\x7e]*$/.test(text), file);
       const links = [];
       new Function('links', text)(links);
-      for (const make of links) assert.equal(make({ url: 'https://x.test/a' }).href, `/?q=${ASK}https://x.test/a`, file);
+      for (const make of links) {
+        // the title goes first, the address on the next line, the whole query encoded (an "&" in the address survives)
+        assert.equal(make({ title: 'A title', url: 'https://x.test/a?b=1&c=2' }).href, `/?q=${encodeURIComponent(`${ASK}A title\nhttps://x.test/a?b=1&c=2`)}`, file);
+        assert.equal(make({ url: 'https://x.test/a' }).href, `/?q=${encodeURIComponent(`${ASK}https://x.test/a`)}`, file); // no title
+      }
     }
   }
+});
+
+test('patch-summary-heading: a summary chat prints its title, not the address; other questions are untouched', () => {
+  const greek = require('../../patches/patch-greek-lang.js');
+  const { TARGETS } = require('../../patches/patch-summary-heading.js');
+  const bundle = 'const h=e=>({className:"text-black dark:text-white font-medium text-3xl lg:w-9/12",children:e.message.query});';
+  // file order: patch-greek-lang writes the heading first, patch-summary-heading edits its output; both stay applied on a second pass
+  let files = { [FILES.messageClient]: bundle };
+  for (let pass = 0; pass < 2; pass++) {
+    for (const targets of [[greek.TARGETS[0]], TARGETS]) {
+      const r = planPatch(files, targets);
+      assert.deepEqual(r.errors, [], `pass ${pass}`);
+      assert.equal(r.applied.length, pass === 0 ? 1 : 0, `pass ${pass}`);
+      files = { ...files, ...r.next };
+    }
+  }
+  const text = files[FILES.messageClient];
+  assert.ok(/^[\x20-\x7e\n]*$/.test(String(require('../../patches/patch-summary-heading.js').HEAD)), 'what this patch injects is ASCII'); // greek-lang\'s LANG is not
+  const heading = new Function(`${text}; return h`)();
+  const shown = (query) => heading({ message: { query } }).children;
+  assert.equal(shown('Περίληψη: A title\nhttps://x.test/a?b=1&c=2'), 'Περίληψη: A title');
+  assert.equal(shown('Περίληψη: Τίτλος άρθρου\nhttps://x.test/a\n'), 'Περίληψη: Τίτλος άρθρου'); // a trailing newline is fine
+  assert.equal(heading({ message: { query: 'Περίληψη: Τίτλος άρθρου\nhttps://x.test/a' } }).lang, 'el'); // greek-lang's prop is still there
+  // untouched: no title (the old form), no address, other questions, and a second line that is not an address
+  for (const q of ['Περίληψη: https://x.test/a', 'Περίληψη: \nhttps://x.test/a', 'Περίληψη: A title', 'what is a title\nhttps://x.test/a', 'Περίληψη: A title\nand some more text']) assert.equal(shown(q), q, q);
 });
 
 test('patch-discover-greek: the Discover search adds every Greek site and query of the topic, in Greek; a failing one adds nothing', async () => {
