@@ -7,3 +7,6 @@ Thumbs.db
 .taste-skill/
 # local keys and machine-specific values; never committed
 .env.txt
+
+# Claude Code local state (launch config, worktrees)
+.claude/
