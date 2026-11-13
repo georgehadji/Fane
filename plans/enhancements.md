@@ -127,6 +127,7 @@ All three edit `FILES.discoverRoute` and ship as one new patch, `patch-discover-
 **Now.** One Discover page load runs about 30 searches through SearXNG (5 English sites × 3-4 queries, 3-5 Greek sites × 2, two magazines) plus three feeds; only the Medium and Kleon feeds are cached. Switching topics waits for all of it, and the burst helps get engines suspended. Two thirds of magazine stories are dropped by the page for lack of a thumbnail, and Greek sites often carry the same agency story.
 
 ### 2. Cache: stale-while-revalidate, single flight
+**Done 2026-11-13** (`STORIES_CACHE` in `patches/patch-discover-stories.js`, `cli/test/discover-stories.test.mjs`). Built with items 6 and 5 as one patch with no upgrade step (no container had an earlier text). Not measured live yet: cold, warm and stale timings.
 
 **Design.** Wrap the `"normal"` branch's producer, keyed by topic:
 
@@ -151,12 +152,14 @@ if("normal"===c){e=(await FANE_STORIES(globalThis,"discover:"+topic,async()=>{le
 **Measure.** `curl -w '%{time_total}'` on `/api/discover?topic=tech` cold, warm and stale (after 10 minutes): warm under 50 ms.
 
 ### 6. Repeated stories
+**Done 2026-11-13** (`DEDUPE_STORIES`, same patch).
 
 **Design.** Stage 2 inside the cached producer: `DEDUPE_STORIES(items)` (pure, exported). Title key: lowercased, accents folded (`normalize('NFD')` minus marks; final sigma to sigma), punctuation dropped, words under 3 letters dropped. Two stories are the same when the word sets' Jaccard similarity is at least 0.6; keep the first with a thumbnail, else the first. O(n²) on about 150 items is fine. Runs before the shuffle, inside the cache, so once per refresh.
 
 **Tests.** A Greek pair from two outlets differing in accents and one word; an English pair; two different stories sharing a name ("Apple" headlines) kept apart; idempotent.
 
 ### 5. Pictures for magazine stories
+**Done 2026-11-13** (`FILL_THUMBNAILS`, same patch). Deviation: the host list (the route's own sites) is the only guard; `PRIVATE_ADDRESS` is not used because a listed name cannot be an IP address. Not checked live: which outlets' images survive the page's origin + pathname + `?id=` rewrite.
 
 **Design.** Stage 3 inside the cached producer: `FILL_THUMBNAILS(items, {fetchImpl, allowHosts, limit, budgetMs})`. For stories without `thumbnail` whose host is in the route's own site list for the topic (`d.links`, plus the Greek table): fetch the page, read at most the first 64 KB, take `og:image` (then `twitter:image`), require `https:`. At most 12 pages per refresh, 4 at a time, the whole stage capped at 4 s (a story still without a picture is dropped by the page as before).
 
