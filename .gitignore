@@ -12,3 +12,4 @@ Thumbs.db
 .claude/
 # npm lockfile for the zero-dependency CLI; not tracked
 cli/package-lock.json
+.env
