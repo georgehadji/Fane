@@ -91,18 +91,38 @@ ${SUBSETS.map(syne).join('\n')}
 h1.text-5xl{font-family:Syne,"PP Editorial",serif!important;font-weight:400;letter-spacing:-.02em}
 h3.text-sm.line-clamp-2{font-family:Syne,Commissioner,Montserrat,Arial,sans-serif;font-weight:400}
 h2.text-3xl.line-clamp-3{font-family:Syne,Commissioner,Montserrat,Arial,sans-serif!important;font-weight:400;letter-spacing:-.01em}`;
-const TYPE = `/*fane:type-5*/\n${BASE}\n${PAGES}\n${LINKS}\n${SERIF}\n${TITLES}`;
+// The fifth version, with Syne (its font files stay in patches/fonts: a container patched with it is upgraded from this text).
+const TYPE_V5 = `/*fane:type-5*/\n${BASE}\n${PAGES}\n${LINKS}\n${SERIF}\n${TITLES}`;
+
+// Sofia Sans Extra Condensed 600 for all of Discover's headings, in place of Syne: Greek words are long, and Syne's
+// card titles were cut with "..." at two lines. Measured on a Greek and an English headline, Syne sets 0.460 em a
+// character and Sofia Sans Extra Condensed 0.284 (38% narrower; Sofia Sans Condensed 0.351, Open Sans at width 75
+// 0.359). Sofia Sans, Copyright 2019 The Sofia Sans Project Authors (github.com/lettersoup/Sofia-Sans), SIL OFL 1.1
+// (patches/fonts/OFL-sofia-sans-extra-condensed.txt): the latin, latin-ext and greek subsets as Google Fonts serves
+// them, pinned to weight 600 (the only weight used: 51 KB instead of 98 KB). Its lowercase is small, so the 14px card
+// title is raised to 1rem; the 30px story title and the 48px page title need no change. The h1 is also the title of
+// Library. PP Editorial stays second for scripts it lacks (Cyrillic).
+const sofia = ([name, range]) => {
+  const data = fs.readFileSync(path.join(__dirname, 'fonts', `sofia-sans-extra-condensed-${name}.woff2`)).toString('base64');
+  return `@font-face{font-family:"Sofia Sans Extra Condensed";font-style:normal;font-weight:600;font-display:swap;src:url(data:font/woff2;base64,${data}) format("woff2");unicode-range:${range}}`;
+};
+const HEADINGS = String.raw`/* Sofia Sans, Copyright 2019 The Sofia Sans Project Authors (github.com/lettersoup/Sofia-Sans), SIL OFL 1.1 */
+${SUBSETS.map(sofia).join('\n')}
+h1.text-5xl{font-family:"Sofia Sans Extra Condensed","PP Editorial",serif!important;font-weight:600;letter-spacing:-.01em}
+h3.text-sm.line-clamp-2{font-family:"Sofia Sans Extra Condensed",Commissioner,Montserrat,Arial,sans-serif;font-weight:600;font-size:1rem;line-height:1.2}
+h2.text-3xl.line-clamp-3{font-family:"Sofia Sans Extra Condensed",Commissioner,Montserrat,Arial,sans-serif!important;font-weight:600;letter-spacing:0}`;
+const TYPE = `/*fane:type-6*/\n${BASE}\n${PAGES}\n${LINKS}\n${SERIF}\n${HEADINGS}`;
 
 const TARGETS = [
   {
-    name: 'Commissioner, Literata answers, Syne page titles, Discover and Library type',
+    name: 'Commissioner, Literata answers, Sofia Sans headings, Discover and Library type',
     file: FILES.appCss,
     // an older block is replaced where it stands (patch-colors may sit between it and the stylesheet's last rule)
-    alts: [{ from: TYPE_V4, to: TYPE }, { from: TYPE_V3, to: TYPE }, { from: TYPE_V2, to: TYPE }, { from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
-    ladder: ['V4', 'V3', 'V2', 'V1', 'fresh'],
-    marker: '/*fane:type-5*/',
+    alts: [{ from: TYPE_V5, to: TYPE }, { from: TYPE_V4, to: TYPE }, { from: TYPE_V3, to: TYPE }, { from: TYPE_V2, to: TYPE }, { from: TYPE_V1, to: TYPE }, { from: END, to: `${END}\n${TYPE}\n` }],
+    ladder: ['V5', 'V4', 'V3', 'V2', 'V1', 'fresh'],
+    marker: '/*fane:type-6*/',
   },
 ];
 
-module.exports = { TARGETS, TYPE, TYPE_V1, TYPE_V2, TYPE_V3, TYPE_V4 };
+module.exports = { TARGETS, TYPE, TYPE_V1, TYPE_V2, TYPE_V3, TYPE_V4, TYPE_V5 };
 if (require.main === module) run('patch-type', TARGETS);

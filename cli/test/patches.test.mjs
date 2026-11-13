@@ -133,10 +133,11 @@ test('patch-type: intact Commissioner WOFF2s for Latin and Greek on Vane\'s font
   const colors = require('../../patches/patch-colors.js');
   const type = require('../../patches/patch-type.js');
   const fonts = [...type.TYPE.matchAll(/base64,([A-Za-z0-9+/=]+)\)/g)].map(m => Buffer.from(m[1], 'base64'));
-  assert.equal(fonts.length, 12); // Commissioner: 3 subsets; Literata: 3 subsets, roman and italic; Syne: 3 subsets
-  // Discover and Library page titles: Syne, which has Latin and Greek; PP Editorial for what it lacks
-  assert.ok(type.TYPE.includes('h1.text-5xl{font-family:Syne,"PP Editorial",serif!important;font-weight:400;'));
-  assert.equal(type.TYPE.split('font-family:Syne;').length - 1, 3);
+  assert.equal(fonts.length, 12); // Commissioner: 3 subsets; Literata: 3 subsets, roman and italic; Sofia Sans Extra Condensed: 3 subsets
+  // Discover and Library page titles: Sofia Sans Extra Condensed 600, which has Latin and Greek; PP Editorial for what it lacks
+  assert.ok(type.TYPE.includes('h1.text-5xl{font-family:"Sofia Sans Extra Condensed","PP Editorial",serif!important;font-weight:600;'));
+  assert.equal(type.TYPE.split('font-family:"Sofia Sans Extra Condensed";').length - 1, 3);
+  assert.ok(!type.TYPE.includes('Syne,')); // Syne is gone from the block; its files stay for the upgrade text
   assert.ok(type.TYPE.includes('.prose{font-family:Literata,Commissioner,'));
   assert.ok(type.TYPE.includes('.prose [role=status]{font-family:Commissioner,')); // Fane's receipts stay sans
   for (const font of fonts) {
@@ -160,12 +161,12 @@ test('patch-type: a stylesheet patched with an earlier version is upgraded in pl
   const colors = require('../../patches/patch-colors.js');
   const type = require('../../patches/patch-type.js');
   const end = '.xl\\:text-8xl{font-size:6rem;line-height:1}}';
-  for (const old of [type.TYPE_V1, type.TYPE_V2, type.TYPE_V3, type.TYPE_V4].flatMap(v => [`x{}${end}\n${v}\n\n${colors.COLORS}\n`, `x{}${end}\n${colors.COLORS}\n\n${v}\n`])) {
+  for (const old of [type.TYPE_V1, type.TYPE_V2, type.TYPE_V3, type.TYPE_V4, type.TYPE_V5].flatMap(v => [`x{}${end}\n${v}\n\n${colors.COLORS}\n`, `x{}${end}\n${colors.COLORS}\n\n${v}\n`])) {
     const r = planPatch({ [FILES.appCss]: old }, type.TARGETS);
     assert.deepEqual(r.errors, []);
     const css = r.next[FILES.appCss];
     assert.ok(css.includes(type.TYPE) && css.includes(colors.COLORS));
-    assert.ok(!css.includes('/*fane:type*/') && !css.includes('/*fane:type-2*/') && !css.includes('/*fane:type-3*/')); // the old block is gone, not left above the new one
+    assert.ok(!css.includes('/*fane:type*/') && !css.includes('/*fane:type-2*/') && !css.includes('/*fane:type-3*/') && !css.includes('/*fane:type-5*/')); // the old block is gone, not left above the new one
     assert.deepEqual(planPatch(r.next, type.TARGETS).applied, []);
   }
 });
