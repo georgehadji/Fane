@@ -66,6 +66,18 @@ Step 4 of `plans/effort-profiles.md`. Decides whether Quality's `reasoning: 'low
 
 Ask before running: it spends OpenRouter credits.
 
+**Status: done 2026-11-13. Decision: Quality stays at `low`; `EFFORT.quality.reasoning` is unchanged.** `scripts/article-bench.mjs` got `--reasoning` (validated by `resolveEffort`, forwarded to the CLI, recorded in the results meta; 9667ed6). The 2026-10-27 baseline was not reused: the pipeline has changed since, so `low` and `medium` were both run fresh on `symplectic`, `glp1` and `ocean-el` (one run each, judge `openai/gpt-6.1-terra-pro`, about $1.76 in all).
+
+| Topic | `low` support / audit | `medium` support / audit | `low` cost | `medium` cost |
+|---|---|---|---|---|
+| `symplectic` | 0.87 / 0.90 | 0.75 / 0.92 | $0.197 | $0.254 |
+| `glp1` | 0.944 / 0.93 | 0.769 / 0.91 | $0.548 | $0.250 |
+| `ocean-el` | 0.905 / 0.89 | failed (Vane research: "no sources found (fetch failed)") | $0.353 | none |
+
+- Judge claim support fell 0.12 and 0.175 at `medium`, past `TOLERANCE.supportDrop` (0.1); audit moved by 0.02 or less; time was similar (6-8 minutes); cost was mixed (+29%, -54%) and the `low` `glp1` run, at twice the 2026-10-27 baseline, looks like noise. No article was degraded and no check failed. `medium` articles landed nearer the 600-word target.
+- Limits: one run per topic, a noisy judge, and `ocean-el` at `medium` failed, so `medium` has two articles. Not checked: whether any call ended with `finish_reason: length` (`HEADROOM.medium` = 16000 is still a guess). Redo with `--runs 3` before ever raising it.
+- Results: `bench/results/articles-q-low.json` and `articles-q-medium.json` (gitignored).
+
 ## 5. Follow-up edits of social posts
 
 **Status: done 2026-11-13, pushed (086b4f8), applied and checked in the web chat.** Built as designed, with two deliberate cuts: a post edit never searches (a request to add facts gets a `degraded` note, because a post has no `[n]` markers to put a new source behind) and its sources stay as they were in the first comment. The mark is `postMark()` in `core/formats.mjs`; `cli/test/post-edit.test.mjs` holds the round trip, the editor, the routing and the failure wording. Needs `node scripts/apply.mjs` (hook folder, so a Vane restart).
